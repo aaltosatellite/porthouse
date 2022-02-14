@@ -59,20 +59,17 @@ def create_template_config() -> None:
     Create template configuration directory.
     """
 
-    dir = os.path.join(os.path.expanduser("~"), ".porthouse")
-    print(f"Creating configure in {dir}")
-
     # Create folders
     try:
-        os.mkdir(dir)
-        os.mkdir(os.path.join(dir, "logs"))
+        os.mkdir(_dir)
+        os.mkdir(os.path.join(_dir, "logs"))
     except FileExistsError:
         print(f"Directory already exists! Exiting...")
         return
 
 
     print("Creating 'globals.yaml' file")
-    with open(os.path.join(dir, "globals.yaml"), "x") as file:
+    with open(os.path.join(_dir, "globals.yaml"), "x") as file:
         file.write(
             f"amqp_url: amqp://guest:guest@localhost:5672/\n"
             f"db_url: postgres://mcs:PASSWORD@localhost/foresail\n"
@@ -81,7 +78,7 @@ def create_template_config() -> None:
         )
 
     print("Creating 'groundstation.yaml' file")
-    with open(os.path.join(dir, "groundstation.yaml"), "x") as file:
+    with open(os.path.join(_dir, "groundstation.yaml"), "x") as file:
         file.write(
             "groundstation:\n"
             "  name: porthouse\n"
@@ -93,7 +90,7 @@ def create_template_config() -> None:
         )
 
     print("Creating 'tle.yaml' file")
-    with open(os.path.join(dir, "tle.yaml"), "x") as file:
+    with open(os.path.join(_dir, "tle.yaml"), "x") as file:
         file.write(
             "#\n"
             "# For more information read the documentation from https://blaa/tle_server.html\n"
