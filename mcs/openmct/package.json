@@ -1,0 +1,23 @@
+{
+  "name": "porthouse-openmct",
+  "version": "1.0.0",
+  "description": "Porthouse OpenMCT",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "Aalto Satellites",
+  "dependencies": {
+    "coffeescript": "^2.5.1",
+    "openmct": "latest",
+    "reconnecting-websocket": "^4.4.0",
+    "tle.js": "^4.0.12",
+    "ws": "^7.3.0"
+  },
+  "devDependencies": {
+    "express": "^4.16.4",
+    "caching-coffeeify": "^0.5.1",
+    "coffeeify": "^3.0.1",
+    "minifyify": "^7.3.5"
+  }
+}

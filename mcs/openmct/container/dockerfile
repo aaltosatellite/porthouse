@@ -1,0 +1,15 @@
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND noninteractive
+
+RUN apt-get update && apt-get install apt-utils tmux sudo nano python3 python3-pip libpq-dev npm git -y
+
+RUN pip3 install websockets aiormq amqp psycopg2
+ENV PYTHONPATH /app/mcc
+COPY ./mcc /app/mcc
+RUN npm install -g browserify
+RUN cd /app/mcc/housekeeping/openmct/ && npm install
+RUN cd /app/mcc/housekeeping/openmct/node_modules/openmct && npm install && npm run build:prod 
+
+COPY ./start_dev.sh /app/
+CMD ["bin/bash","./app/start_dev.sh"]

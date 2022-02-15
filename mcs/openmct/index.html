@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+    <meta content="utf-8" http-equiv="encoding">
+
+    <title>OpenMCT porthouse</title>
+    <script src="node_modules/openmct/dist/openmct.js"></script>
+    <script src="node_modules/reconnecting-websocket/dist/reconnecting-websocket-iife.min.js"></script>
+
+    <script src="connector.js"></script>
+    <script src="groundstation.js"></script>
+    <script src="housekeeping.js"></script>
+    <script src="events.js"></script>
+
+</head>
+<body>
+    <script type="module">
+
+        const FIVE_MINUTES = 5 * 60 * 1000;
+        const THIRTY_MINUTES = 30 * 60 * 1000;
+
+        openmct.setAssetPath('node_modules/openmct/dist');
+
+        openmct.install(openmct.plugins.MyItems());
+        openmct.install(openmct.plugins.UTCTimeSystem());
+        openmct.install(openmct.plugins.LADTable());
+        openmct.install(openmct.plugins.SummaryWidget());
+        openmct.install(openmct.plugins.Espresso());
+
+        openmct.install(openmct.plugins.DisplayLayout({
+            showAsView: ['summary-widget']
+        }));
+        openmct.install(openmct.plugins.AutoflowView({
+            type: "telemetry.panel"
+        }));
+
+        openmct.install(openmct.plugins.Conductor({
+            menuOptions: [
+                {
+                    name: "Fixed",
+                    timeSystem: 'utc',
+                    bounds: {
+                        start: Date.now() - THIRTY_MINUTES,
+                        end: Date.now()
+                    }
+                },
+                {
+                    name: "Realtime",
+                    timeSystem: 'utc',
+                    clock: 'local',
+                    clockOffsets: {
+                        start: - THIRTY_MINUTES,
+                        end: FIVE_MINUTES
+                    }
+                }
+            ]
+        }));
+
+
+        openmct.time.clock('local', {start: -15 * 60 * 1000, end: 0});
+        openmct.time.timeSystem('utc');
+
+        // Connect to backend using WebSockets
+        let ws_url = "ws://" + document.location.host + "/openmct/ws";
+        let connector = new Connector(ws_url);
+
+        openmct.install(PorthouseGroundStationPlugin(connector));
+        openmct.install(PorthouseHousekeepingPlugin(connector));
+        openmct.install(PorthouseEventsPlugin(connector));
+
+        // Use either CouchDB (If installed and set up) or LocalStorageup
+        var couch_url = 'http://' + document.location.host + '/couch/openmct';
+        //openmct.install(openmct.plugins.CouchDB(couch_url))
+        openmct.install(openmct.plugins.LocalStorage());
+
+        openmct.start();
+
+    </script>
+</body>
+</html>
