@@ -30,6 +30,7 @@ VC_CTRL_ARQ_CONNECT       = 20
 VC_CTRL_ARQ_DISCONNECT    = 21
 VC_CTRL_ARQ_TIMEOUT       = 22
 
+VC_CTRL_RESET_MAC         = 30
 
 
 def to_skylink(pkt: Dict) -> bytes:
@@ -48,7 +49,7 @@ def to_skylink(pkt: Dict) -> bytes:
         cmd: str = metadata["cmd"]
         vc: int = metadata.get("vc", 0)
 
-        if cmd == "get_status":
+        if cmd == "get_state":
             return struct.pack("B", VC_CTRL_GET_STATE)
         elif cmd == "flush":
             return struct.pack("B", VC_CTRL_FLUSH_BUFFERS)
@@ -57,13 +58,16 @@ def to_skylink(pkt: Dict) -> bytes:
         elif cmd == "clear_stats":
             return struct.pack("B", VC_CTRL_CLEAR_STATS)
         elif cmd == "set_config":
-            return struct.pack("@BII", VC_CTRL_SET_CONFIG, metadata["config"], metadata["value"])
+            s = metadata["config"].encode() + b"\x00" + str(metadata["value"]).encode()
+            return struct.pack("@B", VC_CTRL_SET_CONFIG) + s
         elif cmd == "get_config":
-            return struct.pack("@BI", VC_CTRL_GET_CONFIG, metadata["config"])
+            return struct.pack("@B", VC_CTRL_GET_CONFIG) + metadata["config"].encode()
         elif cmd == "arq_connect":
             return struct.pack("BB", VC_CTRL_ARQ_CONNECT, vc)
         elif cmd == "arq_disconnect":
             return struct.pack("BB", VC_CTRL_ARQ_DISCONNECT, vc)
+        elif cmd == "reset_mac":
+            return struct.pack("B", VC_CTRL_RESET_MAC)
         else:
             raise RuntimeError(f"Unkown control command {cmd!r}")
 
@@ -101,16 +105,17 @@ def from_skylink(raw: bytes) -> Dict[str, Any]:
 
             vcs = []
             for i in range(4):
-                state = struct.unpack("HHH", data[6*i, 6*i + 6])
+                state = struct.unpack(">4H", data[8*i: 8*i + 8])
                 vcs.append({
-                    "state": state[0],
-                    "tx": state[1],
-                    "rx": state[2],
+                    "arq_state": state[0],
+                    "buffer_free": state[1],
+                    "tx_frames": state[2],
+                    "rx_frames": state[3],
                 })
 
             metadata = {
-                "rsp": "buffer",
-                "stats": vcs
+                "rsp": "state",
+                "state": vcs
             }
 
         elif cmd == VC_CTRL_STATS_RSP:
@@ -152,6 +157,15 @@ def from_skylink(raw: bytes) -> Dict[str, Any]:
             metadata = {
                 "rsp": "arq_timeout",
                 "vc": struct.unpack("B", data)[0]
+            }
+
+        elif cmd == VC_CTRL_GET_CONFIG:
+            #
+            # Parse get config response
+            #
+            metadata = {
+                "rsp": "config",
+                "val": data.decode()
             }
 
         else:

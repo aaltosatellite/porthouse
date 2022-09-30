@@ -111,15 +111,15 @@ class PacketStorage(BaseModule):
             # Parse link confguration
             try:
 
-                link_type = link_params.pop("type")
+                link_type = link_params.get("type")
                 if link_type == "amqp":
                     """
-                        Create AMQP link
+                    Create AMQP link
                     """
 
                     try:
 
-                        exchange, routing_key = link_params.pop("exchange"), link_params.pop("routing_key")
+                        exchange, routing_key = link_params.get("exchange"), link_params.get("routing_key")
 
                         # Create queue for incoming packet
                         declare_ok = await self.channel.queue_declare(exclusive=True)
@@ -137,7 +137,7 @@ class PacketStorage(BaseModule):
 
                 elif link_type == "zmq":
                     """
-                        Create ZMQ link
+                    Create ZMQ link
                     """
 
                     # Create ZMQ if one doesn't exist
@@ -147,16 +147,17 @@ class PacketStorage(BaseModule):
                     # Create socket and bind/connect it
                     sock = self.zmq_ctx.socket(zmq.SUB)
                     if "connect" in link_params:
-                        sock.connect(link_params.pop("connect"))
+                        sock.connect(link_params.get("connect"))
                     elif "bind" in link_params:
-                        sock.bind(link_params.pop("bind"))
+                        sock.bind(link_params.get("bind"))
                     else:
                         raise ValueError("Invalid ZMQ connection parameter")
 
-                    sock.setsockopt(zmq.SUBSCRIBE, link_params.pop("subscribe", "").encode("ascii"))
+                    sock.setsockopt(zmq.SUBSCRIBE, link_params.get("subscribe", "").encode("ascii"))
 
                     # Create listener task
                     asyncio.get_event_loop().create_task(self.zmq_data_receiver(sock, link_params))
+                    self.log.debug(f"Added ZMQ link {link_params}")
 
                 else:
                     self.log.error(f"Unknown link type: {link_type}")

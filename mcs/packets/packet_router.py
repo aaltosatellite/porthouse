@@ -123,29 +123,21 @@ class PacketRouter(BaseModule):
 
         # For each endpoint definition string
         for endpoint_params in endpoints:
-            endpoint_name = endpoint_params.get("name")
+            endpoint_name = endpoint_params.pop("name")
 
             # Parse endpoint confguration
             try:
                 # Get the endpoint class instance
                 endpoint_type = endpoint_params.pop('type')
-                endpoint_class = self.endpoint_factors.get(endpoint_type, None)
+                endpoint_class = self.endpoint_factors.pop(endpoint_type, None)
                 if endpoint_class is None:
                     self.log.warning(f"Unknwon endpoint type {endpoint_type}")
                     continue
 
                 self.log.debug("Creating new endpoint '%s' (type: %s)", endpoint_name, endpoint_type)
-                persistent = endpoint_params.pop("persistent", "true").lower() == "true"
-
+                persistent = endpoint_params.pop("persistent", True)
                 formatter = endpoint_params.pop("formatter", None)
-
-                # Parse additional metadta
-                additional_metadata = {}
-                for name in endpoint_params.keys():
-                    if name.startswith("metadata:"):
-                        additional_metadata[name[9:]] = endpoint_params.pop(name)
-                #endpoint_params["metadata"] = additional_metadata
-                #self.log.debug("Metadata: %s", json.dumps(endpoint_params))
+                metadata = endpoint_params.pop("metadata", { })
 
                 # Create new instance
                 inst = self.endpoints[endpoint_name] = endpoint_class(self, **endpoint_params)
@@ -153,6 +145,7 @@ class PacketRouter(BaseModule):
                 inst.link = None
                 inst.persistent = persistent
                 inst.formatter = None
+                inst.metadata = metadata
 
                 # Parse formatter function
                 if formatter:
@@ -252,8 +245,8 @@ class PacketRouter(BaseModule):
                 return
 
             # Add additional fields
-            new_frame = source.additional_data.copy()
-            new_frame.update(destination.additional_data)
+            new_frame = source.metadata.copy()
+            new_frame.update(destination.metadata)
             new_frame.update(frame)
             # TODO: Join metadata fields
 
@@ -283,7 +276,13 @@ if __name__ == "__main__":
 #        endpoint_aalto_up="type=zmq-sub, connect=tcp://127.0.0.1:43701, packet_type=raw_tc, source=oh2ags, formatter=router_formatter_suo.from_suo",
 #        endpoint_aalto_down="type=zmq-sub, connect=tcp://127.0.0.1:43700, packet_type=raw_tm, source=oh2ags, formatter=router_formatter_suo.from_suo",
 
-        endpoint_aalto_up="type=zmq-pub, connect=tcp://127.0.0.1:52101, packet_type=raw_tc, source=oh2ags, formatter=router_formatter_raw.json_to_raw",
+        endpoint_aalto_up={
+            "type": zmq-pub,
+            "connect": "tcp://127.0.0.1:52101",
+            "packet_type": "raw_tc",
+            "source": "oh2ags",
+            "formatter": "router_formatter_raw.json_to_raw"
+        },
         endpoint_aalto_down="type=zmq-sub, connect=tcp://127.0.0.1:52001, packet_type=raw_tm, source=oh2ags, formatter=router_formatter_raw.raw_to_json",
         endpoint_aalto2_down="type=zmq-sub, connect=tcp://127.0.0.1:52003, packet_type=raw_tm, source=oh2ags, formatter=router_formatter_raw.raw_to_json",
 

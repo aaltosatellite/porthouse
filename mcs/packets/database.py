@@ -29,9 +29,9 @@ def format_timestamp(t):
     return t
 
 
-class PacketsDatabase(object):
+class PacketsDatabase:
     """
-        Database API for packet backend
+    Database API for packet backend
     """
 
     def __init__(self, db_url=None, create_tables=False):
@@ -218,3 +218,15 @@ class PacketsDatabase(object):
                 SET metadata=:ack_value
                 WHERE id=%(packet_id)d
             ''', data)
+
+
+if __name__ == "__main__":
+    import sys
+    from porthouse.core.config import load_globals
+    cfg = load_globals()
+    PacketsDatabase(
+        db_url=cfg["db_url"],
+        create_tables=("--create_tables" in sys.argv)   
+    )
+
+
