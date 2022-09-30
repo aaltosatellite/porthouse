@@ -1,0 +1,21 @@
+
+# Python files
+__pycache__
+*.pyc
+package-lock.json
+build
+*.egg-info
+
+# Editor files
+*.pydevproject
+*.swp
+
+# porthouse temp files
+*.log
+*.log*
+.gs-history
+
+# Sphinx
+_build
+
+
