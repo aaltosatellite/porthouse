@@ -77,7 +77,7 @@ class TLEServer(BaseModule):
 
         # Load old TLE cache which will be server before update has been completed
         try:
-            with cfg_path(".tle_cache", "r") as f:
+            with open(cfg_path(".tle_cache", "r")) as f:
                 self.tle_data = json.loads(f.read())
         except:
             #self.log.warning("Failed to read .tle-cache", exc_info=True)
@@ -253,7 +253,7 @@ class TLEServer(BaseModule):
                         pass
 
                     entry = {
-                        "name": satellite,
+                        "name": satellite["name"],
                         "tle1": tle_iter.__next__().strip(),
                         "tle2": tle_iter.__next__().strip(),
                     }
@@ -291,7 +291,7 @@ class TLEServer(BaseModule):
                     if r.status_code == 200:
                         lines = r.text.split("\n")
                         entry = {
-                            "name": satellite,
+                            "name": satellite["name"],
                             "tle1": lines[0],
                             "tle2": lines[1]
                         }
@@ -310,7 +310,7 @@ class TLEServer(BaseModule):
                     #
 
                     entry = {
-                        "name": satellite,
+                        "name": satellite["name"],
                         "tle1": satellite["tle1"],
                         "tle2": satellite["tle2"],
                     }
