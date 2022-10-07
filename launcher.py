@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
     The porthouse launcher script can be used to launch a larger set of porthouse and monitor their state.
-    The launcher script takes an YAML configuration file as an input   is described in YAML-file. Modules and params...
+    The launcher script takes an YARML configuration file as an input   is described in YAML-file. Modules and params...
 
     The modules can be selectively launched from the launcher file using ``--include`` and ``--exclude`` command line arguments.
     If no filter arguments is provided all the modules defined in the file will be launched.
@@ -37,14 +37,14 @@ def _assert_cfg_valid(cfg:dict):
     assert (type(cfg) == dict), type(cfg)
     for k in cfg.keys():
         assert (k in LAUNCHER_VALID_CFG_MEMBERS), k
-        assert (type(cfg[k]) == LAUNCHER_VALID_CFG_MEMBERS[k][0]), type(cfg[k])
+        assert (type(cfg[k]) == LAUNCHER_VALID_CFG_MEMBERS[k][0]) , type(cfg[k])
         if LAUNCHER_VALID_CFG_MEMBERS[k][0] == list:
             for x in cfg[k]:
                 assert (type(x) == LAUNCHER_VALID_CFG_MEMBERS[k][1])
         if LAUNCHER_VALID_CFG_MEMBERS[k][0] == dict:
             for x1,x2 in cfg[k].items():
-                assert (type(x1) == LAUNCHER_VALID_CFG_MEMBERS[k][1][0]), type(x1)
-                assert (type(x2) == LAUNCHER_VALID_CFG_MEMBERS[k][1][1]), type(x2)
+                assert (type(x1) == LAUNCHER_VALID_CFG_MEMBERS[k][1][0])
+                assert (type(x2) == LAUNCHER_VALID_CFG_MEMBERS[k][1][1])
 
 
 
@@ -70,7 +70,6 @@ class Launcher:
             declare_exchanges: Initialize exchanges in start
             debug: Enable global debugging
         """
-
         self.threads = []
         self.debug = debug
         self.prefix = None
@@ -93,17 +92,18 @@ class Launcher:
         self.connection.connect()
         self.channel = self.connection.channel()
 
-        # Setup logging
-        self.create_log_handlers(self.globals["log_path"], cfg.get("name", "Launcher"))
-        self.log.info("Launching modules from %s!", cfg_file)
-
         # Setup exchanges
         if declare_exchanges:
+            self.create_log_handlers(self.globals["log_path"], cfg.get("name", "Launcher"), log_to_amqp=False)
             self.declare_exchanges(self.exchanges.items())
             return
 
+        # Setup logging
+        self.create_log_handlers(self.globals["log_path"], cfg.get("name", "Launcher"), log_to_amqp=False)
+        self.log.info("Launching modules from %s!", cfg_file)
+
         # Check exchange are present
-        self.check_exchanges(self.exchanges.items())
+        #self.check_exchanges(self.exchanges.items())
 
         # Setup modules
         self.setup_modules(self.modules, includes, excludes)
@@ -127,13 +127,15 @@ class Launcher:
         self.threads = []
 
 
-    def create_log_handlers(self, log_path: str, module_name: str) -> None:
+    def create_log_handlers(self, log_path: str, module_name: str, log_to_amqp: bool=True, log_to_stderr: bool=True) -> None:
         """
         Create AMQP and file (+ stdout) log handlers for logging
 
         params:
             log_path:    Directory for log file
             module_name: Name used to identify module
+            log_to_amqp:
+            log_to_stderr:
         """
         assert(os.path.isdir(log_path))
         file_path = os.path.join(log_path,module_name+".log")
@@ -141,10 +143,11 @@ class Launcher:
         self.log = logging.getLogger(module_name)
         self.log.setLevel(logging.INFO)
 
-        # AMQP log handler
-        amqp_handler = AMQPLogHandler(module_name, self.channel)
-        amqp_handler.setLevel(logging.INFO)
-        self.log.addHandler(amqp_handler)
+        if log_to_amqp:
+            # AMQP log handler
+            amqp_handler = AMQPLogHandler(module_name, self.channel)
+            amqp_handler.setLevel(logging.INFO)
+            self.log.addHandler(amqp_handler)
 
         # File log handler
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -152,7 +155,7 @@ class Launcher:
         file_handler.setFormatter(formatter)
         self.log.addHandler(file_handler)
 
-        if True:
+        if log_to_stderr:
             # Create stdout log handler
             stdout_handler = logging.StreamHandler()
             stdout_handler.setFormatter(formatter)
@@ -175,7 +178,7 @@ class Launcher:
         self.log.info("Setup modules...")
         for module in modules:
             try:
-                assert_module_spec_valid(module)
+                #assert_module_spec_valid(module)
 
                 name = module.get("name", module.get('module', ''))
 
@@ -224,6 +227,9 @@ class Launcher:
                     else:
                         params["prefix"] = self.prefix
 
+                if self.debug:
+                    params["debug"] = True
+
                 # Create new process for the module
                 t = Process(target=self.worker, args=(module.get("module"), params), daemon=True)
                 self.threads.append(t)
@@ -257,8 +263,7 @@ class Launcher:
         for exchange, etype in exchanges:
             self.log.debug("\t%s (%s)", exchange, etype)
             try:
-                #assert (check_exchange_exists(exchange, etype))
-                pass
+                assert check_exchange_exists(exchange, etype)
             except:
                 raise ValueError("Exchange {} not according to spec.".format(exchange))
         self.log.info("Exchanges ok.")
@@ -295,6 +300,14 @@ class Launcher:
             with self.rlock:
                 self.log.info("Starting %s (%s.%s)", params.get("module_name", module_name), package_name, module_name)
 
+            import inspect
+
+            # Check that all the required arguments have been define and output understandable error if not
+            argspec = inspect.getfullargspec(getattr(i, module_name).__init__)
+            for j, arg in enumerate(argspec.args[1:]):
+                if j >= len(argspec.defaults or []) and arg not in params:
+                    raise RuntimeError(f"Module {module_name!r} missing argument {arg!r}")
+
             inst = getattr(i, module_name)(**params)
             inst.run()
 
@@ -309,10 +322,8 @@ class Launcher:
                 self.log.critical("%s crashed!", module, exc_info=True)
 
 
+def setup_parser(parser: argparse.ArgumentParser) -> None:
 
-def main():
-    # Setup command line parse
-    parser = argparse.ArgumentParser(description='porthouse launcher script')
     parser.add_argument('--cfg', required=True,
         help='Configuration file')
     parser.add_argument('--declare_exchanges', action='store_true',
@@ -324,8 +335,9 @@ def main():
     parser.add_argument('--exclude', nargs='*',
         help='Modules to be excluded from the configuration')
 
-    args = parser.parse_args()
 
+
+def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     Launcher(
         cfg_file=args.cfg,
         includes=args.include, excludes=args.exclude,
@@ -333,5 +345,8 @@ def main():
         debug=args.debug
     )
 
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='porthouse launcher script')
+    setup_parser(parser)
+    main(parser, parser.parse_args())
