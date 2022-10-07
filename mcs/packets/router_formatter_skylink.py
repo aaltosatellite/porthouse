@@ -105,7 +105,7 @@ def from_skylink(raw: bytes) -> Dict[str, Any]:
 
             vcs = []
             for i in range(4):
-                state = struct.unpack(">4H", data[8*i: 8*i + 8])
+                state = struct.unpack("4H", data[8*i: 8*i + 8])
                 vcs.append({
                     "arq_state": state[0],
                     "buffer_free": state[1],

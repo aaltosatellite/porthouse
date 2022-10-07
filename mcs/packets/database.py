@@ -36,7 +36,7 @@ class PacketsDatabase:
 
     def __init__(self, db_url=None, create_tables=False):
         """
-            Initialize packet database connection
+        Initialize packet database connection
         """
 
         if db_url is None:

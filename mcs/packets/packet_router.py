@@ -1,11 +1,5 @@
 """
     Packet router module
-
-    Example endpoint definitions:
-        endpoint_aalto_up = "type=zmq-pub, connect=tcp://127.0.0.1:52100, source=oh2ags"
-        endpoint_aalto_down = "type=zmq-sub, connect=tcp://127.0.0.1:52000, source=oh2ags"
-        endpoint_foresail1_tc = "type=amqp-out, exchange=foresail1, routing_key=tc"
-        endpoint_foresail1_tm= " type=amqp-in, exchange=foresail1, routing_key=tm"
 """
 
 import json
@@ -16,7 +10,7 @@ from typing import Any, Dict, List, Optional
 import zmq
 import zmq.asyncio
 
-from porthouse.core.basemodule_async import BaseModule, queue, rpc, RPCError, bind
+from porthouse.core.basemodule_async import BaseModule, rpc, RPCError, bind
 from .router_endpoints import *
 
 
@@ -135,7 +129,7 @@ class PacketRouter(BaseModule):
                     continue
 
                 self.log.debug("Creating new endpoint '%s' (type: %s)", endpoint_name, endpoint_type)
-                persistent = endpoint_params.pop("persistent", True)
+                persistent = endpoint_params.pop("persistent", "True").lower() == "true "
                 formatter = endpoint_params.pop("formatter", None)
                 metadata = endpoint_params.pop("metadata", { })
 
@@ -240,21 +234,21 @@ class PacketRouter(BaseModule):
             else:
                 frame = json.loads(frame)
 
-            # Possible inparseable frame or a dummy frame so skip it
+            # Possible inparseable frame or a control frame so skip it
             if frame is None:
                 return
 
-            # Add additional fields
-            new_frame = source.metadata.copy()
-            new_frame.update(destination.metadata)
-            new_frame.update(frame)
-            # TODO: Join metadata fields
+            # Merge all metadata field with priority
+            metadata = source.metadata.copy()
+            metadata.update(destination.metadata)
+            metadata.update(frame.metadata)
+            frame.metadata = metadata
 
             # Apply the output formatter
             if destination.formatter:
-                new_frame = destination.formatter(new_frame)
+                frame = destination.formatter(frame)
             else:
-                new_frame = json.dumps(new_frame).encode("ascii")
+                frame = json.dumps(frame).encode("ascii")
 
             self.log.debug(f"Routing frame {source.name} --> {destination.name}")
 
@@ -263,7 +257,7 @@ class PacketRouter(BaseModule):
                 return
 
             # Send it forward
-            result = destination.send(new_frame)
+            result = destination.send(frame)
             if hasattr(result, "__await__"):
                 asyncio.create_task(result)
 
@@ -273,42 +267,42 @@ class PacketRouter(BaseModule):
 
 if __name__ == "__main__":
     PacketRouter(
-#        endpoint_aalto_up="type=zmq-sub, connect=tcp://127.0.0.1:43701, packet_type=raw_tc, source=oh2ags, formatter=router_formatter_suo.from_suo",
-#        endpoint_aalto_down="type=zmq-sub, connect=tcp://127.0.0.1:43700, packet_type=raw_tm, source=oh2ags, formatter=router_formatter_suo.from_suo",
-
-        endpoint_aalto_up={
-            "type": zmq-pub,
+        endpoints=[
+        {
+            "name:": "uplink",
+            "type": "zmq-pub",
             "connect": "tcp://127.0.0.1:52101",
             "packet_type": "raw_tc",
             "source": "oh2ags",
             "formatter": "router_formatter_raw.json_to_raw"
         },
-        endpoint_aalto_down="type=zmq-sub, connect=tcp://127.0.0.1:52001, packet_type=raw_tm, source=oh2ags, formatter=router_formatter_raw.raw_to_json",
-        endpoint_aalto2_down="type=zmq-sub, connect=tcp://127.0.0.1:52003, packet_type=raw_tm, source=oh2ags, formatter=router_formatter_raw.raw_to_json",
-
-        endpoint_egse_up="type=zmq-pub, connect=tcp://127.0.0.1:53001, packet_type=raw_tc, source=egse, formatter=router_formatter_raw.json_to_raw",
-        endpoint_egse_down="type=zmq-sub, connect=tcp://127.0.0.1:53000, packet_type=raw_tm, source=egse, formatter=router_formatter_raw.raw_to_json",
-
-
-        #endpoint_raw_up="type=zmq-sub, connect=tcp://127.0.0.1:43701, source=oh2ags",
-
-        endpoint_foresail1_tc="type=amqp-in, packet_type=telecommand, exchange=foresail1, routing_key=*.tc",
-#        endpoint_foresail1_tc="type=amqp-in, packet_type=telecommand, exchange=foresail1, routing_key=*.tc",
-        endpoint_foresail1_tm="type=amqp-out, packet_type=telemetry, exchange=foresail1, routing_key=*.tm",
-#        endpoint_json="type=zmq-sub, packet_type=blaaa, bind=tcp://*:57000, source=json",
-#
-        route_1="foresail1_tc > aalto_up",
-        route_2="aalto_down > foresail1_tm",
-        route_3="aalto2_down > foresail1_tm",
-
-#        route_4="foresail1_tc > egse_up",
-        route_5="egse_down > foresail1_tm",
-
-        #route_3="raw_up > raw_db",
-        #route_4="raw_down > raw_db",
-
-#        route_5="json > foresail1_tm",
-
+        {
+            "name:" "downlink",
+            "type": "zmq-sub",
+            "connect": "tcp://127.0.0.1:52001",
+            "packet_type": "raw_tm",
+            "source": "oh2ags",
+            "formatter": "router_formatter_raw.raw_to_json"
+        },
+        {
+            "name": "foresail1_tc",
+            "type": "amqp-in",
+            "packet_type": "telecommand",
+            "exchange": "foresail1",
+            "routing_key": "*.tc"
+        },
+        {
+            "name": "foresail1_tm",
+            "type": "amqp-out",
+            "packet_type": "telemetry",
+            "exchange": "foresail1", 
+            "routing_key": "*.tm"
+        }
+        ],
+        routes= [
+            "foresail1_tc > uplink",
+            "downlink > foresail1_tm",
+        ],
         amqp_url="amqp://guest:guest@localhost:5672/",
         debug=True
     ).run()

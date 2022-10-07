@@ -1,10 +1,5 @@
 """
     Packet storage module
-
-    Example link definitions:
-        "satellite=fs1, packet_type=downlink, source=OH2AGS, type=zmq, connect=tcp://127.0.0.1:8888"
-        "satellite=aalto1, packet_type=uplink, source="OH2AGS, type=amqp, exchange=modem, routing_key=aalto1.uplink"
-
 """
 
 
@@ -13,15 +8,12 @@ import json
 import functools
 from datetime import datetime, timezone
 from typing import Any, Dict, List
+
 import zmq
 import zmq.asyncio
 
 from porthouse.core.basemodule_async import BaseModule, queue, rpc, bind, RPCError
-from .database_api import PacketsDatabase
-
-
-
-
+from .database import PacketsDatabase
 
 
 
@@ -37,6 +29,9 @@ class PacketStorage(BaseModule):
             **kwargs):
         """
         Initialise module
+
+        Args:
+            links: List of link definitions
         """
         BaseModule.__init__(self, **kwargs)
         self.links = {}
@@ -90,8 +85,7 @@ class PacketStorage(BaseModule):
             """
 
             response = []
-            self.db_cursor.execute(
-                "SELECT satellite, COUNT(*) FROM packets GROUP BY satellite", request_data)
+            self.db_cursor.execute("SELECT satellite, COUNT(*) FROM packets GROUP BY satellite", request_data)
             for name, packets in self.db_cursor.fetchall():
                 response.append({"name": name, "packets": packets})
             return {"satellites": response}
@@ -111,7 +105,7 @@ class PacketStorage(BaseModule):
             # Parse link confguration
             try:
 
-                link_type = link_params.get("type")
+                link_type = link_params.pop("type")
                 if link_type == "amqp":
                     """
                     Create AMQP link
@@ -119,7 +113,7 @@ class PacketStorage(BaseModule):
 
                     try:
 
-                        exchange, routing_key = link_params.get("exchange"), link_params.get("routing_key")
+                        exchange, routing_key = link_params.pop("exchange"), link_params.pop("routing_key")
 
                         # Create queue for incoming packet
                         declare_ok = await self.channel.queue_declare(exclusive=True)
@@ -147,13 +141,13 @@ class PacketStorage(BaseModule):
                     # Create socket and bind/connect it
                     sock = self.zmq_ctx.socket(zmq.SUB)
                     if "connect" in link_params:
-                        sock.connect(link_params.get("connect"))
+                        sock.connect(link_params.pop("connect"))
                     elif "bind" in link_params:
-                        sock.bind(link_params.get("bind"))
+                        sock.bind(link_params.pop("bind"))
                     else:
                         raise ValueError("Invalid ZMQ connection parameter")
 
-                    sock.setsockopt(zmq.SUBSCRIBE, link_params.get("subscribe", "").encode("ascii"))
+                    sock.setsockopt(zmq.SUBSCRIBE, link_params.pop("subscribe", "").encode("ascii"))
 
                     # Create listener task
                     asyncio.get_event_loop().create_task(self.zmq_data_receiver(sock, link_params))
@@ -177,13 +171,15 @@ class PacketStorage(BaseModule):
 
         try:
             packet = json.loads(msg)
-            if packet.get("replayed", False):
+
+            # Ignore replayed and control packets
+            if packet.get("replayed", False) or packet.get("data", None) is None:
                 return
 
             # Parse hexadecimal string to bytes
             packet["data"] = bytes.fromhex(packet["data"])
 
-            # Metge packet and additional fields dict
+            # Merge packet and additional fields dict
             pp = addtional_params.copy()
             pp.update(packet)
             packet = pp
@@ -224,9 +220,9 @@ class PacketStorage(BaseModule):
 if __name__ == "__main__":
     PacketStorage(
         links = [
-            { "name": "", "satellite": "foresail1", "type": "zmq", "connect": "tcp://127.0.0.1:56000" },
-            { "name": "tc", "satellite": "foresail1", "packet_type": "telecommand", "type": "amqp", "exchange": "foresail1", "routing_key": "*.tc" },
-            { "name": "tm", "satellite": "foresail1", "packet_type": "telemetry", "type": "amqp", "exchange": "foresail1", "routing_key": "*.tm" },
+            { "satellite": "Foresail-1", "type": "zmq", "bind": "tcp://127.0.0.1:7600" },
+            { "satellite": "Foresail-1", "packet_type": "telecommand", "type": "amqp", "exchange": "foresail1", "routing_key": "*.tc" },
+            { "satellite": "Foresail-1", "packet_type": "telemetry", "type": "amqp", "exchange": "foresail1", "routing_key": "*.tm" },
         ],
         db_url="postgres://mcs:PASSWORD@localhost/foresail",
         amqp_url="amqp://guest:guest@localhost:5672/",
