@@ -1,0 +1,562 @@
+{
+    "key": "exsat",
+    "name": "ExampleSat-1",
+    "subsystems": [
+        {
+            "key": "obc",
+            "name": "OBC",
+            "fields": [
+                {
+                    "key": "fdir",
+                    "name": "FDIR state",
+                    "format": "integer",
+                    "raw": "uint8"
+                },
+                {
+                    "key": "uptime",
+                    "name": "Uptime",
+                    "units": "seconds",
+                    "format": "integer",
+                    "raw": "uint32"
+                },
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    "format": "float",
+                    "units": "°C",
+                    "raw": "int16",
+                    "calibration": [ 0.1, 0 ]
+                },
+                {
+                    "key": "bootcount",
+                    "name": "Bootcount",
+                    "raw": "uint8",
+                    "format": "integer"
+                },
+                {
+                    "key": "fail_counter",
+                    "name": "ail Counter",
+                    "raw": "uint8",
+                    "format": "integer"
+                }
+            ]
+        },
+        {
+            "key": "eps",
+            "name": "EPS",
+            "fields": [
+                {
+                    "key": "uptime",
+                    "name": "Uptime",
+                    "format": "integer",
+                    "raw": "uint32"
+                },
+                {
+                    "key": "boot_count",
+                    "name": "Boot Count",
+                    "format": "integer",
+                    "raw": "uint8"
+                },
+                {
+                    "key": "pdm_expected",
+                    "name": "PDM excepted",
+                    "format": "string",
+                    "raw": "uint8",
+                    "enumeration": [
+                        { "value": 1,  "mask": 1, "string": "OBC_3V6" },
+                        { "value": 2,  "mask": 2, "string": "COMM_3V6" },
+                        { "value": 4,  "mask": 4, "string": "ADCS_3V6" },
+                        { "value": 8,  "mask": 8, "string": "PL1_BATT" },
+                        { "value": 16,  "mask": 16, "string": "PL2_BATT" }
+                    ]
+                },
+                {
+                    "key": "pdm_faulted",
+                    "name": "PDM faulted",
+                    "format": "string",
+                    "raw": "uint8",
+                    "enumeration": [
+                        { "value": 1,  "mask": 1,  "string": "OBC_3V6" },
+                        { "value": 2,  "mask": 2,  "string": "COMM_3V6" },
+                        { "value": 4,  "mask": 4,  "string": "ADCS_3V6" },
+                        { "value": 8,  "mask": 8,  "string": "PL1_BATT" },
+                        { "value": 16,  "mask": 16,  "string": "PL2_BATT" }
+                    ]
+                },
+                {
+                    "key": "v_in_x_minus",
+                    "name": "X- Panel Voltage",
+                    "format": "float",
+                    "units": "V",
+                    "raw": "uint16",
+                    "calibration": [ 0.001, 0 ]
+                },
+                {
+                    "key": "v_in_x_plus",
+                    "name": "X+ Panel Voltage",
+                    "format": "float",
+                    "units": "V",
+                    "raw": "uint16",
+                    "calibration": [ 0.001, 0 ]
+                },
+                {
+                    "key": "v_in_y_minus",
+                    "name": "Y- Panel Voltage",
+                    "format": "float",
+                    "units": "V",
+                    "raw": "uint16",
+                    "calibration": [ 0.001, 0 ]
+                },
+                {
+                    "key": "v_in_y_plus",
+                    "name": "Y+ Panel Voltage",
+                    "format": "float",
+                    "units": "V",
+                    "raw": "uint16",
+                    "calibration": [ 0.001, 0 ]
+                },
+                {
+                    "key": "i_in_x_minus",
+                    "name": "X- Charger Current",
+                    "format": "float",
+                    "units": "mA",
+                    "raw": "uint16",
+                    "calibration": [ 1, 0 ]
+                },
+                {
+                    "key": "i_in_x_plus",
+                    "name": "X+ Charger Current",
+                    "format": "float",
+                    "units": "mA",
+                    "raw": "uint16",
+                    "calibration": [ 1, 0 ]
+                },
+                {
+                    "key": "i_in_y_minus",
+                    "name": "Y- Charger Current",
+                    "format": "float",
+                    "units": "mA",
+                    "raw": "uint16",
+                    "calibration": [ 1, 0 ]
+                },
+                {
+                    "key": "i_in_y_plus",
+                    "name": "Y+ Charger Current",
+                    "format": "float",
+                    "units": "mA",
+                    "raw": "uint16",
+                    "calibration": [ 1, 0 ]
+                },
+                {
+                    "key": "v_batt_bus",
+                    "name": "Battery Voltage",
+                    "format": "float",
+                    "units": "V",
+                    "raw": "uint16",
+                    "calibration": [ 0.001, 0 ]
+                },
+
+                {
+                    "key": "temp_x_minus",
+                    "name": "X- Panel Temperature",
+                    "format": "float",
+                    "units": "°C",
+                    "raw": "int16",
+                    "calibration": [ 0.1, 0 ]
+                },
+                {
+                    "key": "temp_x_plus",
+                    "name": "X+ Panel Temperature",
+                    "format": "float",
+                    "units": "°C",
+                    "raw": "int16",
+                    "calibration": [ 0.1, 0 ]
+                },
+                {
+                    "key": "temp_y_minus",
+                    "name": "Y- Panel Temperature",
+                    "format": "float",
+                    "units": "°C",
+                    "raw": "int16",
+                    "calibration": [ 0.1, 0 ]
+                },
+                {
+                    "key": "temp_y_plus",
+                    "name": "Y+ Panel Temperature",
+                    "format": "float",
+                    "units": "°C",
+                    "raw": "int16",
+                    "calibration": [ 0.1, 0 ]
+                },
+                {
+                    "key": "temp_pcdu",
+                    "name": "PCDU Temperature",
+                    "format": "float",
+                    "units": "°C",
+                    "raw": "int16",
+                    "calibration": [ 0.1, 0 ]
+                },
+
+                {
+                    "key": "v_3v6_vonverter_a",
+                    "name": "Buck A Output Voltage",
+                    "format": "float",
+                    "units": "V",
+                    "raw": "uint16",
+                    "calibration": [ 0.001, 0 ]
+                },
+                {
+                    "key": "v_3v6_converter_b",
+                    "name": "Buck B Output Voltage",
+                    "format": "float",
+                    "units": "V",
+                    "raw": "uint16",
+                    "calibration": [ 0.001, 0 ]
+                },
+                {
+                    "key": "i_obc_3v6",
+                    "name": "OBC 3.6V Current",
+                    "format": "float",
+                    "units": "mA",
+                    "raw": "uint16",
+                    "calibration": [ 1, 0 ]
+                },
+                {
+                    "key": "i_comm_3v6",
+                    "name": "COMM 3.6V Current",
+                    "format": "float",
+                    "units": "mA",
+                    "raw": "uint16",
+                    "calibration": [ 1, 0 ]
+                },
+                {
+                    "key": "i_adcs_3v6",
+                    "name": "ADCS 3.6V Current",
+                    "format": "float",
+                    "units": "mA",
+                    "raw": "uint16",
+                    "calibration": [ 1, 0 ]
+                },
+                {
+                    "key": "i_pl1_batt",
+                    "name": "PL1 Batt Current",
+                    "format": "float",
+                    "units": "mA",
+                    "raw": "uint16",
+                    "calibration": [ 1, 0 ]
+                },
+                {
+                    "key": "i_pl2_3v6",
+                    "name": "PL2 Batt Current",
+                    "format": "float",
+                    "units": "mA",
+                    "raw": "uint16",
+                    "calibration": [ 1, 0 ]
+                },
+                {
+                    "key": "batt_status",
+                    "name": "Battery Status",
+                    "format": "string",
+                    "raw": "uint16",
+                    "enumeration": [
+                        { "value": 0,  "mask": 7,  "string": "HEATER_OFF" },
+                        { "value": 1,  "mask": 7,  "string": "HEATER_ON" },
+                        { "value": 0,  "mask": 56, "string": "BALANCER_OFF" },
+                        { "value": 8,  "mask": 56, "string": "BALANCING_LOWER" },
+                        { "value": 16, "mask": 56, "string": "BALANCING_UPPER" }
+                    ]
+                },
+                {
+                    "key": "batt_bpc_fail_count",
+                    "name": "Battery Protector Circuit fail count",
+                    "format": "integer",
+                    "raw": "uint8"
+                },
+
+                {
+                    "key": "batt_pack_voltage",
+                    "name": "Battery Pack Voltage",
+                    "format": "float",
+                    "units": "V",
+                    "raw": "uint16",
+                    "calibration": [ 0.001, 0 ]
+                },
+                {
+                    "key": "batt_pack_lower_voltage",
+                    "name": "Battery Pack Lower Cell Voltage",
+                    "format": "float",
+                    "units": "V",
+                    "raw": "uint16",
+                    "calibration": [ 0.001, 0 ]
+                },
+                {
+                    "key": "batt_pack_current",
+                    "name": "Battery Pack Current",
+                    "format": "float",
+                    "units": "mA",
+                    "raw": "uint16",
+                    "calibration": [ 1, 0 ]
+                },
+                {
+                    "key": "batt_pack_temp",
+                    "name": "Battery Pack Temperature",
+                    "format": "float",
+                    "units": "°C",
+                    "raw": "int16",
+                    "calibration": [ 0.1, 0 ]
+                },
+                {
+                    "key": "batt_board_temp",
+                    "name": "Battery Board Temperature",
+                    "format": "float",
+                    "units": "°C",
+                    "raw": "int16",
+                    "calibration": [ 0.1, 0 ]
+                }
+            ]
+        },
+
+        {
+            "key": "comm",
+            "name": "COMM",
+            "fields": [
+                {
+                    "key": "uptime",
+                    "name": "Uptime",
+                    "format": "integer",
+                    "raw": "uint32",
+                    "units": "seconds"
+                },
+                {
+                    "key": "boot_count",
+                    "name": "Boot count",
+                    "format": "integer",
+                    "raw": "uint16"
+                },
+                {
+                    "key": "wdt_reset_count",
+                    "name": "WDT Reset Count",
+                    "format": "integer",
+                    "raw": "uint8"
+                },
+                {
+                    "key": "total_tx_frames",
+                    "name": "Total TX frames",
+                    "raw": "int32",
+                    "format": "integer"
+                },
+                {
+                    "key": "total_rx_frames",
+                    "name": "Total RX frames",
+                    "raw": "int32",
+                    "format": "integer"
+                },
+                {
+                    "key": "rx_mode",
+                    "name": "RX Mode",
+                    "format": "string",
+                    "raw": "uint8",
+                    "enumeration": [
+                        { "value": 1, "string": "GFSK 4800" },
+                        { "value": 2, "string": "GFSK 9600" },
+                        { "value": 3, "string": "GFSK 19200" },
+                        { "value": 4, "string": "GFSK 36400" }
+                    ]
+                },
+                {
+                    "key": "tx_mode",
+                    "name": "TX Mode",
+                    "format": "string",
+                    "raw": "uint8",
+                    "enumeration": [
+                        { "value": 1, "string": "GFSK 4800" },
+                        { "value": 2, "string": "GFSK 9600" },
+                        { "value": 3, "string": "GFSK 19200" },
+                        { "value": 4, "string": "GFSK 36400" }
+                    ]
+                },
+                {
+                    "key": "mcu_temperature",
+                    "name": "MCU temperature",
+                    "raw": "int16",
+                    "format": "float",
+                    "units": "°C",
+                    "calibration": [ 0.1, 0 ]
+                },
+                {
+                    "key": "pa_temperature",
+                    "name": "PA temperature",
+                    "raw": "int16",
+                    "format": "float",
+                    "units": "°C",
+                    "calibration": [ 0.1, 0 ]
+                },
+                {
+                    "key": "background_rssi",
+                    "name": "Background RSSI",
+                    "raw": "int8",
+                    "format": "float",
+                    "unit": "dBm",
+                    "calibration": [ 1, -111 ]
+                },
+                {
+                    "key": "last_rssi",
+                    "name": "Last RSSI",
+                    "raw": "int8",
+                    "format": "integer",
+                    "unit": "dBm",
+                    "calibration": [ 1, -111 ]
+                },
+                {
+                    "key": "last_freq_offset",
+                    "name": "Last Frequency Offset",
+                    "raw": "int16",
+                    "format": "float",
+                    "unit": "Hz",
+                    "calibration": [ 19.07, 0 ]
+                }
+            ]
+        },
+        {
+            "key": "adcs",
+            "name": "ADCS",
+            "fields": [
+                {
+                    "key": "determination",
+                    "name": "Determination Algorithm",
+                    "format": "string",
+                    "raw": "uint8",
+                    "enumeration": [
+                        { "value": 0, "string": "OFF" },
+                        { "value": 1, "string": "TRIAD" },
+                        { "value": 2, "string": "KALMAN" }
+                    ]
+                },
+                {
+                    "key": "control",
+                    "name": "Control Algorithm",
+                    "format": "string",
+                    "raw": "uint8",
+                    "enumeration": [
+                        { "value": 0, "string": "OFF" },
+                        { "value": 1, "string": "BDOT" },
+                        { "value": 2, "string": "SPIN" }
+                    ]
+                },
+                {
+                    "key": "mjd",
+                    "name": "Julian Date",
+                    "format": "float",
+                    "raw": "float"
+                },
+                {
+                    "key": "position_x",
+                    "name": "Position X",
+                    "format": "float",
+                    "raw": "float"
+                },
+                {
+                    "key": "position_y",
+                    "name": "Position Y",
+                    "format": "float",
+                    "raw": "float"
+                },
+                {
+                    "key": "position_z",
+                    "name": "Position Z",
+                    "format": "float",
+                    "raw": "float"
+                },
+
+                {
+                    "key": "velocity_x",
+                    "name": "Velocity X",
+                    "format": "float",
+                    "raw": "float"
+                },
+                {
+                    "key": "velocity_y",
+                    "name": "Velocity Y",
+                    "format": "float",
+                    "raw": "float"
+                },
+                {
+                    "key": "velocity_z",
+                    "name": "Velocity Z",
+                    "format": "float",
+                    "raw": "float"
+                },
+
+                {
+                    "key": "angular_rate_x",
+                    "name": "Angular Rate X",
+                    "format": "float",
+                    "raw": "float",
+                    "unit": "rad/s"
+                },
+                {
+                    "key": "angular_rate_y",
+                    "name": "Angular Rate Y",
+                    "format": "float",
+                    "raw": "float",
+                    "unit": "rad/s"
+                },
+                {
+                    "key": "angular_rate_z",
+                    "name": "Angular Rate Z",
+                    "format": "float",
+                    "raw": "float",
+                    "unit": "rad/s"
+                },
+
+                {
+                    "key": "attitude_x",
+                    "name": "Quaternion X",
+                    "format": "float",
+                    "raw": "float"
+                },
+                {
+                    "key": "attitude_y",
+                    "name": "Quaternion Y",
+                    "format": "float",
+                    "raw": "float"
+                },
+                {
+                    "key": "attitude_z",
+                    "name": "Quaternion Z",
+                    "format": "float",
+                    "raw": "float"
+                },
+                {
+                    "key": "attitude_w",
+                    "name": "Quaternion W",
+                    "format": "float",
+                    "raw": "float"
+                }
+            ]
+        },
+        {
+            "key": "data",
+            "name": "Data",
+            "fields": [
+                {
+                    "key": "uplink",
+                    "name": "Uplink per day",
+                    "format": "float",
+                    "raw": "uint32",
+                    "units": "kbytes",
+                    "calibration": [ 0.001, 0 ]
+                },
+                {
+                    "key": "downlink",
+                    "name": "Downlink per day",
+                    "format": "float",
+                    "raw": "uint32",
+                    "units": "kbytes",
+                    "calibration": [ 0.001, 0 ]
+                }
+            ]
+        }
+
+    ]
+}
