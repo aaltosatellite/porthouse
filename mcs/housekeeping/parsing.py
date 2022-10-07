@@ -195,7 +195,7 @@ class Field:
 
 
 
-def load_subsystems_as_dict(schema_path: str) -> Dict[str, Subsystem]:
+def load_subsystems(schema_path: str) -> Dict[str, Subsystem]:
     """
     Returns:
     """

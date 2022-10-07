@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from typing import Any, Dict, Generator, List, Optional, Sequence, Union
 
 from porthouse.core.db_tools import check_table_exists
-from .parsing import Subsystem, Field, load_subsystems_as_dict
+from .parsing import Subsystem, Field, load_subsystems
 
 
 #TODO: fix time_bucket: 176.
@@ -91,7 +91,7 @@ def check_hk_table_format_correctness(cursor: psycopg2.extensions.cursor, subsys
     return True
 
 
-class Database:
+class HousekeepingDatabase:
     """
     Housekeeping schema and database access class.
     """
@@ -556,7 +556,7 @@ if __name__ == "__main__":
     import sys
     from porthouse.core.config import load_globals
     cfg = load_globals()
-    Database(
+    HousekeepingDatabase(
         db_url=cfg["db_url"],
         schema_path=cfg["hk_schema"],
         create_tables=("--create_tables" in sys.argv)

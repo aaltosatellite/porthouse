@@ -1,9 +1,9 @@
 
-from .database_api import Database
+from .database import HousekeepingDatabase
 from .parsing import Subsystem, Field
 
 __all__ = [
-    Database,
+    HousekeepingDatabase,
     Subsystem,
     Field,
 ]
