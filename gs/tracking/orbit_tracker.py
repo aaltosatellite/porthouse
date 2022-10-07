@@ -1,24 +1,25 @@
 """
-    Orbit tracker module
+    Orbit tracker
 """
 
 import json
-import math
-import yaml
 import asyncio
-from enum import Enum
-from datetime import datetime
-from typing import Any, Dict, Optional
+import yaml
+import datetime
+from enum import IntEnum
+from typing import Optional, NoReturn
 
-import skyfield.api as skyfield
+import skyfield
 
 from porthouse.core.config import cfg_path
 from porthouse.core.basemodule_async import BaseModule, RPCError, RPCRequestError, rpc, queue, bind
 
 from .utils import Satellite, Pass
 
+ts = skyfield.api.load.timescale()
 
-class TrackerStatus(Enum):
+
+class TrackerStatus(IntEnum):
     """ Tracker states """
     DISABLED = 0
     WAITING = 1
@@ -28,77 +29,77 @@ class TrackerStatus(Enum):
 
 
 class OrbitTracker(BaseModule):
-    """ Module class to implement OrbitTracker.  """
+    """ Module class to implement OrbitTracker. """
 
     def __init__(self, **kwarg):
         """
         Initialize module.
-
         """
-        BaseModule.__init__(self, **kwarg)
+        BaseModule.__init__(self, debug=True, **kwarg)
+
         self.target = None
         self.mode = TrackerStatus.DISABLED
+        self.satellites = []
 
         # Open config file
-        cfg = yaml.load(open(cfg_path("groundstation.yaml"), "r"), Loader=yaml.Loader)
+        with open(cfg_path("groundstation.yaml")) as f:
+            self.gs_config = yaml.load(f, Loader=yaml.Loader)['groundstation']
 
         # Create observer from config file
-        observer_cfg: Dict[str, Any] = cfg["observer"]
-        self.gs_name = cfg.get("observer", "name")
-        self.horizon = math.radians(observer_cfg.get("horizon", 0.0))
-        self.gs = skyfield.Topos(
-            latitude=skyfield.Angle(degrees=float(observer_cfg.get("latitude"))),
-            longitude=skyfield.Angle(degrees=float(observer_cfg.get("latitude"))),
-            elevation_m=float(observer_cfg.get("elevation"))
+        self.gs = skyfield.api.Topos(
+            latitude=skyfield.api.Angle(degrees=self.gs_config["latitude"]),
+            longitude=skyfield.api.Angle(degrees=self.gs_config["longitude"]),
+            elevation_m=self.gs_config["elevation"]
         )
 
-        # Finish the setup in coroutine
+        self.preaos_duration = datetime.timedelta(seconds=120)
+
         loop = asyncio.get_event_loop()
-        loop.create_task(self.setup(cfg.get("default")))
+        loop.create_task(self.setup(self.gs_config.get("default", None)))
 
 
-    async def setup(self, default_target: str) -> None:
+    async def setup(self, default_target: Optional[str]) -> NoReturn:
         """
-        Coroutine for finishing the module setup
         """
-
-        if default_target is not None:
-            await self.set_target(default_target)
+        await asyncio.sleep(5)
+        await self.set_target(default_target)
 
         while True:
             if self.target:
-                await self.update_traking()
+                await self.update_tracking()
             await self.broadcast_status()
             await asyncio.sleep(2)
 
 
     @rpc()
-    @bind("tracking", "rpc.#")
+    @bind("tracking", "orbit.rpc.#")
     async def rpc_handler(self,
             request_name: str,
-            request_data: Dict[str, Any],
-        ) -> Optional[Dict[str, Any]]:
+            request_data: dict):
         """
         Handle RPC commands
         """
-
+        request_name = request_name[6:]
+        # Change active spacecraft
         if request_name == "rpc.set_target":
             #
-            # Set the target satellite
+            # Set the target
             #
             await self.set_target(request_data["satellite"])
 
         elif request_name == "rpc.get_config":
             #
-            # Return
             #
+            #
+
             return {
-                "name": self.gs_name,
-                "lat": self.gs.latitude.degrees,
-                "lon": self.gs.longitude.degrees,
-                "elevation": self.gs.elevation.m,
-                "horizon": self.horizon,
-                "target": self.target.name
+                "target": self.obs_name,
+                "lat": self.obs.lat,
+                "lon": self.obs.long,
+                "elevation": self.obs.elevation,
+                "date": self.obs.date,
+                "pressure": self.obs.pressure,
+                "horizon": self.obs.horizon,
             }
 
         elif request_name == "rpc.get_satellite_pass":
@@ -155,7 +156,11 @@ class OrbitTracker(BaseModule):
             if satellite is None:
                 return None
 
+            return self.target.to_dict()
+
             self.update_satellite_position(satellite)
+            pos = (self.target.sc - self.gs).at(ts.now())
+
 
             pos = {}
             pos.update(self.get_satellite_ground_position(satellite))
@@ -184,57 +189,56 @@ class OrbitTracker(BaseModule):
                 self.predict_passes(satellite)
 
         else:
-            raise RPCError("No such command")
+            raise RPCError(f"No such command {request_name}")
 
 
     @queue()
     @bind("tracking", "tle.updated")
-    def tle_updated_callback(self, msg):
+    def tle_updated_callback(self, msg: dict) -> None:
         """
         Receive new TLEs from the TLEServer
         """
+        return
 
         try: # Try to parse TLE
             msg_body = json.loads(msg.body)
         except ValueError:
             return
 
-        # No target to be update
-        if self.target is None:
-            return
+        # Clear the whole list and recreate satellite objects
+        for tle_data in msg_body["tle"]:
 
-        # Find the TLE lines for our target
-        new_tle = next(filter(lambda tle: tle["name"] == self.target.name, msg_body["tle"]), None)
-        if new_tle is not None:
-            self.log.debug("%s TLE updated!", self.target.name)
+            self.log.debug("%s TLE updated!", tle_data["name"])
 
-            sat = Satellite(new_tle["name"], new_tle["name"], new_tle["tle1"], new_tle["tle2"])
-            sat.sc.compute(self.obs)
+            sat = Satellite(tle_data["name"], tle_data["tle1"], tle_data["tle2"])
+            self.calculate_passes(self.gs)
+            self.satellites.append(sat)
 
 
-    async def update_traking(self):
+    async def update_tracking(self) -> None:
         """
         Update tracking calculations
         """
 
+        #
+        await asyncio.sleep(0)
+
         # Update current prediction
-        pos = (self.target - self.gs).at(ts.now()).altaz()
+        now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+        pos: skyfield.positionlib.Geometric = (self.target.sc - self.gs).at(ts.now())
+
 
         next_pass = self.target.get_next_pass()
         if next_pass is None:
             self.log.critical("No passes!")
             self.mode = TrackerStatus.DISABLED
-        else:
-            tr, azr, tt, azt, altt, ts, azs = next_pass.params
 
         # Tracking state machine:
         if self.mode == TrackerStatus.WAITING:
 
             if self.debug:
-                delta = ephem.localtime(tr) - ts.now()
-                sec = delta.seconds + 24 * 60 * delta.days
-
-                m, s = divmod(sec, 60)
+                s = (next_pass.t_aos - now).total_seconds()
+                m, s = divmod(s, 60)
                 h, m = divmod(m, 60)
 
                 if h > 0:
@@ -243,86 +247,74 @@ class OrbitTracker(BaseModule):
                     self.log.debug("AOS in %d minutes and %d seconds", m, s)
 
             # Check if a pass is already going on
-            if self.target.sc.alt > 0:
-
-                self.send_event("aos", satellite=self.target.name)
+            pos = (self.target.sc - self.gs).at(ts.now())
+            if pos.altaz()[0].degrees > 0:
+                await self.send_event("aos", target=self.target.name)
                 self.mode = TrackerStatus.TRACKING
 
             # Is AOS about to happen?
-            elif now + 120 * ephem.second >= tr:
+            elif now >= next_pass.t_aos - self.preaos_duration:
 
-                self.send_event("preaos", satellite=self.target.name,
-                                aos=int(ephem.localtime(tr).strftime("%s")),
-                                aos_az=math.degrees(azr),
-                                maximum=int(ephem.localtime(tt).strftime("%s")),
-                                maximum_az=math.degrees(azt),
-                                maximum_el=math.degrees(altt),
-                                los=int(ephem.localtime(ts).strftime("%s")),
-                                los_az=math.degrees(azs))
+                await self.send_event("preaos", **next_pass.to_dict())
                 self.mode = TrackerStatus.AOS
+
 
         elif self.mode == TrackerStatus.AOS:
 
             # Is the satellite over the horizon
-            if self.target.sc.alt > 0:
-
-                self.send_event("aos", satellite=self.target.name)
+            pos = (self.target.sc - self.gs).at(ts.now())
+            if pos.altaz()[0].degrees > 0: # Above the horizon?
+                await self.send_event("aos", target=self.target.name)
                 self.mode = TrackerStatus.TRACKING
 
             elif self.debug:
-
-                delta = ephem.localtime(tr) - ephem.localtime(now)
-                sec = delta.seconds + 24 * 60 * delta.days
-
+                sec = (next_pass.t_aos - now).total_seconds()
                 self.log.debug("AOS in %d seconds", sec)
+
 
         elif self.mode == TrackerStatus.TRACKING:
 
-            self.obs.date = now + 1.5 * ephem.second
-            self.target.sc.compute(self.obs)
+            # Calculate the postion in 2 seconds in future
+            now += datetime.timedelta(seconds=1)
 
-            self.obs.date = now + 1.5 * ephem.second
-            self.target.sc.compute(self.obs)
+            pos = (self.target.sc - self.gs).at(ts.from_datetime(now))
+            el, az, range, _, _, range_rate = pos.frame_latlon_and_rates(self.gs)
 
-            # Print debug stuff
             if self.debug:
-                delta = ephem.localtime(ts) - ephem.localtime(now)
-                sec = delta.seconds + 24 * 60 * delta.days
-                m, s = divmod(sec, 60)
-
-                self.log.debug(
-                    "Tracking %s, LOS in %d minutes %d seconds", self.target.name, m, s)
+                m, s = divmod((next_pass.t_los - now).total_seconds(), 60)
+                self.log.debug("Tracking %s, LOS in %d minutes %d seconds", self.target.name, m, s)
 
             # Broadcast spacecraft position
-            await self.broadcast_pointing(
-                az=math.degrees(self.target.sc.az),
-                el=math.degrees(self.target.sc.alt),
-                vel=self.target.sc.range_velocity
-            )
+            await self.broadcast_pointing(az=az.degrees, el=el.degrees, range=range.m, range_rate=range_rate.m_per_s)
 
             # Is the satellite below the horizon
-            if self.target.sc.alt < 0:
-                self.send_event("los", satellite=self.target.name)
+            if pos.altaz()[0].degrees < 0:
+                await self.send_event("los", target=self.target.name)
                 self.mode = TrackerStatus.LOS
 
         elif self.mode == TrackerStatus.LOS:
+            #
             # Handle LOS
+            #
             self.log.debug("After LOS")
 
-            # Every sc pass is only tracked once so no unnecessary tracking
-            self.set_target("None")
+            if False:
+                # Every sc pass is only tracked once so no unnecessary tracking
+                await self.set_target(None)
+            else:
+                self.mode = TrackerStatus.WAITING
+                self.target.calculate_passes(self.gs)
 
-        await asyncio.sleep(0)
 
-
-    async def broadcast_pointing(self, az, el, vel):
+    async def broadcast_pointing(self, az: float, el: float, range: float, range_rate: float) -> None:
         """
         Broadcast pointing information
 
         Args:
             az: Target azimuth
             el: Target elevation
-            vel: Target velocity
+            range: Target velocity
+            range_rate:
         """
 
         if el < 0:
@@ -332,13 +324,14 @@ class OrbitTracker(BaseModule):
 
         await self.publish({
             "target": self.target.name,
-            "az": round(az, 1),
-            "el": round(el, 1),
-            "velocity": round(vel, 1)
+            "az": round(az, 2),
+            "el": round(el, 2),
+            "range": round(range, 2),
+            "range_rate": round(range_rate, 2)
         }, exchange="tracking", routing_key="target.position")
 
 
-    async def broadcast_status(self):
+    async def broadcast_status(self) -> None:
         """
         Broadcast tracker status
         """
@@ -373,10 +366,11 @@ class OrbitTracker(BaseModule):
         else:
             status_message = {
                 "satellite": None,
+                "pass": None,
                 "status": "No target"
             }
 
-        self.log.debug("Status: %r", status_message)
+        #self.log.debug("Status: %r", status_message)
         await self.publish(status_message,
             exchange="tracking",
             routing_key="tracker.status")
@@ -391,166 +385,49 @@ class OrbitTracker(BaseModule):
         await self.publish(params, exchange="event", routing_key=event_name)
 
 
-    async def set_target(self, satellite: Optional[str]) -> None:
+    async def set_target(self, satellite: Optional[str]=None):
         """
-        Set tracking target.
-
-        Args:
-
+        Set tracking target
         """
+
+        await asyncio.sleep(0) # Make sure that something is awaited.
 
         if self.mode == TrackerStatus.TRACKING:
             await self.send_event("los", satellite=self.target.name)
+        self.mode = TrackerStatus.DISABLED
+        self.target = None
 
+        if satellite is None:
+            return 
+        
         self.log.info("Changing target to %s", satellite)
 
         try:
-            await self.update_tle(satellite)
-        except KeyError:
-            self.log.error("No TLE information for satellite %s", satellite)
-            return
-
-        self.mode = TrackerStatus.DISABLED
-
-        try:
-            # Reset target and check whether new target is in satellites list
-            self.target = self.get_satellite(satellite)
-
-            if self.target is None:
-                self.log.debug("Target set to None!")
-                return
-
-            self.target.sc.compute(self.obs)
-            self.predict_passes(self.target)
-
-            self.mode = TrackerStatus.WAITING
-
-            # Check TLE epoch
-            tle_age = ephem.now() - self.target.sc._epoch
-
-            if tle_age > 30:
-                self.log.warning("TLE lines for \"%s\" are %.1f days old and might be inaccurate!",
-                    satellite, tle_age)
-
-        except ValueError as e:
-            # If no passes were found
-            self.log.error("%s: %s", satellite, e.args[0])
-
-
-    async def update_tle(self, target):
-        """
-            Read latest TLE lines from the TLE configuration file.
-        """
-
-        # If "None" target is selected, tracking shall be disabled
-        if target == "None":
-            self.target = None
-            return
-
-        try:
-            self.log.debug("Requesting TLE for %s", target)
+            self.log.debug("Requesting TLE for %s", satellite)
             ret = await self.send_rpc_request("tracking", "tle.rpc.get_tle", {
-                "satellite": target
+                "satellite": satellite
             })
 
         except RPCRequestError as e:
             self.log.error("Failed to request TLE: %s", e.args[0])
             return
 
-        sc = self.get_satellite(target)
+        self.target = Satellite(satellite, ret["tle1"], ret["tle2"])
 
-        for satellite in ret["tle"]:
-            if satellite["name"] == target:
-                sc.tle0 = satellite["name"]
-                sc.tle1 = satellite["tle1"]
-                sc.tle2 = satellite["tle2"]
-                return
+        # Check TLE age
+        utcnow = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+        tle_age = utcnow - self.target.sc.epoch.utc_datetime()
+        if tle_age.days > 14:
+            self.log.warning("TLE lines for \"%s\" are %.1f days old and might be inaccurate!",
+                satellite, tle_age.days)
 
-        self.log.critical("No avaible for target satellite!")
-
-
-    def predict_passes(self, satellite, prediction_period=24.0):
-        """
-            Predict upcoming passes of satellite w.r.t. to ground station.
-        """
-        startTime = ephem.now()
-        self.obs.date = startTime
-
-        satellite.passes = []
-
-        satellite.sc.compute(self.obs)
-
-        # If a pass has already started go little bit back in time.
-        if satellite.sc.alt > 0:
-            self.obs.date -= 15 * ephem.minute
-            satellite.sc.compute(self.obs)
-
-        # Calculate passes for the given prediction period
-        while self.obs.date < ephem.Date(startTime + prediction_period * ephem.hour):
-
-            try:
-                tr, _, tt, _, ts, _ = next_pass = self.obs.next_pass(satellite.sc)
-
-                if tr == None:
-                    raise ValueError
-
-                # Calculate azimuth at max elevation
-                self.obs.date = tt
-                satellite.sc.compute(self.obs)
-                next_pass = (next_pass[0], next_pass[1], next_pass[2],
-                             satellite.sc.az, next_pass[3], next_pass[4], next_pass[5])
-
-                newpass = Pass(satellite.name, next_pass)
-                satellite.passes.append(newpass)
-
-            except ValueError:
-                ts = ephem.Date(self.obs.date + ephem.hour)
-
-            self.obs.date = ephem.Date(ts + 0.1 * ephem.hour)
-
-        # Make sure we have some kind of result
-        if len(satellite.passes) == 0:
-            self.mode = TrackerStatus.DISABLED
-            self.log.warning("No future passes were found for %s!", satellite.name)
-            return
-
-        # Pick pass parameters
-        tr, _, tt, _, altt, ts, _ = satellite.passes[0].params
-
-        # Construct info message
-        msg = "Next pass for %s (Orbit %d)" % (
-            satellite.name, satellite.sc._orbit)
-        msg += ", AOS: %s" % ephem.localtime(tr).strftime("%Y-%m-%d %H:%M:%S")
-        msg += ", LOS: %s" % ephem.localtime(ts).strftime("%Y-%m-%d %H:%M:%S")
-        msg += ", Pass length: %s" % (ephem.localtime(ts) -
-                                      ephem.localtime(tr))
-        msg += ", Maximum elevation: %d degrees" % math.degrees(altt)
-        self.log.info(msg)
-
-        if self.debug:
-            print("--------------------------------------------------------------")
-            print("      Date/Time        Elev/Azim    Alt     Range     RVel    ")
-            print("--------------------------------------------------------------")
-
-            self.obs.date = tr
-
-            while self.obs.date <= ts:
-                satellite.sc.compute(self.obs)
-
-                print("{0} | {1:4.1f} {2:5.1f} | {3:5.1f} | {4:6.1f} | {5:+7.1f}".format(
-                    ephem.localtime(self.obs.date).strftime(
-                        "%Y-%m-%d %H:%M:%S"),
-                    math.degrees(satellite.sc.alt),
-                    math.degrees(satellite.sc.az),
-                    satellite.sc.elevation/1000.,
-                    satellite.sc.range/1000.,
-                    satellite.sc.range_velocity))
-
-                self.obs.date = ephem.Date(self.obs.date + 20 * ephem.second)
+        self.target.calculate_passes(self.gs)
+        await self.send_event("next_pass", **self.target.get_next_pass().to_dict())
+        self.mode = TrackerStatus.WAITING
 
 
     def get_satellite(self, satellite):
-        """ Returns ephem spacecraft if satellite is in list else None. """
+        """Returns ephem spacecraft if satellite is in list else None."""
         if satellite == "None":
             return None
         else:
@@ -560,32 +437,3 @@ class OrbitTracker(BaseModule):
             self.log.error("Satellite %s not in list!", satellite)
             return None
 
-
-    def update_satellite_position(self, satellite):
-        """ Calculates position of satellite. """
-        self.obs.date = ephem.now()
-        satellite.sc.compute(self.obs)
-
-
-    def get_satellite_ground_position(self, satellite):
-        """ Returns position of satellite projected on ground. """
-        lat = math.degrees(satellite.sc.sublat)
-        lon = math.degrees(satellite.sc.sublong)
-        alt = satellite.sc.elevation
-
-        return {"lat": lat, "lon": lon, "alt": alt}
-
-    def get_satellite_sky_position(self, satellite):
-        """ Returns position of satellite in the sky. """
-        az = math.degrees(satellite.sc.az)
-        el = math.degrees(satellite.sc.alt)
-
-        return {"az": az, "el": el}
-
-
-if __name__ == "__main__":
-    OrbitTracker(
-        cfg_file="tracker.cfg",
-        amqp_url="amqp://guest:guest@localhost:5672/",
-        debug=True
-    ).run()
