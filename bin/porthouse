@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+
 import sys
 import argparse
 
@@ -25,6 +26,7 @@ porthouse.gs.scheduler.schedule.setup_parser(subparser.add_parser('scheduler'))
 porthouse.mcs.packets.packets.setup_parser(subparser.add_parser('packets'))
 
 args = parser.parse_args()
+
 
 if args.utility == "cmdl":
     porthouse.cmdl.main(parser, args)

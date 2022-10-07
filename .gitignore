@@ -18,4 +18,6 @@ build
 # Sphinx
 _build
 
+# No .idea from Pycharm
+.idea
 
