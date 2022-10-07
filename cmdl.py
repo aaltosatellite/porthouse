@@ -24,6 +24,8 @@ from prompt_toolkit.application import in_terminal
 from ptpython.repl import embed, PythonRepl
 from ptpython.prompt_style import PromptStyle
 
+
+from porthouse.core.config import load_globals, cfg_path
 from porthouse.core.rpc_async import amqp_connect, send_rpc_request
 
 
@@ -46,7 +48,7 @@ def configure(repl: PythonRepl):
     repl.prompt_style = 'custom'
     repl.show_docstring = True
     repl.insert_blank_line_after_output = False
-
+    repl.enable_dictionary_completion = True
 
     """
     Monkey patching eval_asyc!
@@ -60,51 +62,6 @@ def configure(repl: PythonRepl):
             result = await result
         return result
     repl.eval_async = auto_async_eval
-
-
-from porthouse.core.config import load_globals, cfg_path
-
-parser = argparse.ArgumentParser(description='')
-parser.add_argument('--amqp_url', dest="amqp_url", help="")
-parser.add_argument('-l', '--logger', action="store_true")
-args = parser.parse_args()
-
-
-#
-# Connect to AMQP broker
-#
-connection, channel = None, None
-async def connect_broker(amqp_url: str):
-    global connection, channel
-    connection, channel = await amqp_connect(amqp_url)
-
-
-#
-# Load cmdl config file
-#
-try:
-    import yaml
-    with open(cfg_path("cmdl.yaml"), "r") as fd:
-        cmdl_cfg = yaml.load(fd, Loader=yaml.Loader)
-except FileNotFoundError:
-    cmdl_cfg = { }
-
-
-#
-# Load the environment
-#
-services = cmdl_cfg.get("services", [
-    "porthouse.cmdl_env",
-])
-
-for service in services:
-    # Import the service module
-    #module = importlib.import_module(service)
-    #globals()[service] = module
-
-    module = __import__(service, globals=globals())
-
-    print(dir(module))
 
 
 
@@ -143,7 +100,7 @@ async def logger() -> None:
     await channel.queue_bind(log_queue, exchange="log", routing_key="*")
 
 
-async def run_repl():
+async def run_repl() -> None:
     """
     Coroutine for running the Python REPL
     """
@@ -151,7 +108,7 @@ async def run_repl():
         await embed(globals(), locals(),
             vi_mode=False,
             configure=configure,
-            history_filename=cfg_path(".history"),
+            history_filename=cfg_path(".cmdl-history"),
             return_asyncio_coroutine=True,
             patch_stdout=True,
         )
@@ -159,7 +116,54 @@ async def run_repl():
         asyncio.get_event_loop().stop()
 
 
-def main():
+def setup_parser(cmdl_parser: argparse.ArgumentParser) -> None:
+    """
+    """
+    cmdl_parser.add_argument('-l', '--logger', action="store_true")
+
+
+
+
+
+def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """ """
+
+    #
+    # Load cmdl config file
+    #
+    try:
+        import yaml
+        with open(cfg_path("cmdl.yaml"), "r") as fd:
+            cmdl_cfg = yaml.load(fd, Loader=yaml.Loader)
+    except FileNotFoundError:
+        cmdl_cfg = { }
+
+
+    #
+    # Load the environment
+    #
+    services = cmdl_cfg.get("services", [
+        "porthouse.cmdl_env",
+    ])
+
+    for service in services:
+        # Import the service module
+        #module = importlib.import_module(service)
+        #globals()[service] = module
+
+        module = __import__(service, globals=globals())
+
+
+    #
+    # Connect to AMQP broker
+    #
+    connection, channel = None, None
+    async def connect_broker(amqp_url: str):
+        global connection, channel
+        connection, channel = await amqp_connect(amqp_url)
+
+
+
     print(r"                  _   _                           ")
     print(r" _ __   ___  _ __| |_| |__   ___  _   _ ___  ___  ")
     print(r"| '_ \ / _ \| '__| __| '_ \ / _ \| | | / __|/ _ \ ")
@@ -181,5 +185,7 @@ def main():
             repl_task.cancel()
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == '__main__' and False:
+    parser = argparse.ArgumentParser(description='Commandline')
+    setup_parser(parser)
+    main(parser, parser.parse_args())
