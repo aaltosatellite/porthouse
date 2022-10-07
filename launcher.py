@@ -17,6 +17,7 @@ import amqp
 import yaml
 import time
 import argparse
+import inspect
 from multiprocessing import Process, RLock
 from importlib import import_module
 import logging, logging.handlers
@@ -26,28 +27,11 @@ from typing import Any, Dict, List, Optional, NoReturn, Tuple
 
 from porthouse.core.config import load_globals
 from porthouse.core.log.amqp_handler import AMQPLogHandler
-from porthouse.core.basemodule_async import assert_module_spec_valid
 from porthouse.core.amqp_tools import check_exchange_exists
 
-# There was massive confusion between parameters for launcher, and parameters for modules,
-# causing silent bugs and erroneous function without crash.
-# Hence, a strict policy on allowed arguments and parameters per level will be enforced.
-LAUNCHER_VALID_CFG_MEMBERS = {"modules":(list,dict), "exchanges":(dict,(str,str))}
-def _assert_cfg_valid(cfg:dict):
-    assert (type(cfg) == dict), type(cfg)
-    for k in cfg.keys():
-        assert (k in LAUNCHER_VALID_CFG_MEMBERS), k
-        assert (type(cfg[k]) == LAUNCHER_VALID_CFG_MEMBERS[k][0]) , type(cfg[k])
-        if LAUNCHER_VALID_CFG_MEMBERS[k][0] == list:
-            for x in cfg[k]:
-                assert (type(x) == LAUNCHER_VALID_CFG_MEMBERS[k][1])
-        if LAUNCHER_VALID_CFG_MEMBERS[k][0] == dict:
-            for x1,x2 in cfg[k].items():
-                assert (type(x1) == LAUNCHER_VALID_CFG_MEMBERS[k][1][0])
-                assert (type(x2) == LAUNCHER_VALID_CFG_MEMBERS[k][1][1])
 
-
-
+class ModuleValidationError(RuntimeError):
+    """ """
 
 
 class Launcher:
@@ -79,10 +63,10 @@ class Launcher:
         # Read basic configuration
         with open(cfg_file, "r") as cfg_fd:
             cfg = yaml.load(cfg_fd, Loader=yaml.Loader)
-            _assert_cfg_valid(cfg)
+        self.validate_launch_specification(cfg)
+
         self.exchanges = cfg.get("exchanges", {})
         self.modules = cfg["modules"]
-
 
         self.globals = load_globals()
 
@@ -176,11 +160,15 @@ class Launcher:
 
         """
         self.log.info("Setup modules...")
-        for module in modules:
+        for module_def in modules:
             try:
-                #assert_module_spec_valid(module)
+                self.validate_module_specification(module_def)
 
-                name = module.get("name", module.get('module', ''))
+                module = module_def.get('module', '')
+                if not isinstance(module, str) or ("." not in module):
+                    raise RuntimeError(f"Errornouse module name {module}")
+
+                name = module_def.get("name", module)
 
                 ok = True
                 if includes is not None: # Whitelist/including
@@ -191,10 +179,9 @@ class Launcher:
                 if not ok:
                     continue
 
-
                 # Parse parameters
                 params = dict(self.globals)
-                for param in module.get("params", []):
+                for param in module_def.get("params", []):
                     for k in ("name","value"):
                         assert(k in param)
 
@@ -231,12 +218,12 @@ class Launcher:
                     params["debug"] = True
 
                 # Create new process for the module
-                t = Process(target=self.worker, args=(module.get("module"), params), daemon=True)
+                t = Process(target=self.worker, args=(module, params), daemon=True)
                 self.threads.append(t)
                 t.start()
 
             except:
-                self.log.error("Failed to start module \"%s\"", module.get("name"))
+                self.log.error("Failed to start module \"%s\"", module_def.get("name"))
                 raise
 
 
@@ -249,10 +236,9 @@ class Launcher:
             self.log.debug("\t%s (%s)", exchange, etype)
             try:
                 self.channel.exchange_delete(exchange)
-                self.channel.exchange_declare(exchange=exchange, type=etype, durable=True,  auto_delete=False)
+                self.channel.exchange_declare(exchange=exchange, type=etype, durable=True, auto_delete=False)
             except:
                 raise ValueError("Invalid exchange spec.")
-        self.log.info("Declaring done")
 
 
     def check_exchanges(self, exchanges: List[Tuple[str, str]]) -> None:
@@ -265,8 +251,7 @@ class Launcher:
             try:
                 assert check_exchange_exists(exchange, etype)
             except:
-                raise ValueError("Exchange {} not according to spec.".format(exchange))
-        self.log.info("Exchanges ok.")
+                raise ValueError(f"Exchange {exchange} not according to spec.")
 
 
     def wait(self) -> NoReturn:
@@ -286,33 +271,35 @@ class Launcher:
             pass
 
 
-    def worker(self, module: str, params: Dict) -> NoReturn:
+    def worker(self, module: str, params: Dict[str, Any]) -> NoReturn:
         """
         Worker function to start the new module.
         """
         try:
-            package_name, module_name = module.rsplit('.', 1)
-            i = import_module(package_name)
-            """
-                Note: Logging here isn't completely threadsafe!
-                      ... but meh!
-            """
-            with self.rlock:
-                self.log.info("Starting %s (%s.%s)", params.get("module_name", module_name), package_name, module_name)
-
-            import inspect
+            # Parse package, class etc. names
+            package_name, class_name = module.rsplit('.', 1)
+            module_name = params.get("module_name", class_name) # Verbose name
+            package = import_module(package_name)
+            class_object = getattr(package, class_name)
 
             # Check that all the required arguments have been define and output understandable error if not
-            argspec = inspect.getfullargspec(getattr(i, module_name).__init__)
+            argspec = inspect.getfullargspec(class_object.__init__)
             for j, arg in enumerate(argspec.args[1:]):
                 if j >= len(argspec.defaults or []) and arg not in params:
-                    raise RuntimeError(f"Module {module_name!r} missing argument {arg!r}")
-
-            inst = getattr(i, module_name)(**params)
-            inst.run()
+                    raise RuntimeError(f"Module {module_name} (class {class_name}) missing argument {arg!r}")
 
             with self.rlock:
-                self.log.info("Module %s (%s.%s) exited", params.get("module_name", module_name), package_name, module_name)
+                self.log.info("Starting %s (%s.%s)", module_name, package_name, class_name)
+
+            # Call module class constuctor
+            instance = class_object(**params)
+
+            # Start executing 
+            ret = instance.run()
+            # TODO: if asyncio.iscoroutine(ret): ret = await ret
+
+            with self.rlock:
+                self.log.info("Module %s (%s.%s) exited", module_name, package_name, class_name)
 
         except KeyboardInterrupt:
             pass
@@ -320,6 +307,54 @@ class Launcher:
         except: # Catch all exceptions!
             with self.rlock:
                 self.log.critical("%s crashed!", module, exc_info=True)
+
+
+    def validate_module_specification(self, module_spec: dict) -> None:
+        """ Validate module specification """
+
+        REQUIRED_FIELDS = (
+            ("name", str, False),
+            ("module", str, True),
+            ("params", list, False)
+        )
+
+        if not isinstance(module_spec, dict):
+            raise ModuleValidationError(f"Module specification is not a dict but a {type(module_spec)}")
+
+        for field_name, field_type, field_required in REQUIRED_FIELDS:
+            if field_name not in module_spec:
+                if not field_required:
+                    continue
+                raise ModuleValidationError(f"{field_name!r} missing from module specification {module_spec!r}")
+            if not isinstance(module_spec[field_name], field_type):
+                raise ModuleValidationError(f"{field_name!r} has wrong type. Expected {field_type!r} got {type(module_spec[field_name])}")
+
+        for param in module_spec.get("params", []):
+            if not isinstance(param, dict):
+                raise ModuleValidationError(f"Parameter define {param!r} in is not a dict")
+            if "name" not in param:
+                raise ModuleValidationError(f"Parameter define {param!r} missing field 'name'")
+            if "value" not in param:
+                raise ModuleValidationError(f"Parameter define {param!r} missing field 'value'")
+
+
+    def validate_launch_specification(self, launch_cfg: Dict) -> None:
+        """
+        """
+
+        if not isinstance(launch_cfg, dict):
+            raise ModuleValidationError(f"Module specification is not a dict but a {type(launch_cfg)}")
+
+        if "exchanges" in launch_cfg:
+            exchanges = launch_cfg["exchanges"]
+            if not isinstance(exchanges, dict):
+                raise ModuleValidationError(f"Exchange specification is not a dict but a {type(exchanges)}")
+
+        if "modules" in launch_cfg:
+            modules = launch_cfg["modules"]            
+            if not isinstance(launch_cfg, dict):
+                raise ModuleValidationError(f"Module specification is not a list but a {type(modules)}")
+
 
 
 def setup_parser(parser: argparse.ArgumentParser) -> None:

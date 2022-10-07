@@ -18,19 +18,6 @@ import aiormq.types
 from .log.amqp_handler_async import AMQPLogHandler
 
 
-MODULE_SPEC_VALID_MEMBERS = {"name":str, "module":str, "params":list}
-def assert_module_spec_valid(spec:dict):
-    assert (type(spec) == dict)
-    for k in spec.keys():
-        assert( k in MODULE_SPEC_VALID_MEMBERS, k)
-        assert (type(spec[k]) == MODULE_SPEC_VALID_MEMBERS[k], type(spec[k]))
-    if "params" in spec:
-        for p in spec["params"]:
-            assert(type(p) == dict, type(p))
-            assert ("name" in p)
-            assert ("value" in p)
-
-
 # Define what is being imported by default
 __all__ = [
     "BaseModule",
