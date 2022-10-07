@@ -1,5 +1,5 @@
 """
-    Utils for loading porthouse configrations
+    Utils for loading porthouse configurations
 """
 
 import os
@@ -19,7 +19,7 @@ else:
 
 def cfg_path(filename: Optional[str]=None) -> str:
     """
-    Return a absolute path to config directory or a file located in config directory.
+    Return an absolute path to config directory or a file located in config directory.
 
     Args:
         filename: Optional filename to be appended to the path.
@@ -74,7 +74,7 @@ def create_template_config() -> None:
     with open(os.path.join(_dir, "globals.yaml"), "x") as file:
         file.write(
             f"amqp_url: amqp://guest:guest@localhost:5672/\n"
-            f"db_url: postgres://mcs:PASSWORD@localhost/foresail\n"
+            f"db_url: postgres://mcs:PASSWORD@localhost/porthouse\n"
             f"log_path: {os.path.join(_dir, 'logs')}\n"
             f"#hk_schema: \n"
         )
@@ -105,7 +105,7 @@ def create_template_config() -> None:
             "  websrc: http://www.celestrak.com/NORAD/elements/cubesat.txt\n"
             "\n"
             "- name: ISS\n"
-            "  soure: web\n"
+            "  source: web\n"
             "  identifier: ISS (ZARYA)\n"
             "  websrc: http://www.celestrak.com/NORAD/elements/stations.txt\n"
         )

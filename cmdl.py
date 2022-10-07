@@ -142,16 +142,45 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     #
     # Load the environment
     #
-    services = cmdl_cfg.get("services", [
-        "porthouse.cmdl_env",
-    ])
+    services = [
+        {
+            "name": "rotator",
+            "class": "porthouse.gs.hardware.interface.RotatorInterface",
+            "params": {
+                "prefix": "uhf"
+            }
+        },
+        {
+            "name": "torator",
+            "class": "porthouse.gs.hardware.interface.RotatorInterface",
+            "params": {
+                "prefix": "sband"
+            }
+        },
+        {
+            "name": "tracker",
+            "class": "porthouse.gs.tracking.interface.OrbitTrackerInterface",
+        }
+    ]
 
     for service in services:
-        # Import the service module
-        #module = importlib.import_module(service)
-        #globals()[service] = module
+        """
+        Instantiate interface objects and add them to 'globals()'
+        """
+        package_name, class_name = service["class"].rsplit('.', 1)
+        params = service.get("params", {})
+        package = importlib.import_module(package_name)
+        class_object = getattr(package, class_name)
 
-        module = __import__(service, globals=globals())
+        import inspect
+        # Check that all the required arguments have been define and output understandable error if not
+        argspec = inspect.getfullargspec(class_object.__init__)
+        for j, arg in enumerate(argspec.args[1:]):
+            if j >= len(argspec.defaults or []) and arg not in params:
+                raise RuntimeError(f"Module {class_name!r} missing argument {arg!r}")
+
+        globals()[service["name"]] = class_object(**params)
+
 
 
     #

@@ -69,7 +69,7 @@ modules:
       connect: tcp://127.0.0.1:3001
 
 
-- modulee: porthouse.mcs.housekeeping.backend.Housekeeping
+- module: porthouse.mcs.housekeeping.backend.HousekeepingBackend
   params:
   - name: schema
     value: tutorial/housekeeping.json
