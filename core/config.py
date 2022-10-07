@@ -17,7 +17,7 @@ else:
     _dir = os.path.join(os.path.expanduser("~"), ".porthouse")
 
 
-def cfg_path(filename: Optional[str]="") -> str:
+def cfg_path(filename: Optional[str]=None) -> str:
     """
     Return a absolute path to config directory or a file located in config directory.
 
@@ -59,6 +59,8 @@ def create_template_config() -> None:
     Create template configuration directory.
     """
 
+    print(f"Creating configure in {_dir}")
+
     # Create folders
     try:
         os.mkdir(_dir)
@@ -73,7 +75,7 @@ def create_template_config() -> None:
         file.write(
             f"amqp_url: amqp://guest:guest@localhost:5672/\n"
             f"db_url: postgres://mcs:PASSWORD@localhost/foresail\n"
-            f"log_path: {os.path.join(dir, 'logs')}\n"
+            f"log_path: {os.path.join(_dir, 'logs')}\n"
             f"#hk_schema: \n"
         )
 
