@@ -7,6 +7,7 @@
 import json
 import uuid
 import logging
+from os.path import join as path_join
 
 import aiormq
 from porthouse.core.basemodule_async import BaseModule, rpc, queue, bind
@@ -20,12 +21,13 @@ class LogServer(BaseModule):
     LOG_LEVELS = ["debug", "info", "warning", "error", "critical"]
     HISTORY_SIZE = 500
 
-    def __init__(self, **kwarg):
+    def __init__(self, log_path: str, **kwarg):
         """
         Initialize module privates.
         """
         self.log_list = []
-        BaseModule.__init__(self, **kwarg)
+        self.log_path = log_path
+        BaseModule.__init__(self, log_path=log_path, **kwarg)
 
 
     def create_log_handlers(self, log_path, module_name):
@@ -38,9 +40,9 @@ class LogServer(BaseModule):
 
         if True:
             # File log handler
+            log_file = path_join(self.log_path, module_name + ".log")
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            file_handler = logging.handlers.RotatingFileHandler(module_name + ".log",
-                maxBytes=2e6, backupCount=5)
+            file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=2e6, backupCount=5)
             file_handler.setFormatter(formatter)
             self.log.addHandler(file_handler)
 
