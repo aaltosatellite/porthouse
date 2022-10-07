@@ -17,10 +17,11 @@ setuptools.setup(
     package_dir={ 'porthouse': '.' },
     python_requires='>=3.8',
     install_requires=[ # Minimal requirements
-        "amqp",
         "aiormq",
+        "amqp",  
         "skyfield",
-        "ptpython"
+        "ptpython",
+        "PyYAML",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",

@@ -64,7 +64,11 @@ Install the timescale as superuser
     > CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
 
 
+Install psycopg2
 
+.. code-block:: console
+
+    $ sudo apt install python3-psycopg2
 
 
 Creating tables
