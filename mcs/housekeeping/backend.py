@@ -8,23 +8,23 @@ from datetime import datetime
 import aiormq
 
 from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, queue, bind
-from .database import Database, DatabaseError
+from .database import HousekeepingDatabase, DatabaseError
 from ...core import config
 
 
 class HousekeepingBackend(BaseModule):
 
-    def __init__(self, hk_schema_path: str, db_url: str, **kwargs):
+    def __init__(self, schema_path: str, db_url: str, **kwargs):
         """
         Init the housekeeping backend
 
         Args:
-            hk_schema_path
+            schema_path
             db_url:
 
         """
         BaseModule.__init__(self, **kwargs)
-        self.db = HKDatabase(hk_schema_path, db_url)
+        self.db = HousekeepingDatabase(schema_path, db_url)
 
 
     @queue()
@@ -68,7 +68,7 @@ class HousekeepingBackend(BaseModule):
 
             # Push the housekeeping entry to database
             self.db.insert_subsystem_frame(subsystem,timestamp,source,metadata,values)
-        except HKDatabaseError as e:
+        except DatabaseError as e:
             self.log.error("Database error: %s", str(e))
         else:
             self.log.debug("Stored hk frame: %s", str(json_message)[:100])
@@ -102,7 +102,7 @@ class HousekeepingBackend(BaseModule):
                     raise RPCError(f"Request missing argument {arg!r}")
                 elif "unexpected" in str(e):
                     arg = str(e).split("'")[1]
-                    raise RPCError(f"Unknown argument {arg!}")
+                    raise RPCError(f"Unknown argument {arg!r}")
                 raise
 
 

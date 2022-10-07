@@ -121,7 +121,7 @@ class HousekeepingDatabase:
         if db_url is not None:
             self._db_connect(db_url)
 
-        self.subsystems = load_subsystems_as_dict(schema_path)
+        self.subsystems = load_subsystems(schema_path)
 
         if self.cursor is not None:
             for subsystem in self.subsystems.values():
