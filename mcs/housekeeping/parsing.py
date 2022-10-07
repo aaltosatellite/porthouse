@@ -16,9 +16,12 @@ _format_types = {"float":float, "integer":int, "string":str}
 # A hefty set of assertions to catch malignant housekeeping spec early.
 def check_data_field_correctness(key,name,formatt,raw,enum,calibration):
     try:
-        assert type(key) == type(name) == type(formatt) == type(raw) == str
 
-        assert  raw in _struct_map
+        assert isinstance(key, str)
+        assert isinstance(name, str)
+        assert isinstance(formatt, str)
+        assert isinstance(raw, str)
+        assert  raw in _struct_map.keys()
 
         kk = struct.unpack(_struct_map[raw], os.urandom(_lengths[raw]))[0]
         assert type(kk) in (int, float)
@@ -38,8 +41,8 @@ def check_data_field_correctness(key,name,formatt,raw,enum,calibration):
             #assert b4 in ([True]*len(enum), [False]*len(enum) )
 
         elif calibration is not None:
-            assert isinstance(calibration, list)
-            assert all([ c in (int, float) for c in calibration ])
+            pass # assert isinstance(calibration, list)
+            #assert all([ c in (int, float) for c in calibration ])
 
     except:
         raise ValueError("Housekeeping specification in housekeeping.json is off-standard and will not work.")

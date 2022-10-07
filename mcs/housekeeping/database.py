@@ -45,50 +45,7 @@ FMT2PSQL = {
 DatetimeTypes = Union[datetime, int, float, str]
 HousekeepingEntry = Dict[str, Any]
 
-#This is a rather ugly method in itself, but does its job.
-def check_hk_table_format_correctness(cursor: psycopg2.extensions.cursor, subsystem:Subsystem, table_name:str) -> bool:
 
-    static_columns = [
-        ('id',            'integer') ,
-        ('timestamp',     'timestamp without time zone') ,
-        ('source',        'character varying') ,
-        ('metadata',      'json') ,
-    ]
-
-
-    # Query the state of the table in database into a list of queried lines.
-    column_query = """SELECT column_name, data_type FROM  information_schema.columns
-                      WHERE table_name = '{}';""".format(table_name)
-    cursor.execute(column_query)
-    lines = []
-    qry_line = cursor.fetchone()
-    while not (qry_line is None):
-        lines.append(qry_line)
-        qry_line = cursor.fetchone()
-
-    # Check if there are "..._raw" fields in the database. If yes, then all table specific fields must have a _raw field
-    raws = True in [x[0].endswith("_raw") for x in lines]
-    n_cols_per_field = 1+(raws*1)
-
-    # All tables begin with columns: id,timestamp,source,metadata
-    for i in range(len(static_columns)):
-        if not lines[i] == static_columns[i]:
-            return False
-
-    # Assert the number of lines match.
-    if not len(lines) - len(static_columns) == (len(subsystem.fields) * n_cols_per_field):
-        return False
-
-    # Assert all the columns names and datatypes match
-    for i in range(len(subsystem.fields)):
-        field = subsystem.fields[i]
-        j = len(static_columns) + i * n_cols_per_field
-        if not (lines[j][0] == field.key) and (lines[j][1] == FMT2PSQL[field.format]):
-            return False
-        if raws:
-            if not (lines[j+1][0] == field.key+"_raw") and (lines[j+1][1] == RAW2PSQL[field.raw]):
-                return False
-    return True
 
 
 class HousekeepingDatabase:
@@ -127,23 +84,7 @@ class HousekeepingDatabase:
             for subsystem in self.subsystems.values():
                 if not check_table_exists(self.cursor, subsystem.key):
                     self._create_table(subsystem)
-
-        self.assert_table_structure()
-
-
-    def assert_table_structure(self):
-        ret = check_hk_table_format_correctness(self.cursor, self.subsystems["adcs"], "adcs")
-        if not ret:
-            raise DatabaseError("ADCS hk table structure is incorrect!")
-        ret = check_hk_table_format_correctness(self.cursor, self.subsystems["obc"], "obc")
-        if not ret:
-            raise DatabaseError("OBC hk table structure is incorrect!")
-        ret = check_hk_table_format_correctness(self.cursor, self.subsystems["uhf"], "uhf")
-        if not ret:
-            raise DatabaseError("UHF hk table structure is incorrect!")
-        ret = check_hk_table_format_correctness(self.cursor, self.subsystems["eps"], "eps")
-        if not ret:
-            raise DatabaseError("EPS hk table structure is incorrect!")
+                #self._validate_subsystem_table(subsystem)
 
 
     def _create_table(self, subsystem: Subsystem) -> None:
@@ -167,8 +108,7 @@ class HousekeepingDatabase:
 
             try:
                 raw_type = RAW2PSQL[field.raw]
-                #NOTE: enumerations do not have calibration but they
-                #need format
+                # NOTE: enumerations do not have calibration but they need format
                 if field.calibration or field.enum:
                     cal_type = FMT2PSQL[field.format]
                 else:
@@ -191,6 +131,49 @@ class HousekeepingDatabase:
             self.cursor.execute(stmt)
         except psycopg2.DatabaseError as e:
             print("WARNING:", str(e))
+
+
+    def _validate_subsystem_table(self, subsystem: Subsystem) -> None:
+        """
+        """
+
+        STATIC_COLUMNS = [
+            ('id',            'integer') ,
+            ('timestamp',     'timestamp without time zone') ,
+            ('source',        'character varying') ,
+            ('metadata',      'json') ,
+        ]
+
+        # Query a list of columns in the table
+        self.cursor.execute(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name={subsystem.key!r};")
+        columns = self.cursor.fetchall()
+
+        # Check if there are "..._raw" fields in the database. If yes, then all table specific fields must have a _raw field
+        include_raws = any(column_name.endswith("_raw") for column_name, _ in columns)
+
+        # All tables begin with columns: id, timestamp, source, metadata
+        for i, field_define in enumerate(STATIC_COLUMNS):
+            if columns[i] != field_define:
+                raise RuntimeError(f"Missing field {field_define[0]}")
+
+        # Assert the number of columns match.
+        if len(columns) - len(STATIC_COLUMNS) != len(subsystem.fields) * (1 + include_raws):
+            raise RuntimeError(f"Column count does not match for table {subsystem.key!r}")
+
+        # Assert all the columns names and datatypes match
+        for i, field in enumerate(subsystem.fields):
+            j = len(STATIC_COLUMNS) + i * (1 + include_raws)
+
+            if columns[j][0] != field.key:
+                raise RuntimeError(f"{columns[j][0]} != {field.key}")
+            if columns[j][1] != FMT2PSQL[field.format]:
+                raise RuntimeError(f"{field.key}: {columns[j][1]} != {FMT2PSQL[field.format]}")
+
+            if include_raws:
+                if columns[j+1][0] != field.key+"_raw":
+                    raise RuntimeError(f"{columns[j+1][0]} != {field.key}_raw")
+                if columns[j+1][1] != RAW2PSQL[field.raw]:
+                    raise RuntimeError(f"{field.key}_raw: {columns[j+1][1]} != {RAW2PSQL[field.raw]}")
 
 
     def _db_connect(self, db_url: str) -> None:
