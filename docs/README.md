@@ -11,3 +11,10 @@ To compile documentation locally type following magic words:
 $ pip3 install sphinx sphinxemoji furo
 $ make html
 ```
+
+# Open documentation
+
+```
+$ <your_browser> _build/html/index.html
+```
+
