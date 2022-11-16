@@ -102,7 +102,7 @@ class PacketStorage(BaseModule):
         # For each link definition string
         for link_params in links:
 
-            # Parse link confguration
+            # Parse link configuration
             try:
 
                 link_type = link_params.pop("type")
@@ -164,7 +164,7 @@ class PacketStorage(BaseModule):
                 self.log.error(f"Malformed link configuration. ValueError {e}: {link_params!r}", exc_info=True)
 
 
-    def parse_json_frame_to_db(self, msg, addtional_params):
+    def parse_json_frame_to_db(self, msg, additional_params):
         """
         Parse JSON frame ready to database
         """
@@ -180,7 +180,7 @@ class PacketStorage(BaseModule):
             packet["data"] = bytes.fromhex(packet["data"])
 
             # Merge packet and additional fields dict
-            pp = addtional_params.copy()
+            pp = additional_params.copy()
             pp.update(packet)
             packet = pp
 
@@ -208,21 +208,21 @@ class PacketStorage(BaseModule):
         self.parse_json_frame_to_db(message.body, additional_data)
 
 
-    async def zmq_data_receiver(self, sock, additonal_data, **kwargs):
+    async def zmq_data_receiver(self, sock, additional_data, **kwargs):
         """
         Async data receiver for ZMQ sockets
         """
         while True:
             packet = await sock.recv()
-            self.parse_json_frame_to_db(packet, additonal_data)
+            self.parse_json_frame_to_db(packet, additional_data)
 
 
 if __name__ == "__main__":
     PacketStorage(
         links = [
-            { "satellite": "Foresail-1", "type": "zmq", "bind": "tcp://127.0.0.1:7600" },
-            { "satellite": "Foresail-1", "packet_type": "telecommand", "type": "amqp", "exchange": "foresail1", "routing_key": "*.tc" },
-            { "satellite": "Foresail-1", "packet_type": "telemetry", "type": "amqp", "exchange": "foresail1", "routing_key": "*.tm" },
+            { "satellite": "Foresail-1p", "type": "zmq", "bind": "tcp://127.0.0.1:7600" },
+            { "satellite": "Foresail-1p", "packet_type": "telecommand", "type": "amqp", "exchange": "foresail1p", "routing_key": "*.tc" },
+            { "satellite": "Foresail-1p", "packet_type": "telemetry", "type": "amqp", "exchange": "foresail1p", "routing_key": "*.tm" },
         ],
         db_url="postgres://mcs:PASSWORD@localhost/foresail",
         amqp_url="amqp://guest:guest@localhost:5672/",

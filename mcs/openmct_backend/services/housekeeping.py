@@ -7,7 +7,7 @@ import asyncio
 import json
 from typing import Dict, List, Optional, Union
 
-from porthouse.mcs.housekeeping.database_api import Database, DatabaseError
+from porthouse.mcs.housekeeping.database import HousekeepingDatabase, DatabaseError
 from ..utils import WebRPCError, iso_timestamp_to_millis, datetime_to_millis, millis_to_datetime
 
 class HousekeepingService:

@@ -14,7 +14,7 @@ from ...core import config
 
 class HousekeepingBackend(BaseModule):
 
-    def __init__(self, schema_path: str, db_url: str, **kwargs):
+    def __init__(self, hk_schema_path: str, db_url: str, **kwargs):
         """
         Init the housekeeping backend
 
@@ -24,7 +24,7 @@ class HousekeepingBackend(BaseModule):
 
         """
         BaseModule.__init__(self, **kwargs)
-        self.db = HousekeepingDatabase(schema_path, db_url)
+        self.db = HousekeepingDatabase(hk_schema_path, db_url)
 
 
     @queue()

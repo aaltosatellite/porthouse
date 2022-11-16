@@ -7,6 +7,7 @@ import sys
 import requests
 import re, json
 import datetime
+import time
 
 
 """
@@ -30,7 +31,7 @@ def slack_announce_observation(obs, total_frames, total_bytes):
 
     channel.basic_publish(msg.dumps({
         "msg": txt
-    }), exchange="slack", routing_key="announce.foresail1")
+    }), exchange="slack", routing_key="announce.foresail1p")
 
 
 def broadcast_frame(timestamp, data, obs_id):

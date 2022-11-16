@@ -30,7 +30,7 @@ from porthouse.core.config import cfg_path
 from porthouse.core.frame import Frame
 
 import skylink
-from foresail1.pus import Telemetry
+from foresail1p.commanding.pus import Telemetry
 
 
 """

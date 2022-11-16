@@ -19,7 +19,7 @@ parser.add_argument('--db', dest="db_url",
     help="PostgreSQL database URL. If not given environment variable MCC_DB_ACCESS is used.")
 
 # Filters
-parser.add_argument('--satellite', default="foresail1",
+parser.add_argument('--satellite', default="foresail1p",
     help="Filter telemetry packets by the satellite identifier/name")
 parser.add_argument('--type', dest="packet_type", default="telemetry",
     help="Filter telemetry packets by packet type")
@@ -104,7 +104,7 @@ for packet in db.cursor.fetchall():
 
     if not args.dry_run:
         msg = amqp.basic_message.Message(body=json.dumps(tm_packet))
-        channel.basic_publish(msg, exchange='foresail1', routing_key=routing_key)
+        channel.basic_publish(msg, exchange='foresail1p', routing_key=routing_key)
         time.sleep(0.1)
 
 

@@ -119,13 +119,13 @@ class PacketRouter(BaseModule):
         for endpoint_params in endpoints:
             endpoint_name = endpoint_params.pop("name")
 
-            # Parse endpoint confguration
+            # Parse endpoint configuration
             try:
                 # Get the endpoint class instance
                 endpoint_type = endpoint_params.pop('type')
-                endpoint_class = self.endpoint_factors.pop(endpoint_type, None)
+                endpoint_class = self.endpoint_factors.get(endpoint_type, None)
                 if endpoint_class is None:
-                    self.log.warning(f"Unknwon endpoint type {endpoint_type}")
+                    self.log.warning(f"Unknown endpoint type {endpoint_type}")
                     continue
 
                 self.log.debug("Creating new endpoint '%s' (type: %s)", endpoint_name, endpoint_type)
@@ -168,14 +168,14 @@ class PacketRouter(BaseModule):
         # For each link definition string
         for route_def in routes:
 
-            # Parse link paramater string
+            # Parse link parameter string
             try:
                 endpoint_a, endpoint_b = [ params.strip() for params in route_def.split(">") ]
             except:
                 self.log.error(f"Malformed route configuration: {route_def!r}")
                 continue
 
-            # Parse link confguration
+            # Parse link configuration
             self.create_route(endpoint_a, endpoint_b)
 
 
@@ -285,23 +285,23 @@ if __name__ == "__main__":
             "formatter": "router_formatter_raw.raw_to_json"
         },
         {
-            "name": "foresail1_tc",
+            "name": "foresail1p_tc",
             "type": "amqp-in",
             "packet_type": "telecommand",
-            "exchange": "foresail1",
+            "exchange": "foresail1p",
             "routing_key": "*.tc"
         },
         {
-            "name": "foresail1_tm",
+            "name": "foresail1p_tm",
             "type": "amqp-out",
             "packet_type": "telemetry",
-            "exchange": "foresail1", 
+            "exchange": "foresail1p",
             "routing_key": "*.tm"
         }
         ],
         routes= [
-            "foresail1_tc > uplink",
-            "downlink > foresail1_tm",
+            "foresail1p_tc > uplink",
+            "downlink > foresail1p_tm",
         ],
         amqp_url="amqp://guest:guest@localhost:5672/",
         debug=True
