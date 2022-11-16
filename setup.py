@@ -22,6 +22,7 @@ setuptools.setup(
         "skyfield",
         "ptpython",
         "PyYAML",
+        "filelock",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",

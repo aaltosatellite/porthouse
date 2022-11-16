@@ -277,7 +277,7 @@ if __name__ == "__main__":
             "formatter": "router_formatter_raw.json_to_raw"
         },
         {
-            "name:" "downlink",
+            "name": "downlink",
             "type": "zmq-sub",
             "connect": "tcp://127.0.0.1:52001",
             "packet_type": "raw_tm",
