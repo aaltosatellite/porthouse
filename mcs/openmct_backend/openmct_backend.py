@@ -58,7 +58,7 @@ class OpenMCTBackend(BaseModule):
         self.clients: Set[OpenMCTProtocol] = set()
 
         self.services = {
-            "housekeeping": HousekeepingService(self, db_url, "fs1", hk_schema),
+            "housekeeping": HousekeepingService(self, db_url, "fs1p", hk_schema),
             "system": SystemService(self),
             "events": EventsService(self),
             "tracking": TrackingService(self)

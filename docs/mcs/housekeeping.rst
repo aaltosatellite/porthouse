@@ -9,31 +9,48 @@ Housekeeping
 Installing PostgreSQL and Timescale
 --------------------------------
 
-Add timescale to apt package manager
+New instructions.
+
+Go to TimescaleDB for installation instructions:
+https://docs.timescale.com/install/latest/self-hosted/installation-debian/
+
+Briefly, install TimescaleDB and PostgreSQL:
 
 .. code-block:: console
 
-    $ sudo add-apt-repository ppa:timescale/timescaledb-ppa
+    $ sudo apt install gnupg postgresql-common apt-transport-https lsb-release wget
+    $ sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
+    $ sudo echo "deb https://packagecloud.io/timescale/timescaledb/ubuntu/ $(lsb_release -c -s) main" | sudo tee /etc/apt/sources.list.d/timescaledb.list
+    $ sudo wget --quiet -O - https://packagecloud.io/timescale/timescaledb/gpgkey | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/timescaledb.gpg
+    $ sudo apt update
+    $ sudo apt install timescaledb-2-postgresql-14
 
-If you have postgres already installed, check its version by typing:
+Next install psql for command-line use
 
 .. code-block:: console
 
-    $ psql --version
-
-If yes install only the corresponding timescale plugin for Postgres.
-
-.. code-block:: console
-
-    $ sudo apt install postgresql-12
-    $ sudo apt install timescaledb-postgresql-12
+    $ sudo apt-get update
+    $ sudo apt-get install postgresql-client
 
 Setup the Timescale plugin and restart PostgreSQL server
 
 .. code-block:: console
 
-    $ sudo timescaledb-tune
+    $ sudo timescaledb-tune -pg-version 14 -yes
     $ sudo service postgresql restart
+
+Now PostgreSQL and TimescaleDB should be installed.
+
+.. TODO::
+    See if these are necessary.
+    (Might need this command below for access to postgresql.conf, to add timescaledb to preloaded libraries.)
+    .. code-block:: console
+        $ sudo chown postgres:root /etc/postgresql/14/main/*
+
+    (Now maybe restart the service, after using timescaledb-tune)
+    .. code-block:: console
+        $ systemctl restart postgresql
+
 
 
 Creating a database
@@ -47,7 +64,6 @@ Create new user for database access
     <type a good password here>   # PASSWORD is used in the default configuration :D
 
 Create new database (mcs user is the database owner user)
-
 .. code-block:: console
 
     $ sudo -u postgres createdb "porthouse" -O mcs
