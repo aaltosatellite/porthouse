@@ -19,7 +19,7 @@ class HousekeepingService:
         self.hk_schema = hk_schema
         self.satellite = satellite
         self.server = server
-        self.db = Database(hk_schema, db_url)
+        self.db = HousekeepingDatabase(hk_schema, db_url)
 
 
     async def rpc_command(self, client: OpenMCTProtocol, method: str, params: Optional[dict]):

@@ -50,7 +50,7 @@ class ZMQ_Subscriber_Endpoint:
         # Create socket and bind/connect it
         self._sock = self.m.zmq_ctx.socket(zmq.SUB)
         if self._connect is not None:
-            self.sock.connect(self._connect)
+            self._sock.connect(self._connect)
         elif self._bind is not None:
             self._sock.bind(self._bind)
         else:
@@ -97,7 +97,8 @@ class ZMQ_Publisher_Endpoint:
     def __init__(self, m,
             bind: Optional[str]=None,
             connect: Optional[str]=None,
-            multipart: bool=False
+            multipart: bool=False,
+            **kwargs
         ):
         """
         """
@@ -142,7 +143,7 @@ class Outgoing_AMQP_Endpoint:
     """
     type_identifier = "amqp-out"
 
-    def __init__(self, m, exchange: str, routing_key: str):
+    def __init__(self, m, exchange: str, routing_key: str, **kwargs):
         """
         Args:
             exchange:
@@ -164,7 +165,7 @@ class Incoming_AMQP_Endpoint:
     """
     type_identifier = "amqp-in"
 
-    def __init__(self, m, exchange: str, routing_key: str):
+    def __init__(self, m, exchange: str, routing_key: str, **kwargs):
         """
         """
         self.m = m
@@ -194,7 +195,7 @@ class Outgoing_UDP_Endpoint:
         UCP Endpoint for the packet router
     """
     type_identifier = "udp-out"
-    def __init__(self, m, connect: str):
+    def __init__(self, m, connect: str, **kwargs):
         self.m = m
         self._host, self._port = connect.split(":")
         self._port = int(self._port)
@@ -220,7 +221,7 @@ class Incoming_UDPEndpoint:
         UDP Endpoint for the packet router
     """
     type_identifier = "udp-in"
-    def __init__(self, m, bind: str):
+    def __init__(self, m, bind: str, **kwargs):
         self.m = m
         self._host, self._port = bind.split(":")
         self._sock: Optional[socket.socket] = None
@@ -252,7 +253,8 @@ class TCPEndpoint:
 
     def __init__(self,
             bind: Optional[str]=None,
-            connect: Optional[str]=None
+            connect: Optional[str]=None,
+            **kwargs
         ):
         """
 
