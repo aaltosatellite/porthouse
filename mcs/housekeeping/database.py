@@ -539,8 +539,10 @@ if __name__ == "__main__":
     import sys
     from porthouse.core.config import load_globals
     cfg = load_globals()
-    HousekeepingDatabase(
-        db_url=cfg["db_url"],
-        schema_path=cfg["hk_schema"],
-        create_tables=("--create_tables" in sys.argv)
-    )
+    if (len(sys.argv) == 3) and (sys.argv[1] == "--create_tables"):
+        HousekeepingDatabase(
+            db_url=cfg["db_url"],
+            schema_path=sys.argv[2],
+            create_tables=True
+        )
+        print("Done.")

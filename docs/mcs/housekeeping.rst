@@ -87,8 +87,4 @@ Install psycopg2
     $ sudo apt install python3-psycopg2
 
 
-Creating tables
-
-.. code-block:: console
-
-    $ python3 -m porthouse.mcs.housekeeping.database --create_tables
+Creating tables for missions is done with a mission specific configuration.
