@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import json
 import struct
-from typing import Any, Dict, List, NamedTuple, Union
+from typing import Any, Dict, List, NamedTuple, Union, Optional
 
 
 _lengths = {"float":4, "uint8":1, "uint16":2, "uint32":4, "uint64":8, "int8":1, "int16":2, "int32":4, }
@@ -14,7 +14,7 @@ _format_types = {"float":float, "integer":int, "string":str}
 
 
 # A hefty set of assertions to catch malignant housekeeping spec early.
-def check_data_field_correctness(key,name,formatt,raw,enum,calibration):
+def check_data_field_correctness(key,name,formatt,raw,enumeration,calibration):
     try:
 
         assert isinstance(key, str)
@@ -29,13 +29,13 @@ def check_data_field_correctness(key,name,formatt,raw,enum,calibration):
         assert formatt in _format_types
 
 
-        if enum is not None:
+        if enumeration is not None:
 
-            assert isinstance(enum, list)
+            assert isinstance(enumeration, list)
             # Must have 'string' field
-            assert all([ ("string" in e and isinstance(e["string"], str)) for e in enum ])
+            assert all([ ("string" in e and isinstance(e["string"], str)) for e in enumeration ])
             # Must have 'value' field
-            assert all([ ("value" in e and isinstance(e["value"], int)) for e in enum ])
+            assert all([ ("value" in e and isinstance(e["value"], int)) for e in enumeration ])
 
             #b4 = [("mask" in e) for e in enum]
             #assert b4 in ([True]*len(enum), [False]*len(enum) )
@@ -65,10 +65,12 @@ class Subsystem:
         self.fields = fields
 
     def get_total_length(self):
-        return sum( [k.leng for k in self.fields] )
+        return sum( [k.length for k in self.fields] )
 
     def parse_blob_for_printing(self, data: bytes) -> Dict[str, Any]:
         """
+        OBSOLETE: eps.get_housekeeping() handles this now if verbose=True
+        Not used currently, but there was a plan to use this for printing the units as well.
         """
         if not isinstance(data, bytes):
             raise ValueError("'data' is not bytes")
@@ -78,9 +80,12 @@ class Subsystem:
         parse_output = dict()
         cursor = 0
         for field in self.fields:
-            fmtd, raw = field.parse(data, cursor)
-            cursor += field.leng
-            parse_output[field.key] = fmtd
+            fmtd, raw = field.parse(data, cursor)   # returns the calibrated and raw values
+            cursor += field.length
+            if hasattr(field, "units"):
+                parse_output[field.key] = (fmtd, field.units)
+            else:
+                parse_output[field.key] = (fmtd, "N/A")
         return parse_output
 
 
@@ -95,9 +100,9 @@ class Subsystem:
         parse_output = dict()
         cursor = 0
         for field in self.fields:
-            fmtd, raw = field.parse(data, cursor)
-            cursor += field.leng
-            parse_output[field.key] = raw
+            fmtd, raw = field.parse(data, cursor)   # returns the calibrated and raw values
+            cursor += field.length
+            parse_output[field.key] = fmtd      # better name would be calibrated, not formatted
         return parse_output
 
 
@@ -130,19 +135,17 @@ class Field:
     name: str
     format: str
     raw: str
-    #enum: Optional[]
-    #calibration: Optional[]
+    units: Optional[str]
+    enumeration: Optional[int]
+    calibration: Optional[int]
     length: int
 
-    def __init__(self, key, name, formatt, raw, enum=None, calibration=None):
-        check_data_field_correctness(key,name,formatt,raw,enum,calibration)
-        self.key = key
-        self.name = name
-        self.format = formatt
-        self.raw = raw
-        self.enum = enum
-        self.calibration = calibration
-        self.leng = _lengths[raw]
+    def __init__(self, **kwargs):
+        self.__dict__.update( kwargs )
+        #check_data_field_correctness(key,name,format,raw,enumeration,calibration)
+    @property
+    def length(self):
+        return _lengths[self.raw]
 
 
     def parse(self, data: bytes, cursor: int):
@@ -155,27 +158,29 @@ class Field:
         (str, [str, ...])                 //enum_name:  [name]   state name list
         """
 
-        if self.leng > (len(data) - cursor):
+        if self.length > (len(data) - cursor):
             raise ValueError(f"Unexpected end of bytes string. {self.key:=} {cursor:=}")
 
-        d = data[cursor:cursor+self.leng]
+        d = data[cursor:cursor+self.length]
         parsed = struct.unpack(_struct_map[self.raw], d)[0]
+        parsed_raw = parsed
 
-        if self.calibration:
+        if hasattr(self, "calibration"):
             parsed = self.calibrate(parsed)
 
-        if self.enum:
+        if hasattr(self, "enumeration"):
             enum_return = self.parse_enum(parsed)
-            return enum_return, parsed
+            return enum_return, parsed_raw
 
         formatted_value = _format_types[self.format](parsed)
-        return formatted_value, formatted_value
+             # calibrated_val,  raw_val
+        return formatted_value, parsed_raw
 
 
     def calibrate(self, raw: Union[int, float]) -> float:
         """
         """
-        if self.calibration is None:
+        if not(hasattr(self, "calibration")):
             return raw
 
         return raw * self.calibration[0] + self.calibration[1]
@@ -185,11 +190,11 @@ class Field:
     def parse_enum(self, raw: int) -> str:
         """
         """
-        if self.enum is None:
+        if not(hasattr(self, "enumeration")):
             return ""
         return " | ".join([
             elem["string"]
-            for elem in self.enum
+            for elem in self.enumeration
             if raw & elem.get("mask", 0xFFFFFFFF) == elem["value"]
         ])
 
@@ -214,14 +219,6 @@ def load_subsystems(schema_path: str) -> Dict[str, Subsystem]:
         fields_dict = subsystem["fields"]
         field_list = []
         for fld in fields_dict:
-            ky = fld["key"]
-            nm = fld["name"]
-            fm = fld["format"]
-            rw = fld["raw"]
-            enumm = fld.get("enumeration")
-            calib = fld.get("calibration")
-            if "enumerationn" in fld:
-                enumm = fld["enumerationn"]
-            field_list.append(Field(ky,nm,fm,rw,enumm,calib))
+            field_list.append(Field(**fld))
         hkss[subsystem["key"]] = Subsystem(subsystem_key, subsystem_name, field_list)
     return hkss
