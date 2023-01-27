@@ -7,7 +7,7 @@ import math
 import time
 import asyncio
 import yaml
-import aiormq.types
+import aiormq.abc
 from typing import Dict, List, NoReturn, Optional, Tuple, NamedTuple
 
 from porthouse.core.config import cfg_path
@@ -67,7 +67,7 @@ class PointTracker(BaseModule):
 
     @queue()
     #@bind("transport", "downlink")
-    async def received_aprs_frame(self, msg: aiormq.types.DeliveredMessage) -> None:
+    async def received_aprs_frame(self, msg: aiormq.abc.DeliveredMessage) -> None:
         """
         New frame received parse position data.
         """
@@ -90,7 +90,7 @@ class PointTracker(BaseModule):
 
     @queue()
     @bind("tracking", "new_position")
-    async def new_target_position(self, msg: aiormq.types.DeliveredMessage) -> None:
+    async def new_target_position(self, msg: aiormq.abc.DeliveredMessage) -> None:
         """
         """
 

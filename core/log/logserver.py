@@ -49,7 +49,7 @@ class LogServer(BaseModule):
 
     @queue("log_recorder")  # Name the queue so it wont be recreated everytime
     @bind(exchange="log", routing_key="*")
-    async def log_event(self, msg: aiormq.types.DeliveredMessage) -> None:
+    async def log_event(self, msg: aiormq.abc.DeliveredMessage) -> None:
         """
         Store log entry to cache
         """

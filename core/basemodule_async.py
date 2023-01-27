@@ -13,7 +13,7 @@ import logging.handlers
 from typing import Optional
 from .config import load_globals
 import aiormq
-import aiormq.types
+import aiormq.abc
 
 from .log.amqp_handler_async import AMQPLogHandler
 
@@ -237,7 +237,7 @@ class BaseModule:
             self.log.setLevel(logging.DEBUG)
 
 
-    async def send_rpc_response(self, request: aiormq.types.DeliveredMessage, data: dict):
+    async def send_rpc_response(self, request: aiormq.abc.DeliveredMessage, data: dict):
         """
         Helper function to send a response to incoming RPC query.
 
@@ -271,7 +271,7 @@ class BaseModule:
         #await request.channel.basic_ack(request.delivery.delivery_tag)
 
 
-    async def __rpc_response(self, message: aiormq.types.DeliveredMessage):
+    async def __rpc_response(self, message: aiormq.abc.DeliveredMessage):
 
         """
         Callback function to handle received reponse for an outgoing RPC request.

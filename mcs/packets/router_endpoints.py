@@ -185,7 +185,7 @@ class Incoming_AMQP_Endpoint:
         await self.m.channel.queue_delete(self._queue_name)
         self._queue_name = None
 
-    async def receiver_callback(self, pkt: aiormq.types.DeliveredMessage) -> None:
+    async def receiver_callback(self, pkt: aiormq.abc.DeliveredMessage) -> None:
         """ """
         self.m.route_frame(self, pkt.body)
 

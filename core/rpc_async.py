@@ -10,7 +10,7 @@ from concurrent.futures import TimeoutError as AsyncIOTimeoutError
 from typing import Tuple, Optional, Dict, Any
 
 import aiormq
-import aiormq.types
+import aiormq.abc
 
 from .config import load_globals
 from .basemodule_async import RPCRequestError, RPCRequestTimeout
@@ -43,7 +43,7 @@ async def amqp_connect(
     return connection, channel
 
 def __rpc_response(
-        message: aiormq.types.DeliveredMessage
+        message: aiormq.abc.DeliveredMessage
     ) -> None:
     """
     Callback function to handle received reponse for an outgoing RPC request.

@@ -29,7 +29,7 @@ class HousekeepingBackend(BaseModule):
 
     @queue()
     @bind(exchange='housekeeping', routing_key='store', prefixed=True)
-    async def housekeeping_store_callback(self, msg: aiormq.types.DeliveredMessage):
+    async def housekeeping_store_callback(self, msg: aiormq.abc.DeliveredMessage):
         """
         Callback to store new data to database
         """

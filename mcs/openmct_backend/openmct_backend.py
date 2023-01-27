@@ -153,7 +153,7 @@ class OpenMCTBackend(BaseModule):
     @bind(exchange="events", routing_key="fs1.update")
     @bind(exchange="log", routing_key="*")
     @bind(exchange="housekeeping", routing_key="fs1.update")
-    async def handle_message(self, msg: aiormq.types.DeliveredMessage) -> None:
+    async def handle_message(self, msg: aiormq.abc.DeliveredMessage) -> None:
         """
         Handle message from the AMQP
 

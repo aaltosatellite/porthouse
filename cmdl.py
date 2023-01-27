@@ -77,7 +77,7 @@ async def logger() -> None:
         "critical": "ansibrightred",
     }
 
-    async def print_log_entry(message: aiormq.types.DeliveredMessage):
+    async def print_log_entry(message: aiormq.abc.DeliveredMessage):
         """
         Print received message to stdout.
         """
