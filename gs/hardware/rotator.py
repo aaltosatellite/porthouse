@@ -7,10 +7,13 @@ import time
 import json
 import asyncio
 
+import aiormq.abc
+
 from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, queue, bind
 
 from .controllerbox import ControllerBox, ControllerBoxError
 from .hamlib import rotctl
+from .dummyrotctl import DummyRotatorController
 
 
 class Rotator(BaseModule):
@@ -22,7 +25,7 @@ class Rotator(BaseModule):
     # affects how often hardware functions are called
     position_update_interval = 1.0
 
-    def __init__(self, driver, address, **kwarg):
+    def __init__(self, driver, address, tracking_enabled=False, **kwarg):
         """
         Initialize rotator module
 
@@ -33,7 +36,8 @@ class Rotator(BaseModule):
         BaseModule.__init__(self, **kwarg)
 
         # TOGGLES between manual rotator use or tracker-controlled automatic mode.
-        self.tracking_enabled = False
+        self.tracking_enabled = tracking_enabled
+        self.log.debug("Tracking enabled: %s" % (self.tracking_enabled,))
 
         # Default threshold, only move while position difference is bigger
         # than threshold
@@ -66,6 +70,8 @@ class Rotator(BaseModule):
             self.rotator = rotctl(address)
         elif driver == "aalto":
             self.rotator = ControllerBox(address)
+        elif driver == "dummy":
+            self.rotator = DummyRotatorController(address)
         else:
             raise ValueError(f"Unknown rotator driver {driver}")
 
@@ -413,16 +419,15 @@ class Rotator(BaseModule):
 
         elif request_name == "rpc.get_dutycycle_range":
             ########### Actual call of rotator command ###########
-            ret = self.rotator._get_dutycycle_range()
+            ret = self.rotator.get_dutycycle_range()
             return {"dutycycle_range": ret}
 
         elif request_name == "rpc.set_dutycycle_range":
             ########### Actual call of rotator command ###########
-            self.rotator._set_dutycycle_range(float(request_data["az_min"]),
-                                                    float(request_data["az_max"]),
-                                                    float(request_data["el_min"]),
-                                                    float(request_data["el_max"]))
-
+            self.rotator.set_dutycycle_range(int(request_data["az_min"]),
+                                             int(request_data["az_max"]),
+                                             int(request_data["el_min"]),
+                                             int(request_data["el_max"]))
 
         elif request_name == "rpc.get_status":
             """
@@ -434,7 +439,7 @@ class Rotator(BaseModule):
     @queue()
     @bind(exchange="event", routing_key="*")
     @bind(exchange="tracking", routing_key="target.position")
-    def tracking_event(self, message):
+    def tracking_event(self, message: aiormq.abc.DeliveredMessage):
         """
             Automatic events for tracking
         """
@@ -450,7 +455,7 @@ class Rotator(BaseModule):
                            e.args[0], message.body)
             return
 
-        routing_key = message.delivery_info['routing_key']
+        routing_key = message.delivery['routing_key']
         self.log.debug("tracking_event: %s: %r", routing_key, event_body)
 
         if routing_key == "target.position":
@@ -480,9 +485,9 @@ class Rotator(BaseModule):
             aos_el = self.threshold
 
             # Make sure azimuths are in range [0, 360]
-            aos_az = event_body["aos_az"] % 360
-            max_az = event_body["maximum_az"] % 360
-            los_az = event_body["los_az"] % 360
+            aos_az = event_body["az_aos"] % 360
+            max_az = event_body["az_max"] % 360
+            los_az = event_body["az_los"] % 360
 
             ### Might be needed to adapt this when using with different GS ###
             # Over the north-west to east or vice versa or
@@ -503,7 +508,7 @@ class Rotator(BaseModule):
             try:
                 # Speed up the azimuth rotation speed
                 self.log.info("DEBUG raise duty cycle up to 100")
-                self.rotator._set_dutycycle_range(az_duty_max=100)
+                self.rotator.set_dutycycle_range(az_duty_max=100)
 
                 # Needs to go to position defined by full [-90, +450] angle
                 self.set_target_position(initial_target, shortest_path=False)
@@ -520,7 +525,7 @@ class Rotator(BaseModule):
         elif routing_key == "aos":
             # Set to default rotation speed
             self.log.info("DEBUG set duty cycle back to 60")
-            self.rotator._set_dutycycle_range(az_duty_max=60)
+            self.rotator.set_dutycycle_range(az_duty_max=60)
 
         elif routing_key == "los":
             """
@@ -537,12 +542,12 @@ class Rotator(BaseModule):
                 return
 
 
-
 if __name__ == "__main__":
     Rotator(
-        driver="hamlib",
+        driver="aalto",
         address="127.0.0.1:4533",
         amqp_url="amqp://guest:guest@localhost:5672/",
         prefix="uhf",
+        tracking_enabled=True,
         debug=True
     ).run()
