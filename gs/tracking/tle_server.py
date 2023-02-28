@@ -16,7 +16,7 @@
     - Add JSON-OMM support
 
     Dependencies:
-    $ pip3 install requests-async
+    $ pip3 install httpx
 """
 
 import time
@@ -27,7 +27,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional, NoReturn
 
 import skyfield.api as skyfield
-import requests_async as requests
+import httpx
 
 from porthouse.core.config import cfg_path
 from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, queue, bind
@@ -153,7 +153,8 @@ class TLEServer(BaseModule):
                             "tle1": tle["tle1"],
                             "tle2": tle["tle2"],
                         }
-                raise RPCError("No such satellite")
+                raise RPCError("Could not find satellite '%s' in  %s" % (
+                    request_data["satellite"], [t['name'] for t in self.tle_data]))
 
             # Return all TLE lines
             return {
@@ -225,9 +226,10 @@ class TLEServer(BaseModule):
                     else:
                         try:
                             self.log.debug("Downloading %s", weburl)
-                            response = await requests.get(weburl, timeout=3)
+                            async with httpx.AsyncClient() as client:
+                                response = await client.get(weburl, timeout=3)
 
-                        except requests.RequestException as e:
+                        except httpx.RequestException as e:
                             self.log.error("Failed to download file %r: %s", weburl, e, exc_info=True)
                             continue
 
@@ -272,9 +274,10 @@ class TLEServer(BaseModule):
 
                     if auth_cookies is None:
                         # Login to space-track.org
-                        r = await requests.post("https://www.space-track.org/ajaxauth/login",
-                            data=self.credentials,
-                            timeout=3)
+                        async with httpx.AsyncClient() as client:
+                            r = await client.post("https://www.space-track.org/ajaxauth/login",
+                                                  data=self.credentials,
+                                                  timeout=3)
                         auth_cookies = r.cookies
 
                     # Request latest TLE entry for given NORAD ID
@@ -282,9 +285,10 @@ class TLEServer(BaseModule):
                         "NORAD_CAT_ID/{id}/orderby/EPOCH%20desc/limit/1/format/tle"
 
                     try:
-                        r = await requests.get(URL.format(id=satellite["norad_id"]),
-                            cookies=auth_cookies, timeout=3)
-                    except requests.RequestException as e:
+                        async with httpx.AsyncClient() as client:
+                            r = await client.get(URL.format(id=satellite["norad_id"]),
+                                                 cookies=auth_cookies, timeout=3)
+                    except httpx.RequestException as e:
                         self.log.error("Failed to query TLE from space-track.org: %r", e)
                         continue
 

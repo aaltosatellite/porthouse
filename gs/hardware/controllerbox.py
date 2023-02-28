@@ -6,7 +6,7 @@ import asyncio
 import time
 import serial # serial_asyncio
 
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union
 
 
 class RotatorError(Exception):
@@ -111,15 +111,9 @@ class ControllerBox:
                 f"Error while reading message from controller box: {e}"
             ) from e
 
-        try:
-            # Convert to ascii
-            rsp = rsp.decode("ascii").strip()
-        except Exception as e: # Just crap on the UART line
-            return b""
-
         # Raise error if the line starts with "Error"
-        if rsp.startswith("Error: "):
-            raise ControllerBoxError(rsp[7:])
+        if rsp.startswith(b"Error: "):
+            raise ControllerBoxError(str(rsp[7:]))
 
         return rsp
 
@@ -135,12 +129,11 @@ class ControllerBox:
             `ControllerBoxError` - in case the controller box encoutered an error.
         """
 
-        if isinstance(cmd, str):
-            cmd += '\n' # Add newline
-            cmd = cmd.decode("ascii")
-
-        elif not isinstance(cmd, bytes):
+        if not isinstance(cmd, bytes):
             raise ValueError("Wrong input format")
+
+        if cmd[-1] != b"\n":
+            cmd += b"\n"
 
         try:
             ret = self.ser.write(cmd)
@@ -161,7 +154,7 @@ class ControllerBox:
         """
         Stop rotator movement
         """
-        self._write_command("S")
+        self._write_command(b"S")
         self._read_response()
 
 
@@ -173,7 +166,7 @@ class ControllerBox:
             A tuple containing current azimuth and elevation.
         """
 
-        self._write_command("P -s")
+        self._write_command(b"P -s")
         self.current_position = ControllerBox._parse_position_output(self._read_response())
 
         self.err_cnt = 0 # Reset error counter
@@ -211,11 +204,11 @@ class ControllerBox:
             raise ControllerBoxError("Elevation value outside allowed limits.")
 
         if shortest_path:
-            self._write_command(f"MS -a {round(az, rounding)}")
-            self._write_command(f"MS -e {round(el, rounding)}")
+            self._write_command(f"MS -a {round(az, rounding)}".encode("ascii"))
+            self._write_command(f"MS -e {round(el, rounding)}".encode("ascii"))
         else:
-            self._write_command(f"M -a {round(az, rounding)}")
-            self._write_command(f"M -e {round(el, rounding)}")
+            self._write_command(f"M -a {round(az, rounding)}".encode("ascii"))
+            self._write_command(f"M -e {round(el, rounding)}".encode("ascii"))
 
         self._read_response()
 
@@ -233,7 +226,7 @@ class ControllerBox:
             `ControllerBoxError` - in case the controller box encoutered an error.
         """
 
-        self._write_command("M -s")
+        self._write_command(b"M -s")
         return ControllerBox._parse_position_output(self._read_response())
 
 
@@ -248,13 +241,13 @@ class ControllerBox:
             `ControllerBoxError` - in case the controller box encoutered an error.
         """
 
-        self._write_command("R+ -s")
+        self._write_command(b"R+ -s")
         self.az_max, self.el_max = ControllerBox._parse_position_output(self._read_response())
 
-        self._write_command("R- -s")
+        self._write_command(b"R- -s")
         self.az_min, self.el_min = ControllerBox._parse_position_output(self._read_response())
 
-        return (self.az_min, self.az_max, self.el_min, self.el_max)
+        return self.az_min, self.az_max, self.el_min, self.el_max
 
 
     def set_position_range(self,
@@ -270,19 +263,19 @@ class ControllerBox:
             `ControllerBoxError` - in case the controller box encoutered an error.
         """
         if az_min is not None:
-            self._write_command(f"R- -a {round(az_min, rounding)}")
+            self._write_command(f"R- -a {round(az_min, rounding)}".encode("ascii"))
             self._read_response() # Just "OK" ack
 
         if az_max is not None:
-            self._write_command(f"R+ -a {round(az_max, rounding)}")
+            self._write_command(f"R+ -a {round(az_max, rounding)}".encode("ascii"))
             self._read_response() # Just "OK" ack
 
         if el_min is not None:
-            self._write_command(f"R- -e {round(el_min, rounding)}")
+            self._write_command(f"R- -e {round(el_min, rounding)}".encode("ascii"))
             self._read_response() # Just "OK" ack
 
         if el_max is not None:
-            self._write_command(f"R+ -e {round(el_max, rounding)}")
+            self._write_command(f"R+ -e {round(el_max, rounding)}".encode("ascii"))
             self._read_response() # Just "OK" ack
 
         return self.get_position_range()
@@ -323,10 +316,10 @@ class ControllerBox:
         if self._check_pointing((az, el)):
 
             # Force current position to be 0,0
-            self._write_command("P -a 0")
+            self._write_command(b"P -a 0")
             self._read_response()
 
-            self._write_command("P -e 0")
+            self._write_command(b"P -e 0")
             self._read_response()
         else:
             raise ControllerBoxError(
@@ -335,7 +328,7 @@ class ControllerBox:
         return self.get_position()
 
 
-    def _get_duty_cycle(self) -> Tuple[int, int, int, int]:
+    def get_dutycycle_range(self) -> Tuple[int, int, int, int]:
         """
         Get dutycycle range for azimuth and elevation.
 
@@ -346,16 +339,16 @@ class ControllerBox:
             `ControllerBoxError` - in case the controller box encoutered an error.
         """
 
-        self._write_command("D+ -s")
+        self._write_command(b"D+ -s")
         range_max = ControllerBox._parse_position_output(self._read_response())
 
-        self._write_command("D- -s")
+        self._write_command(b"D- -s")
         range_min = ControllerBox._parse_position_output(self._read_response())
 
-        return (range_min[0], range_max[0], range_min[1], range_max[1])
+        return int(range_min[0]), int(range_max[0]), int(range_min[1]), int(range_max[1])
 
 
-    def _set_duty_cycle(self,
+    def set_dutycycle_range(self,
             az_duty_min: Optional[int]=None,
             az_duty_max: Optional[int]=None,
             el_duty_min: Optional[int]=None,
@@ -375,19 +368,19 @@ class ControllerBox:
         """
 
         if az_duty_min is not None:
-            self._write_command(f"D- -a {az_duty_min:d}")
+            self._write_command(f"D- -a {az_duty_min:d}".encode("ascii"))
             self._read_response()
 
         if az_duty_max is not None:
-            self._write_command(f"D+ -a {az_duty_max:d}")
+            self._write_command(f"D+ -a {az_duty_max:d}".encode("ascii"))
             self._read_response()
 
         if el_duty_min is not None:
-            self._write_command(f"D- -e {el_duty_min:d}")
+            self._write_command(f"D- -e {el_duty_min:d}".encode("ascii"))
             self._read_response()
 
         if el_duty_max is not None:
-            self._write_command(f"D+ -e {el_duty_max:d}")
+            self._write_command(f"D+ -e {el_duty_max:d}".encode("ascii"))
             self._read_response()
 
 
@@ -416,12 +409,13 @@ class ControllerBox:
         Expected input format: "Az: xxx.x <units> El: xxx.x <units>"
         """
 
-        if not isinstance(output, str):
+        if not isinstance(output, bytes):
             raise ValueError("Bytes expected")
 
         try:
-            parsed_output = output.split()
+            str_output = output.decode("ascii").strip()
+            parsed_output = str_output.split()
             return float(parsed_output[1]), float(parsed_output[4])
 
-        except ValueError:
-            raise ControllerBoxError(f"Failed to parse output format: {output}")
+        except Exception as e:
+            raise ControllerBoxError(f"Failed to parse output format: {output}") from e
