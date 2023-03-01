@@ -1,0 +1,81 @@
+globals:
+  amqp_url: amqp://guest:guest@localhost:5672/
+  db_url: postgres://mcs:PASSWORD@localhost/foresail
+  log_path: /tmp
+
+
+exchanges:
+  # Standard exchanges
+  log: topic
+  event: topic
+
+  # Ground station services' exchanges:
+  tracking: topic
+  rotator: topic
+  scheduler: topic
+
+  # Mission Control Systems's exchanges:
+  executer: topic
+  housekeeping: topic
+  packets: topic
+
+
+modules:
+- module: porthouse.core.log.logserver.LogServer
+
+- name: UHFRotator
+  module: porthouse.gs.hardware.rotator.Rotator
+  prefix: uhf
+  params:
+  - name: driver
+    value: hamlib
+  - name: address
+    value: 127.0.0.1:4533
+
+
+- name: Hamlib
+  module: porthouse.core.exec.Exec
+  params:
+  - name: cmd
+    value: rotctld -m 1
+
+
+
+# Some of the configs are in separate cfg files!
+- module: porthouse.gs.tracking.orbit_tracker.OrbitTracker
+- module: porthouse.gs.scheduler.scheduler.Scheduler
+- module: porthouse.gs.tracking.tle_server.TLEServer
+
+- module: porthouse.mcs.packets.packet_storage.PacketStorage
+  params:
+  - name: links
+    value:
+    - satellite: fs1
+      packet_type: uplink
+      source: DemoGS
+      type: zmq
+      connect: tcp://127.0.0.1:8888
+
+    - satellite: fs1
+      packet_type: downlink
+      source: DemoGS
+      type: zmq
+      connect: tcp://127.0.0.1:8888
+
+    - satellite: fs1
+      packet_type: telecommand
+      source: DemoGS
+      type: zmq
+      connect: tcp://127.0.0.1:8888
+
+    - satellite: fs1
+      packet_type: telemetry
+      source: DemoGS
+      type: zmq
+      connect: tcp://127.0.0.1:8888
+
+
+- module: porthouse.mcs.housekeeping.housekeeping.Housekeeping
+  params:
+  - name: schema
+    value: mcs/foresail/housekeeping.json
