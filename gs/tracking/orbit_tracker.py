@@ -35,7 +35,7 @@ class OrbitTracker(BaseModule):
         """
         Initialize module.
         """
-        BaseModule.__init__(self, debug=True, **kwarg)
+        BaseModule.__init__(self, **kwarg)
 
         self.target = None
         self.mode = TrackerStatus.DISABLED
@@ -381,7 +381,7 @@ class OrbitTracker(BaseModule):
         Send event
         """
 
-        self.log.info("%s event omited: %s", event_name, params)
+        self.log.info("%s event emitted: %s", event_name, params)
         await self.publish(params, exchange="event", routing_key=event_name)
 
 
@@ -437,3 +437,9 @@ class OrbitTracker(BaseModule):
             self.log.error("Satellite %s not in list!", satellite)
             return None
 
+
+if __name__ == "__main__":
+    OrbitTracker(
+        amqp_url="amqp://guest:guest@localhost:5672/",
+        debug=True
+    ).run()

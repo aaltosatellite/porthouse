@@ -60,10 +60,10 @@ class ControllerBox:
         self.err_cnt = 0
 
         if self.debug:
-            self.log = open(f"controlbox_debug_{time.time():d}.log", "w")
+            self.log = open(f"controlbox_debug_{time.time():.0f}.log", "w")
 
         # Creates and opens serial com
-        self.ser = serial.Serial(port=address, baudrate=baudrate, timeout=0.3)
+        self.ser = serial.Serial(port=address, baudrate=baudrate, timeout=0.5)
 
 
     def open(self):
@@ -132,14 +132,14 @@ class ControllerBox:
         if not isinstance(cmd, bytes):
             raise ValueError("Wrong input format")
 
-        if cmd[-1] != b"\n":
-            cmd += b"\n"
+        if cmd[-1] != b"\r":
+            cmd += b"\r"
 
         try:
             ret = self.ser.write(cmd)
 
             if self.debug:
-                self.log.write(f"{time.time()} WRITE: {cmd}\n")
+                self.log.write(f"{time.time()} WRITE (bytes {ret}): {cmd}\n")
                 self.log.flush()
 
         except serial.SerialTimeoutException as e:
