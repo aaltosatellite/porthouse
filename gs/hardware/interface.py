@@ -26,7 +26,8 @@ class RotatorInterface:
     async def move(
             self,
             az: float,
-            el: float
+            el: float,
+            shortest: bool = True
         ):
         """
         Move the rotator to given azimuth-elevation position.
@@ -34,9 +35,10 @@ class RotatorInterface:
         Args:
             az: Target azimuth angle
             el: Target elevation angle
+            shortest: If true, the shortest path is used.
         """
         await send_rpc_request("rotator", f"{self.prefix}.rpc.rotate", {
-            "az": az, "el": el
+            "az": az, "el": el, "shortest": shortest
         })
 
 

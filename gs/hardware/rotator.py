@@ -55,7 +55,7 @@ class Rotator(BaseModule):
         self.shortest_path = True
 
         # tries to avoid unnecessary rotate-calls, state-machine approach could be better
-        self.moving_to_target = True
+        self.moving_to_target = False
         self.target_valid = False
 
         # most recent received position received from hardware
@@ -67,11 +67,11 @@ class Rotator(BaseModule):
         ########### Actual call of rotator command ###########
 
         if driver == "hamlib":
-            self.rotator = rotctl(address)
+            self.rotator = rotctl(address, debug=self.debug)
         elif driver == "aalto":
-            self.rotator = ControllerBox(address)
+            self.rotator = ControllerBox(address, debug=self.debug)
         elif driver == "dummy":
-            self.rotator = DummyRotatorController(address)
+            self.rotator = DummyRotatorController(address, debug=self.debug)
         else:
             raise ValueError(f"Unknown rotator driver {driver}")
 
