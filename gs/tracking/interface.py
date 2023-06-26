@@ -11,7 +11,7 @@ class OrbitTrackerInterface:
         """
         Get satellite tracker status.
         """
-        status = await send_rpc_request("tracking", "rpc.status")
+        status = await send_rpc_request("tracking", "orbit.rpc.status")
         if verbose:
             print(status)
         else:

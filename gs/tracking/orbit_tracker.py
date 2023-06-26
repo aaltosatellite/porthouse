@@ -87,6 +87,9 @@ class OrbitTracker(BaseModule):
             #
             await self.set_target(request_data["satellite"])
 
+        elif request_name == "rpc.status":
+            return self._get_status_message()
+
         elif request_name == "rpc.get_config":
             #
             #
@@ -151,22 +154,17 @@ class OrbitTracker(BaseModule):
             return passes
 
         elif request_name == "rpc.get_satellite_position":
-            satellite = self.get_satellite(request_data["satellite"])
+            sat_name = request_data.get("satellite", "")
+            if self.target is not None and (sat_name == "" or self.target.name == sat_name):
+                satellite = self.target
+            else:
+                satellite = self.get_satellite(sat_name)
 
             if satellite is None:
                 return None
 
-            return self.target.to_dict()
-
-            self.update_satellite_position(satellite)
-            pos = (self.target.sc - self.gs).at(ts.now())
-
-
-            pos = {}
-            pos.update(self.get_satellite_ground_position(satellite))
-            pos.update(self.get_satellite_sky_position(satellite))
-
-            return pos
+            satellite.gs = self.gs
+            return satellite.to_dict()
 
         elif request_name == "rpc.get_satellite_period":
             satellite = self.get_satellite(request_data["satellite"])
@@ -336,39 +334,7 @@ class OrbitTracker(BaseModule):
         Broadcast tracker status
         """
 
-        status_message = {}
-
-        # Do we have target which has upcoming passes
-        if self.target is not None and len(self.target.passes) > 0:
-
-            if self.mode == TrackerStatus.AOS:
-                status = f"Pre-AOS for {self.target.name}"
-                pass_info = self.target.passes[0]
-            elif self.mode == TrackerStatus.TRACKING:
-                status = f"Tracking {self.target.name}"
-                pass_info = self.target.passes[0]
-            elif self.mode == TrackerStatus.DISABLED:
-                status = "Disabled"
-                pass_info = None
-            else:
-                status = f"Waiting for {self.target.name}"
-                pass_info = self.target.passes[0]
-
-            if pass_info is not None:
-                pass_info = pass_info.to_dict()
-
-            status_message = {
-                "satellite": self.target.name,
-                "pass": pass_info,
-                "status": status,
-            }
-
-        else:
-            status_message = {
-                "satellite": None,
-                "pass": None,
-                "status": "No target"
-            }
+        status_message = self._get_status_message()
 
         #self.log.debug("Status: %r", status_message)
         await self.publish(status_message,
@@ -436,6 +402,41 @@ class OrbitTracker(BaseModule):
                     return sat
             self.log.error("Satellite %s not in list!", satellite)
             return None
+
+    def _get_status_message(self):
+        # Do we have target which has upcoming passes
+        if self.target is not None and len(self.target.passes) > 0:
+
+            if self.mode == TrackerStatus.AOS:
+                status = f"Pre-AOS for {self.target.name}"
+                pass_info = self.target.passes[0]
+            elif self.mode == TrackerStatus.TRACKING:
+                status = f"Tracking {self.target.name}"
+                pass_info = self.target.passes[0]
+            elif self.mode == TrackerStatus.DISABLED:
+                status = "Disabled"
+                pass_info = None
+            else:
+                status = f"Waiting for {self.target.name}"
+                pass_info = self.target.passes[0]
+
+            if pass_info is not None:
+                pass_info = pass_info.to_dict()
+
+            status_message = {
+                "satellite": self.target.name,
+                "pass": pass_info,
+                "status": status,
+            }
+
+        else:
+            status_message = {
+                "satellite": None,
+                "pass": None,
+                "status": "No target"
+            }
+
+        return status_message
 
 
 if __name__ == "__main__":
