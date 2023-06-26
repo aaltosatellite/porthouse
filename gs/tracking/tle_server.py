@@ -229,7 +229,7 @@ class TLEServer(BaseModule):
                             async with httpx.AsyncClient() as client:
                                 response = await client.get(weburl, timeout=3)
 
-                        except httpx.RequestException as e:
+                        except httpx.RequestError as e:
                             self.log.error("Failed to download file %r: %s", weburl, e, exc_info=True)
                             continue
 
@@ -288,7 +288,7 @@ class TLEServer(BaseModule):
                         async with httpx.AsyncClient() as client:
                             r = await client.get(URL.format(id=satellite["norad_id"]),
                                                  cookies=auth_cookies, timeout=3)
-                    except httpx.RequestException as e:
+                    except httpx.RequestError as e:
                         self.log.error("Failed to query TLE from space-track.org: %r", e)
                         continue
 
