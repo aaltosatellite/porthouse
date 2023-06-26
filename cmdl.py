@@ -64,7 +64,6 @@ def configure(repl: PythonRepl):
     repl.eval_async = auto_async_eval
 
 
-
 async def logger() -> None:
     """
     Log printer coroutine
@@ -120,9 +119,8 @@ def setup_parser(cmdl_parser: argparse.ArgumentParser) -> None:
     """
     """
     cmdl_parser.add_argument('-l', '--logger', action="store_true")
-
-
-
+    cmdl_parser.add_argument('--amqp', dest="amqp_url",  help="AMQP connection URL.")
+    cmdl_parser.add_argument('--db', dest="db_url", help="PostgreSQL database URL.")
 
 
 def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -137,7 +135,6 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
             cmdl_cfg = yaml.load(fd, Loader=yaml.Loader)
     except FileNotFoundError:
         cmdl_cfg = { }
-
 
     #
     # Load the environment
@@ -181,8 +178,6 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
 
         globals()[service["name"]] = class_object(**params)
 
-
-
     #
     # Connect to AMQP broker
     #
@@ -190,8 +185,6 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     async def connect_broker(amqp_url: str):
         global connection, channel
         connection, channel = await amqp_connect(amqp_url)
-
-
 
     print(r"                  _   _                           ")
     print(r" _ __   ___  _ __| |_| |__   ___  _   _ ___  ___  ")
@@ -214,7 +207,7 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
             repl_task.cancel()
 
 
-if __name__ == '__main__' and False:
+if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Commandline')
     setup_parser(parser)
     main(parser, parser.parse_args())
