@@ -2,6 +2,8 @@
 from __future__ import annotations
 from enum import IntEnum
 import datetime
+from typing import Union
+
 import skyfield.api as skyfield
 
 ts = skyfield.load.timescale()
@@ -134,6 +136,8 @@ class Satellite:
         self.azel = (0, 0, 0)
         self.gs = None
 
+        # TODO: load satellite details from .yaml file (min elevation, prio, is_active, etc.)
+
         self.sc = skyfield.EarthSatellite(self.tle1, self.tle2)
         self.passes = []
 
@@ -157,19 +161,19 @@ class Satellite:
 
         if True and self.gs:
             #
-            pos = (self.sc - self.gs).at(ts.from_datetime(now))
-            el, az, range, _, _, range_rate = pos.frame_latlon_and_rates(skyfield.framelib.ecliptic_J2000_frame)
+            pos = (self.sc - self.gs).at(ts.utc(now.utc_datetime()))
+            el, az, range, _, _, range_rate = pos.frame_latlon_and_rates(self.gs)
 
             sc.extend({
                 "elevation": el.degrees,
-                "azitmuth": az.degrees,
+                "azimuth": az.degrees,
                 "range": range.km,
                 "range_rate": range_rate.m_per_s
             })
 
-        if True:
+        if False:
             #
-            geocentric = self.sc.at(now)
+            geocentric = self.sc.at(ts.utc(now.utc_datetime()))
             lat, lon = wgs84.latlon_of(geocentric)
             alt = wgs84.height_of(geocentric)
 
@@ -183,26 +187,27 @@ class Satellite:
             sc["next_pass"] = self.passes[0].to_dict() if len(self.passes) else None
 
         if True:
-            sc["passes"] = [ p.to_dict for p in self.passes ]
+            sc["passes"] = [p.to_dict() for p in self.passes]
 
         if tle:
             sc["tle1"] = self.tle1
             sc["tle2"] = self.tle2
 
-        return
+        return sc
 
 
     def calculate_passes(self,
             gs: skyfield.Topos,
-            start_time: Union[None, datetime.datetime, skyfield.Time]=None,
-            period: float = None,
-            min_elevation: float=0
-        ) -> None:
+            start_time: Union[None, datetime.datetime, skyfield.Time] = None,
+            period: float = 24,
+            min_elevation: float = 0
+        ) -> list[Pass]:
         """
 
         Args:
             gs:
             start_time:
+            period:         how many days to calculate the passes for, defaults to 24 hours
             min_elevation:
         """
 
@@ -218,10 +223,7 @@ class Satellite:
         else:
             raise ValueError("Invalid start_time type")
 
-        if period is None:
-            end_time = t + datetime.timedelta(hours=24)
-        else:
-            raise ValueError("Invalid period type")
+        end_time = t + datetime.timedelta(hours=period)
 
         # Check if the satellite is already at the sky
         el, _, _ = (self.sc - gs).at(ts.utc(t)).altaz()
@@ -231,6 +233,9 @@ class Satellite:
         # Find all the events for the satellite
         t_event, events = self.sc.find_events(gs, ts.utc(t), ts.utc(end_time), min_elevation)
         t_aos, az_aos, t_max, el_max, az_max, t_los, az_los = None, None, None, None, None, None, None
+
+        # TODO: remove conflicting passes, i.e. passes where satellites with higher priority are inside the pass
+        #   - need to maintain a list of passes of all satellites somewhere else?
 
         #print("Calculating passes for %s (%s)" % (self.name, t.isoformat()))
 
