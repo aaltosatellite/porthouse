@@ -10,7 +10,7 @@ import uuid
 import datetime
 import logging
 import logging.handlers
-from typing import Optional
+from typing import Optional, Union
 from .config import load_globals
 import aiormq
 import aiormq.abc
@@ -106,10 +106,11 @@ class BaseModule:
         if self.debug:
             self.log.setLevel(logging.DEBUG)
 
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
         # Create file log handler
         if log_path is not None:
             log_file = path_join(log_path, self.module_name + ".log")
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
             file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=int(2e6), backupCount=5)
             file_handler.setFormatter(formatter)
             self.log.addHandler(file_handler)

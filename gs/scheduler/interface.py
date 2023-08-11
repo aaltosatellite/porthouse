@@ -2,12 +2,8 @@
 Command line tool for controlling the scheduler
 """
 
-import sys
-import os
 import json
 import argparse
-
-import amqp
 
 from porthouse.core.rpc import amqp_connect, send_rpc_request
 

@@ -285,7 +285,7 @@ class ControllerBox:
             az: float,
             el: float,
             rounding: int=1,
-            timeout=120
+            timeout=15
         ) -> PositionType:
         """
         Calibrate azimuth and elevation by moving to position values
@@ -307,8 +307,8 @@ class ControllerBox:
 
         self.set_position(az, el, rounding=rounding, shortest_path=False)
 
-        timeout = time.time() + timeout
-        while (not self._check_pointing((az, el)) and timeout < time.time()):
+        endtime = time.time() + timeout
+        while not self._check_pointing((az, el)) and endtime > time.time():
             time.sleep(1)
             self.get_position()
 

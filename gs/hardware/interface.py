@@ -58,7 +58,7 @@ class RotatorInterface:
         #       - easier elevation calibration as azimuth can remain 90 deg
         await send_rpc_request("rotator", f"{self.prefix}.rpc.calibrate", {
             "az": az, "el": el, "force": True, "cal": True
-        })
+        }, timeout=15)
 
     async def stop(self):
         """

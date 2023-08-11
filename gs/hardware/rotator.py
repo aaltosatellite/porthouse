@@ -77,7 +77,8 @@ class Rotator(BaseModule):
 
         # Create setup coroutine
         loop = asyncio.get_event_loop()
-        loop.create_task(self.setup())
+        task = loop.create_task(self.setup(), name="rotator.setup")
+        task.add_done_callback(self.task_done_handler)
 
 
     async def setup(self):
@@ -453,6 +454,9 @@ class Rotator(BaseModule):
         except ValueError as e:
             self.log.error('Failed to parse json: %s\n%s',
                            e.args[0], message.body)
+            return
+
+        if self.prefix not in event_body.get('rotators', []):
             return
 
         routing_key = message.delivery['routing_key']

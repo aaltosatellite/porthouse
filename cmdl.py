@@ -1,5 +1,6 @@
 """
 porthouse command line tool
+ - run using bin/porthouse
 """
 
 import asyncio
@@ -200,9 +201,3 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
             loop.run_until_complete(repl_task)
         except KeyboardInterrupt:
             repl_task.cancel()
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Commandline')
-    setup_parser(parser)
-    main(parser, parser.parse_args())
