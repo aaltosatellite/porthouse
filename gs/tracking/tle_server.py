@@ -96,7 +96,8 @@ class TLEServer(BaseModule):
 
 
         # Create TLE updater task
-        asyncio.get_event_loop().create_task(self.updater_task())
+        task = asyncio.get_event_loop().create_task(self.updater_task(), name="tle_server.updater_task")
+        task.add_done_callback(self.task_done_handler)
 
 
     @rpc()
@@ -121,8 +122,8 @@ class TLEServer(BaseModule):
             if not self.updating:
 
                 # Create new task for immediate update
-                asyncio.get_event_loop().create_task(self.update_tles())
-
+                task = asyncio.get_event_loop().create_task(self.update_tles(), name="tle_server.update_tles")
+                task.add_done_callback(self.task_done_handler)
 
         elif request_name == "tle.rpc.get_tle":
             """

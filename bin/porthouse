@@ -6,7 +6,7 @@ import argparse
 
 import porthouse.cmdl
 import porthouse.launcher
-import porthouse.gs.scheduler.schedule
+import porthouse.gs.scheduler.interface
 import porthouse.mcs.packets.packets
 
 

@@ -30,7 +30,7 @@ class DummyRotatorController:
         self._az_dc_min, self._az_dc_max, self._el_dc_min, self._el_dc_max = [60] * 4
 
         if self.debug:
-            self.log = open(f"controlbox_debug_{time.time():d}.log", "w")
+            self.log = open(f"controlbox_debug_{time.time():.0f}.log", "w")
 
     def open(self):
         pass
