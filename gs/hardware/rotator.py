@@ -400,6 +400,10 @@ class Rotator(BaseModule):
 
             self.refresh_rotator_position(force_update=True)
 
+        elif request_name == "rpc.reset_position":
+            self.rotator.reset_position(float(request_data["az"]), float(request_data["el"]))
+            return
+
         elif request_name == "rpc.get_position_target":
             ########### Actual call of rotator command ###########
             ret = self.rotator.get_position_target()
