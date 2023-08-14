@@ -6,7 +6,6 @@ import argparse
 
 import porthouse.cmdl
 import porthouse.launcher
-import porthouse.gs.scheduler.interface
 import porthouse.mcs.packets.packets
 
 
@@ -22,7 +21,6 @@ parser.add_argument('--db', dest="db_url",
 
 porthouse.cmdl.setup_parser(subparser.add_parser("cmdl"))
 porthouse.launcher.setup_parser(subparser.add_parser('launch'))
-porthouse.gs.scheduler.schedule.setup_parser(subparser.add_parser('scheduler'))
 porthouse.mcs.packets.packets.setup_parser(subparser.add_parser('packets'))
 
 args = parser.parse_args()
@@ -34,7 +32,5 @@ elif args.utility == "launch":
     porthouse.launcher.main(parser, args)
 elif args.utility == "packets":
     porthouse.mcs.packets.packets.main(parser, args)
-elif args.utility == "scheduler":
-    porthouse.gs.scheduler.schedule.main(parser, args)
 else:
     parser.print_help()

@@ -1,72 +1,43 @@
-"""
-Command line tool for controlling the scheduler
-"""
-
-import json
-import argparse
-
-from porthouse.core.rpc import amqp_connect, send_rpc_request
+from porthouse.core.rpc_async import send_rpc_request
 
 
-def setup_parser(scheduler_parser: argparse.ArgumentParser) -> None:
-
-    # Filters
-    scheduler_parser.add_argument('--satellite',
-        help="Filter results by the satellite identifier/name")
-
-    # Actions
-    scheduler_parser.add_argument('--print', action="store_true",
-        help="")
-    scheduler_parser.add_argument('--passes', action="store_true",
-        help="")
-
-    scheduler_parser.add_argument('--totals', action="store_true",
-        help="Get total number of bytes stored in the database")
-    scheduler_parser.add_argument('--export', action="store_true")
-
-
-def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+class SchedulerInterface:
     """
-    Examples:
-    $ porthouse schedule --print
-    $ porthouse schedule --passes aalto-1
+    Scheduler related commands
     """
 
-    #
-    # Connect to AMQP broker
-    #
-    connection, channel = amqp_connect(args.amqp_url)
-
-
-    if args.print:
+    async def get_schedule(self, verbose=True):
         """
-    	Print the scheduler schedule
+        Get satellite tracker status.
         """
+        schedule = await send_rpc_request("scheduler", "rpc.get_schedule")
+        if verbose:
+            print(schedule)
+        else:
+            return schedule
 
-        res = send_rpc_request("scheduler", "rpc.get_schedule", {
-            "satellite": "Aalto-1"
-        })
-        print(json.dumps(res, indent=4))
+    async def get_processes(self, verbose=True):
+        processes = await send_rpc_request("scheduler", "rpc.get_processes")
+        if verbose:
+            print(processes)
+        else:
+            return processes
 
+    async def update_schedule(self, start_time=None, end_time=None):
+        params = dict(start_time=start_time, end_time=end_time)
+        res = await send_rpc_request("scheduler", "rpc.update_schedule", params)
+        return res
 
-        print()
-        print("SCHEDULE:")
-        print("Name:           | Type:           | Metadata:")
-        print("----------------|-----------------|-----------------")
-        for entry in res["entries"]:
-            print(f"{entry['name']:<16}| {entry['type']:<16}|")
-        print()
+    async def enable_schedule_file_sync(self, enable):
+        res = await send_rpc_request("scheduler", "rpc.enable_schedule_file_sync", {"enable": enable})
+        return res
 
+    async def add_task(self):
+        raise NotImplementedError()
 
-    elif args.passes:
-        """
-        List all passes
-        """
-        send_rpc_request("scheduler", "rpc.connect")
+    async def remove_task(self):
+        raise NotImplementedError()
 
-        #elif args.scheduler:
-        pass
-
-    else:
-        parser.print_help()
+    async def get_potential_tasks(self):
+        raise NotImplementedError()
 

@@ -153,7 +153,11 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
         {
             "name": "tracker",
             "class": "porthouse.gs.tracking.interface.OrbitTrackerInterface",
-        }
+        },
+        {
+            "name": "scheduler",
+            "class": "porthouse.gs.scheduler.interface.SchedulerInterface",
+        },
     ]
 
     for service in services:
