@@ -69,8 +69,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
                        f"{event_body['target']} {event_body['rotators']} received")
 
         if routing_key == "task.start":
-            await self.add_target(event_body["target"], event_body["rotators"],
-                                  preaos_time=event_body.get("preaos_time", self.DEFAULT_PREAOS_TIME))
+            await self.add_target(event_body.pop("target"), event_body.pop("rotators"), **event_body)
+
         elif routing_key == "task.end":
             await self.remove_target(event_body["target"], event_body["rotators"])
 
@@ -112,8 +112,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             raise RPCError(f"No such command {request_name}")
 
     async def add_target(self, target_name: str, rotators: List[str],
-                         start_time: Union[None, datetime, skyfield.Time] = None,
-                         end_time: Union[None, datetime, skyfield.Time] = None,
+                         start_time: Union[None, datetime, skyfield.api.Time] = None,
+                         end_time: Union[None, datetime, skyfield.api.Time] = None,
                          min_elevation: float = 0,
                          min_max_elevation: float = 0,
                          sun_max_elevation: float = None,

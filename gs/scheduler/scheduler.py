@@ -49,6 +49,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         self.tle_sats = []
         self.gs_rotators = []
 
+        self.sync_schedule_files = True
+
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.setup(), name="scheduler.setup")
         task.add_done_callback(self.task_done_handler)
@@ -89,9 +91,11 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         await asyncio.sleep(0)
 
+        write_schedule = False
         if not self.schedule_lock.locked():
             # update schedule from file if schedule is not being updated by another task
             self.read_processes()
+            write_schedule = self.sync_schedule_files
             await self.read_schedule()
 
         now = datetime.now(timezone.utc).replace(microsecond=0)  # + timedelta(minutes=1*60 + 3)
@@ -122,27 +126,34 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         for task in remove_tasks:
             self.schedule.remove(task)
 
-        self.write_schedule()
+        if write_schedule:
+            self.write_schedule()
+
         self.maybe_start_schedule_creation()
 
-    def maybe_start_schedule_creation(self):
+    def maybe_start_schedule_creation(self, force=False, start_time=None, end_time=None):
         """
         Create new tasks every 24h, up to 48h into the future,
         starting from the last scheduled task or 24h into the future, whichever is earlier.
         """
         now = datetime.now(timezone.utc).replace(microsecond=0)
 
-        if self.schedule_updated_date is None or self.schedule_updated_date < now - timedelta(hours=24):
-            self.schedule_updated_date = now
-
+        if force or self.schedule_updated_date is None or self.schedule_updated_date < now - timedelta(hours=24):
             if self._create_schedule_task is not None:
+                if force:
+                    raise RPCError("Schedule creation already in progress")
                 self.log.warning("Previous schedule creation task has not finished! Cancelling it now.")
                 self._create_schedule_task.cancel()
                 self._create_schedule_task = None
 
-            start_time = now if len(self.schedule.end_times) == 0 else self.schedule.end_times[-1].end_time
-            start_time = min(start_time, now + timedelta(hours=24))
-            end_time = now + timedelta(hours=48)
+            self.schedule_updated_date = now
+
+            if start_time is None:
+                start_time = now if len(self.schedule.end_times) == 0 else self.schedule.end_times[-1].end_time
+                start_time = min(start_time, now + timedelta(hours=24))
+
+            if end_time is None:
+                end_time = now + timedelta(hours=48)
 
             loop = asyncio.get_event_loop()
             self._create_schedule_task = loop.create_task(self.create_schedule(start_time, end_time),
@@ -153,6 +164,9 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Read processes from file
         """
+        if not self.sync_schedule_files:
+            return
+
         self.processes = OrderedDict()
 
         for file, storage in ((self.main_processes_file, Process.STORAGE_MAIN),
@@ -174,6 +188,9 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Write schedule to YAML file
         """
+        if not self.sync_schedule_files:
+            return
+
         for file, storage in ((self.main_processes_file, Process.STORAGE_MAIN),
                               (self.misc_processes_file, Process.STORAGE_MISC)):
             if skip_main and storage == Process.STORAGE_MAIN:
@@ -193,6 +210,9 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Read schedule from file
         """
+        if not self.sync_schedule_files:
+            return
+
         async with self.schedule_lock:
             self.schedule = Schedule()
 
@@ -214,6 +234,9 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Write schedule to YAML file
         """
+        if not self.sync_schedule_files:
+            return
+
         for file, storage in ((self.main_schedule_file, Task.STORAGE_MAIN),
                               (self.misc_schedule_file, Task.STORAGE_MISC)):
             schedule = [task.to_dict()
@@ -250,6 +273,21 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
         schedule = [task.to_dict() for task in self.schedule if filter_task(task)][:limit]
         return schedule
+
+    def export_processes(self, target=None, rotators=None, enabled=None, storage=None):
+        def filter_task(process):
+            if target is not None and target not in process.target:
+                return False
+            if rotators is not None and len(set(rotators).intersection(process.rotators)) == 0:
+                return False
+            if enabled is not None and process.enabled != enabled:
+                return False
+            if storage is not None and process.storage != storage:
+                return False
+            return True
+
+        processes = [process.to_dict() for process in self.processes if filter_task(process)]
+        return processes
 
     async def create_schedule(self, start_time: datetime = None, end_time: datetime = None):
         """
@@ -385,8 +423,39 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         await asyncio.sleep(0)
 
+        def date_arg(date_field):
+            if date_field in request_data:
+                return datetime.strptime(request_data[date_field], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+            return None
+
         if request_name == "rpc.get_schedule":
             return self.export_schedule(**request_data)
+
+        elif request_name == "rpc.get_processes":
+            return self.export_processes(**request_data)
+
+        elif request_name == "rpc.update_schedule":
+            start_time, end_time = date_arg("start_time"), date_arg("end_time")
+
+            if request_data.get("reset", False):
+                start_time = start_time or datetime.now(timezone.utc)
+                end_time = end_time or start_time + timedelta(hours=48)
+
+                async with self.schedule_lock:
+                    tbr = [task for task in self.schedule
+                           if task.status == TaskStatus.SCHEDULED and task.auto_scheduled
+                              and task.start_time >= start_time and task.end_time <= end_time]
+                    for task in tbr:
+                        self.schedule.remove(task)
+                    self.write_schedule()
+
+            return self.maybe_start_schedule_creation(force=True, start_time=start_time, end_time=end_time)
+
+        elif request_name == "rpc.enable_schedule_file_sync":
+            if "enable" not in request_data:
+                raise RPCError("enable (bool) parameter not give")
+            self.sync_schedule_files = request_data["enable"]
+            return {"success": True}
 
         elif request_name == "rpc.add_task":
             #
@@ -421,12 +490,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             if "target" not in request_data:
                 raise RPCError("No target given")
 
-            start_time, end_time = [None] * 2
-            if "start_time" in request_data:
-                start_time = datetime.strptime(request_data.pop("start_time"), "%Y-%m-%dT%H:%M:%S.%fZ")
-            if "end_time" in request_data:
-                end_time = datetime.strptime(request_data.pop("end_time"), "%Y-%m-%dT%H:%M:%S.%fZ")
-
+            start_time, end_time = date_arg("start_time"), date_arg("end_time")
             tasks = await self.create_tasks(Process.from_dict(request_data), start_time, end_time)
             return [task.to_dict() for task in tasks]
 
