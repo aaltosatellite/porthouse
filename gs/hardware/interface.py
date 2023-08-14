@@ -60,6 +60,23 @@ class RotatorInterface:
             "az": az, "el": el, "force": True, "cal": True
         }, timeout=15)
 
+    async def reset_position(
+            self,
+            az: float,
+            el: float
+        ):
+        """
+        Reset position to given values without moving the rotator. If new position is outside allowed range,
+        the rotator will be moved to the closest allowed position.
+
+        Args:
+            az: Target azimuth angle
+            el: Target elevation angle
+        """
+        await send_rpc_request("rotator", f"{self.prefix}.rpc.reset_position", {
+            "az": az, "el": el
+        }, timeout=5)
+
     async def stop(self):
         """
         Stop rotator immediately.

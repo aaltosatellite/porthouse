@@ -13,9 +13,12 @@ license = {file = "LICENSE"}
 keywords = [ "sample", "asd" ]
 authors = [
     {name= "Petri Niemelä", email="petri.niemela@aalto.fi"},
+    {name= "Olli Knuuttila", email="olli.knuuttila@aalto.fi"},
+    {name= "Topi Räty", email="topi.raty@aalto.fi"},
 ]
 maintainers = [
-    {name= "Petri Niemelä", email="petri.niemela@aalto.fi"},
+    {name= "Topi Räty", email="topi.raty@aalto.fi"},
+    {name= "Olli Knuuttila", email="olli.knuuttila@aalto.fi"},
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -32,7 +35,13 @@ dependencies = [
     "ptpython",
     "argcomplete",
     "PyYAML",
-    "websockets>=8.0,<=13.1"
+    "websockets>=8.0,<=13.1",
+    "httpx",                # async http client for TLE download
+    "sortedcontainers",     # scheduler sorted list
+    "pyserial-asyncio",     # rotator serial interface
+    "quaternion",           # rotator geometry model
+    "pandas",               # scheduler hipparcos catalogue import
+    "prompt_toolkit"        # command line interface
 ]
 
 [project.urls]

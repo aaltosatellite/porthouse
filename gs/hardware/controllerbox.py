@@ -12,10 +12,13 @@ from typing import Tuple, Optional, Union
 class RotatorError(Exception):
     """ Exception class for all rotator hardware """
 
+
 class ControllerBoxError(RotatorError):
     """ Exception class for all rotator hardware error returned by control box """
 
+
 PositionType = Tuple[float, float]
+
 
 class ControllerBox:
     """
@@ -23,20 +26,20 @@ class ControllerBox:
     """
 
     current_position: PositionType
-    az_min: int
-    az_max: int
-    el_min: int
-    el_max: int
+    az_min: float
+    az_max: float
+    el_min: float
+    el_max: float
 
     debug: bool
 
     def __init__(self,
             address: str,
             baudrate: int=115200,
-            az_min: int =-90,
-            az_max: int =450,
-            el_min: int =0,
-            el_max: int =90,
+            az_min: float =-90,
+            az_max: float =450,
+            el_min: float =0,
+            el_max: float =90,
             debug=False):
         """
         Initialzie controller box including serial com to controller box.
@@ -302,10 +305,10 @@ class ControllerBox:
             timeout:
 
         Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
+            `ControllerBoxError` - in case the controller box encountered an error.
         """
 
-        self.set_position(az, el, rounding=rounding, shortest_path=False)
+        self.set_position(az, el, rounding=rounding, shortest_path=True)
 
         endtime = time.time() + timeout
         while not self._check_pointing((az, el)) and endtime > time.time():
@@ -326,6 +329,34 @@ class ControllerBox:
                 "The setpoint was not reached during calibration!")
 
         return self.get_position()
+
+
+    def reset_position(self,
+                       az: float,
+                       el: float,
+                       ) -> None:
+
+        orig_az_min, tmp_az_min = self.az_min, min(self.az_min, az)
+        orig_az_max, tmp_az_max = self.az_max, max(self.az_max, az)
+        orig_el_min, tmp_el_min = self.el_min, min(self.el_min, el)
+        orig_el_max, tmp_el_max = self.el_max, max(self.el_max, el)
+
+        alter_range = (tmp_az_min != orig_az_min or tmp_az_max != orig_az_max or
+                       tmp_el_min != orig_el_min or tmp_el_max != orig_el_max)
+
+        if alter_range:
+            self.set_position_range(tmp_az_min, tmp_az_max, tmp_el_min, tmp_el_max)
+
+        # Force current position to be az, el
+        self._write_command(f"P -a {az: .1f}".encode("ascii"))
+        self._read_response()
+
+        self._write_command(f"P -e {el: .1f}".encode("ascii"))
+        self._read_response()
+
+        if alter_range:
+            self.set_position(min(max(az, orig_az_min), orig_az_max), min(max(el, orig_el_min), orig_el_max))
+            self.set_position_range(orig_az_min, orig_az_max, orig_el_min, orig_el_max)
 
 
     def get_dutycycle_range(self) -> Tuple[int, int, int, int]:

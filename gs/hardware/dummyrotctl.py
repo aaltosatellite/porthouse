@@ -107,6 +107,9 @@ class DummyRotatorController:
 
         return self.get_position()
 
+    def reset_position(self, az: float, el: float):
+        self.current_position = (az, el)
+
     def get_dutycycle_range(self) -> Tuple[int, int, int, int]:
         return self._az_dc_min, self._az_dc_max, self._el_dc_min, self._el_dc_max
 

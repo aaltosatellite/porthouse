@@ -83,8 +83,10 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         request_name = request_name[6:]
 
         if request_name == "rpc.add_target":
-            await self.add_target(request_data["target"], request_data["rotators"],
-                                  preaos_time=request_data.get("preaos_time", self.DEFAULT_PREAOS_TIME))
+            params = {k: v for k, v in request_data.items() if k in ["start_time", "end_time", "min_elevation",
+                                                                     "min_max_elevation", "sun_max_elevation",
+                                                                     "sunlit", "preaos_time"]}
+            await self.add_target(request_data["target"], request_data["rotators"], **params)
 
         elif request_name == "rpc.remove_target":
             await self.remove_target(request_data["target"], request_data["rotators"])
@@ -110,6 +112,12 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             raise RPCError(f"No such command {request_name}")
 
     async def add_target(self, target_name: str, rotators: List[str],
+                         start_time: Union[None, datetime, skyfield.Time] = None,
+                         end_time: Union[None, datetime, skyfield.Time] = None,
+                         min_elevation: float = 0,
+                         min_max_elevation: float = 0,
+                         sun_max_elevation: float = None,
+                         sunlit: bool = None,
                          preaos_time: int = DEFAULT_PREAOS_TIME) -> NoReturn:
         """
         Set the tracking target for given rotators.
@@ -133,12 +141,17 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
 
         self.log.info(f"Starting to track target {target_name} with {rotators}")
 
-        # NOTE: params not needed for get_satellite or get_celestial_object as current pass is only of interest
-        #       and scheduler takes care of min elevation etc filtering
+        # NOTE: Other params except target_name not strictly needed for get_satellite or get_celestial_object
+        #       as current pass is only of interest and scheduler takes care of min elevation etc filtering.
+        #       However, AOS and LOS times could be different without them.
         if CelestialObject.is_class_of(target_name):
-            target = await self.get_celestial_object(target_name)
+            target = await self.get_celestial_object(target_name, start_time=start_time, end_time=end_time,
+                                                     min_elevation=min_elevation, min_max_elevation=min_max_elevation,
+                                                     sun_max_elevation=sun_max_elevation, sunlit=sunlit)
         else:
-            target = await self.get_satellite(target_name)
+            target = await self.get_satellite(target_name, start_time=start_time, end_time=end_time,
+                                              min_elevation=min_elevation, min_max_elevation=min_max_elevation,
+                                              sun_max_elevation=sun_max_elevation, sunlit=sunlit)
 
         if target is None:
             self.log.error(f"add_target: Could not find target {target_name}")
