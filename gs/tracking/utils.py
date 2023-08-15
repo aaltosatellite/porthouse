@@ -162,7 +162,7 @@ class Satellite:
         tle_age = utcnow - self.sc.epoch.utc_datetime()
         return tle_age.days
 
-    def pos_at(self, time: Union[None, datetime, skyfield.Time]) -> Geometric:
+    def pos_at(self, time: Union[None, str, datetime, skyfield.Time]) -> Geometric:
         return (self.sc - self.gs).at(parse_time(time))
 
     def to_dict(self, tle: bool=False):
@@ -220,8 +220,8 @@ class Satellite:
         return self.passes is not None and len(self.passes) > 0 and \
             self.passes_start_time <= start_time and self.passes_end_time >= end_time
 
-    def calculate_passes(self, start_time: Union[None, datetime, skyfield.Time] = None,
-                         end_time: Union[None, datetime, skyfield.Time] = None, period: float = 24,
+    def calculate_passes(self, start_time: Union[None, str, datetime, skyfield.Time] = None,
+                         end_time: Union[None, str, datetime, skyfield.Time] = None, period: float = 24,
                          min_elevation: float = 0, min_max_elevation: float = 0, sun_max_elevation: float = None,
                          sunlit: bool = None) -> list[Pass]:
         """
@@ -325,7 +325,7 @@ class CelestialObject:
     def target_name(self):
         return self.target
 
-    def pos_at(self, time: Union[None, datetime, skyfield.Time]) -> Geometric:
+    def pos_at(self, time: Union[None, str, datetime, skyfield.Time]) -> Geometric:
         assert self._initialized, "CelestialObject not initialized"
         return (self.obj - (self.earth + self.gs)).at(parse_time(time))
 
@@ -381,8 +381,8 @@ class CelestialObject:
         return self.passes is not None and len(self.passes) > 0 and \
             self.passes_start_time <= start_time and self.passes_end_time >= end_time
 
-    def calculate_passes(self, start_time: Union[None, datetime, skyfield.Time] = None,
-                         end_time: Union[None, datetime, skyfield.Time] = None, period: float = 24,
+    def calculate_passes(self, start_time: Union[None, str, datetime, skyfield.Time] = None,
+                         end_time: Union[None, str, datetime, skyfield.Time] = None, period: float = 24,
                          min_elevation: float = 0, min_max_elevation: float = 0, sun_max_elevation: float = None,
                          sunlit: bool = None) -> list[Pass]:
         """
@@ -447,8 +447,8 @@ class SkyfieldModuleMixin:
         )
 
     async def get_satellite(self, target: str,
-                            start_time: Union[None, datetime, skyfield.Time] = None,
-                            end_time: Union[None, datetime, skyfield.Time] = None,
+                            start_time: Union[None, str, datetime, skyfield.Time] = None,
+                            end_time: Union[None, str, datetime, skyfield.Time] = None,
                             min_elevation: float = 0,
                             min_max_elevation: float = 0,
                             sun_max_elevation: float = None,
@@ -492,8 +492,8 @@ class SkyfieldModuleMixin:
         return sat
 
     async def get_celestial_object(self, target: str,
-                                   start_time: Union[None, datetime, skyfield.Time] = None,
-                                   end_time: Union[None, datetime, skyfield.Time] = None,
+                                   start_time: Union[None, str, datetime, skyfield.Time] = None,
+                                   end_time: Union[None, str, datetime, skyfield.Time] = None,
                                    min_elevation: float = 0,
                                    min_max_elevation: float = 0,
                                    sun_max_elevation: float = None,
@@ -533,9 +533,11 @@ class SkyfieldModuleMixin:
         return obj
 
 
-def parse_time(t) -> skyfield.Time:
+def parse_time(t: Union[None, str, datetime, skyfield.Time]) -> skyfield.Time:
     if t is None:
         dt = datetime.utcnow().replace(tzinfo=timezone.utc)
+    elif isinstance(t, str):
+        dt = datetime.fromisoformat(t.replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
     elif isinstance(t, datetime):
         dt = t.replace(tzinfo=timezone.utc)
     elif isinstance(t, skyfield.Time):
