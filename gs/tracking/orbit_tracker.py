@@ -115,8 +115,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             raise RPCError(f"No such command: {request_name}")
 
     async def add_target(self, target_name: str, rotators: List[str],
-                         start_time: Union[None, str, datetime, skyfield.api.Time] = None,
-                         end_time: Union[None, str, datetime, skyfield.api.Time] = None,
+                         start_time: Union[None, str, datetime.datetime, skyfield.api.Time] = None,
+                         end_time: Union[None, str, datetime.datetime, skyfield.api.Time] = None,
                          min_elevation: float = 0,
                          min_max_elevation: float = 0,
                          sun_max_elevation: float = None,

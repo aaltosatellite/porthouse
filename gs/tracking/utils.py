@@ -256,7 +256,8 @@ class Satellite:
             t_event, events = find_events(obj_gs, start_time, end_time, min_elevation, min_max_elevation,
                                           CelestialObject.BODIES, sun_max_elevation, sunlit)
 
-        self.passes = events_to_passes(self.name, self.sc - self.gs, t_event, events, min_max_elevation)
+        self.passes = events_to_passes(self.name, self.sc - self.gs, t_event, events, min_max_elevation,
+                                       start_time, end_time)
         self.passes_start_time = start_time.utc_datetime()
         self.passes_end_time = end_time.utc_datetime()
         return self.passes
@@ -410,7 +411,7 @@ class CelestialObject:
         obj_gs = self.obj - (self.earth + self.gs)
         t_event, events = find_events(obj_gs, t0, t1, min_elevation, min_max_elevation,
                                       CelestialObject.BODIES, sun_max_elevation, sunlit)
-        self.passes = events_to_passes(self.name, obj_gs, t_event, events, min_max_elevation)
+        self.passes = events_to_passes(self.name, obj_gs, t_event, events, min_max_elevation, t0, t1)
         self.passes_start_time = t0.utc_datetime()
         self.passes_end_time = t1.utc_datetime()
         return self.passes
@@ -623,7 +624,7 @@ def find_events(obj_gs: vectorlib.VectorFunction, t0: skyfield.Time, t1: skyfiel
 
 
 def events_to_passes(obj_name: str, obj_gs: object, t_event: list, events: list,
-                     min_max_elevation: float) -> list[Pass]:
+                     min_max_elevation: float, start_time: skyfield.Time, end_time: skyfield.Time) -> list[Pass]:
     passes = []
     t_aos, az_aos, t_max, el_max, az_max, t_los, az_los = None, None, None, None, None, None, None
 
@@ -632,11 +633,11 @@ def events_to_passes(obj_name: str, obj_gs: object, t_event: list, events: list,
         el, az, _ = obj_gs.at(t).altaz()
 
         if event == 0:  # AOS
-            t_aos, az_aos = t.utc_datetime(), az.degrees
+            t_aos, az_aos = max(t.utc_datetime(), start_time.utc_datetime()), az.degrees
         elif event == 1:  # Max
             t_max, el_max, az_max = t.utc_datetime(), el.degrees, az.degrees
         elif event == 2:  # LOS
-            t_los, az_los = t.utc_datetime(), az.degrees
+            t_los, az_los = min(t.utc_datetime(), end_time.utc_datetime()), az.degrees
 
             # Make sure we have all details
             if t_aos and t_max and el_max > min_max_elevation:
