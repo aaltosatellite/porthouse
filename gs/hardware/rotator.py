@@ -434,11 +434,14 @@ class Rotator(BaseModule):
                                              int(request_data["el_min"]),
                                              int(request_data["el_max"]))
 
-        elif request_name == "rpc.get_status":
+        elif request_name == "rpc.status":
             """
                 Get rotator status message
             """
             return self.get_status_msg()
+
+        else:
+            raise RPCError("No such command: %s" % request_name)
 
 
     @queue()
