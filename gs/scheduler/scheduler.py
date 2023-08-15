@@ -286,7 +286,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 return False
             return True
 
-        processes = [process.to_dict() for process in self.processes if filter_task(process)]
+        processes = [process.to_dict() for process in self.processes.values() if filter_task(process)]
         return processes
 
     async def create_schedule(self, start_time: datetime = None, end_time: datetime = None):
