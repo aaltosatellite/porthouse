@@ -162,7 +162,7 @@ class Satellite:
         tle_age = utcnow - self.sc.epoch.utc_datetime()
         return tle_age.days
 
-    def pos_at(self, time: Union[None, datetime, skyfield.Time]) -> Geometric:
+    def pos_at(self, time: Union[None, str, datetime, skyfield.Time]) -> Geometric:
         return (self.sc - self.gs).at(parse_time(time))
 
     def to_dict(self, tle: bool=False):
@@ -216,12 +216,12 @@ class Satellite:
 
     def passes_contain(self, start_time, end_time=None, period=24):
         start_time = parse_time(start_time).utc_datetime()
-        end_time = parse_time(end_time) if end_time is not None else start_time + timedelta(hours=period)
+        end_time = parse_time(end_time).utc_datetime() if end_time is not None else start_time + timedelta(hours=period)
         return self.passes is not None and len(self.passes) > 0 and \
             self.passes_start_time <= start_time and self.passes_end_time >= end_time
 
-    def calculate_passes(self, start_time: Union[None, datetime, skyfield.Time] = None,
-                         end_time: Union[None, datetime, skyfield.Time] = None, period: float = 24,
+    def calculate_passes(self, start_time: Union[None, str, datetime, skyfield.Time] = None,
+                         end_time: Union[None, str, datetime, skyfield.Time] = None, period: float = 24,
                          min_elevation: float = 0, min_max_elevation: float = 0, sun_max_elevation: float = None,
                          sunlit: bool = None) -> list[Pass]:
         """
@@ -247,18 +247,24 @@ class Satellite:
 
         if sunlit is None and sun_max_elevation is None:
             # Find all the events for the satellite, as before
-            t_event, events = self.sc.find_events(self.gs, start_time, end_time, min_elevation)
+            t_event, events = self.sc.find_events(self.gs, start_time - timedelta(seconds=60),
+                                                  end_time + timedelta(seconds=60), min_elevation)
         else:
             # Use own version of find_events that takes into account sunlit and sun_max_elevation params
             if CelestialObject.EARTH is None:
                 CelestialObject.init_bodies()
             obj_gs = (CelestialObject.EARTH + self.sc) - (CelestialObject.EARTH + self.gs)
-            t_event, events = find_events(obj_gs, start_time, end_time, min_elevation, min_max_elevation,
-                                          CelestialObject.BODIES, sun_max_elevation, sunlit)
+            t_event, events = find_events(obj_gs, start_time - timedelta(seconds=60), end_time + timedelta(seconds=60),
+                                          min_elevation, min_max_elevation, CelestialObject.BODIES,
+                                          sun_max_elevation, sunlit)
 
-        self.passes = events_to_passes(self.name, self.sc - self.gs, t_event, events, min_max_elevation)
+        self.passes = events_to_passes(self.name, self.sc - self.gs, t_event, events, min_max_elevation,
+                                       start_time, end_time)
         self.passes_start_time = start_time.utc_datetime()
         self.passes_end_time = end_time.utc_datetime()
+        if len(self.passes) == 0:
+            print(f"{t_event} | {events} | {start_time - timedelta(seconds=60)} | {end_time + timedelta(seconds=60)} | "
+                  f"{min_elevation} | {min_max_elevation} | {sun_max_elevation} | {sunlit}")
         return self.passes
 
 
@@ -325,7 +331,7 @@ class CelestialObject:
     def target_name(self):
         return self.target
 
-    def pos_at(self, time: Union[None, datetime, skyfield.Time]) -> Geometric:
+    def pos_at(self, time: Union[None, str, datetime, skyfield.Time]) -> Geometric:
         assert self._initialized, "CelestialObject not initialized"
         return (self.obj - (self.earth + self.gs)).at(parse_time(time))
 
@@ -381,8 +387,8 @@ class CelestialObject:
         return self.passes is not None and len(self.passes) > 0 and \
             self.passes_start_time <= start_time and self.passes_end_time >= end_time
 
-    def calculate_passes(self, start_time: Union[None, datetime, skyfield.Time] = None,
-                         end_time: Union[None, datetime, skyfield.Time] = None, period: float = 24,
+    def calculate_passes(self, start_time: Union[None, str, datetime, skyfield.Time] = None,
+                         end_time: Union[None, str, datetime, skyfield.Time] = None, period: float = 24,
                          min_elevation: float = 0, min_max_elevation: float = 0, sun_max_elevation: float = None,
                          sunlit: bool = None) -> list[Pass]:
         """
@@ -410,7 +416,7 @@ class CelestialObject:
         obj_gs = self.obj - (self.earth + self.gs)
         t_event, events = find_events(obj_gs, t0, t1, min_elevation, min_max_elevation,
                                       CelestialObject.BODIES, sun_max_elevation, sunlit)
-        self.passes = events_to_passes(self.name, obj_gs, t_event, events, min_max_elevation)
+        self.passes = events_to_passes(self.name, obj_gs, t_event, events, min_max_elevation, t0, t1)
         self.passes_start_time = t0.utc_datetime()
         self.passes_end_time = t1.utc_datetime()
         return self.passes
@@ -447,8 +453,8 @@ class SkyfieldModuleMixin:
         )
 
     async def get_satellite(self, target: str,
-                            start_time: Union[None, datetime, skyfield.Time] = None,
-                            end_time: Union[None, datetime, skyfield.Time] = None,
+                            start_time: Union[None, str, datetime, skyfield.Time] = None,
+                            end_time: Union[None, str, datetime, skyfield.Time] = None,
                             min_elevation: float = 0,
                             min_max_elevation: float = 0,
                             sun_max_elevation: float = None,
@@ -492,8 +498,8 @@ class SkyfieldModuleMixin:
         return sat
 
     async def get_celestial_object(self, target: str,
-                                   start_time: Union[None, datetime, skyfield.Time] = None,
-                                   end_time: Union[None, datetime, skyfield.Time] = None,
+                                   start_time: Union[None, str, datetime, skyfield.Time] = None,
+                                   end_time: Union[None, str, datetime, skyfield.Time] = None,
                                    min_elevation: float = 0,
                                    min_max_elevation: float = 0,
                                    sun_max_elevation: float = None,
@@ -533,9 +539,11 @@ class SkyfieldModuleMixin:
         return obj
 
 
-def parse_time(t) -> skyfield.Time:
+def parse_time(t: Union[None, str, datetime, skyfield.Time]) -> skyfield.Time:
     if t is None:
         dt = datetime.utcnow().replace(tzinfo=timezone.utc)
+    elif isinstance(t, str):
+        dt = datetime.fromisoformat(t.replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
     elif isinstance(t, datetime):
         dt = t.replace(tzinfo=timezone.utc)
     elif isinstance(t, skyfield.Time):
@@ -621,7 +629,7 @@ def find_events(obj_gs: vectorlib.VectorFunction, t0: skyfield.Time, t1: skyfiel
 
 
 def events_to_passes(obj_name: str, obj_gs: object, t_event: list, events: list,
-                     min_max_elevation: float) -> list[Pass]:
+                     min_max_elevation: float, start_time: skyfield.Time, end_time: skyfield.Time) -> list[Pass]:
     passes = []
     t_aos, az_aos, t_max, el_max, az_max, t_los, az_los = None, None, None, None, None, None, None
 
@@ -630,11 +638,11 @@ def events_to_passes(obj_name: str, obj_gs: object, t_event: list, events: list,
         el, az, _ = obj_gs.at(t).altaz()
 
         if event == 0:  # AOS
-            t_aos, az_aos = t.utc_datetime(), az.degrees
+            t_aos, az_aos = max(t.utc_datetime(), start_time.utc_datetime()), az.degrees
         elif event == 1:  # Max
             t_max, el_max, az_max = t.utc_datetime(), el.degrees, az.degrees
         elif event == 2:  # LOS
-            t_los, az_los = t.utc_datetime(), az.degrees
+            t_los, az_los = min(t.utc_datetime(), end_time.utc_datetime()), az.degrees
 
             # Make sure we have all details
             if t_aos and t_max and el_max > min_max_elevation:

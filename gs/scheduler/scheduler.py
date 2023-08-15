@@ -14,7 +14,7 @@ from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, bind, RPC
 from porthouse.gs.scheduler.model import Schedule, TaskStatus, Process, Task
 from porthouse.gs.tracking.gnss_tracker import PointTracker
 from porthouse.gs.tracking.orbit_tracker import OrbitTracker
-from porthouse.gs.tracking.utils import SkyfieldModuleMixin, CelestialObject
+from porthouse.gs.tracking.utils import SkyfieldModuleMixin, CelestialObject, parse_time
 
 
 class Scheduler(SkyfieldModuleMixin, BaseModule):
@@ -77,7 +77,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         available_rotators = []
         for prefix in rotators:
             try:
-                status = await self.send_rpc_request("rotator", f"{prefix}.rpc.get_status")
+                status = await self.send_rpc_request("rotator", f"{prefix}.rpc.status")
             except (RPCRequestTimeout, asyncio.exceptions.TimeoutError):
                 self.log.warning("Rotator %s not available", prefix)
                 continue
@@ -286,7 +286,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 return False
             return True
 
-        processes = [process.to_dict() for process in self.processes if filter_task(process)]
+        processes = [process.to_dict() for process in self.processes.values() if filter_task(process)]
         return processes
 
     async def create_schedule(self, start_time: datetime = None, end_time: datetime = None):
@@ -425,7 +425,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
         def date_arg(date_field):
             if date_field in request_data:
-                return datetime.strptime(request_data[date_field], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+                return parse_time(request_data[date_field]).utc_datetime()
             return None
 
         if request_name == "rpc.get_schedule":
