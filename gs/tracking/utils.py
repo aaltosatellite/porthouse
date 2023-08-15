@@ -216,7 +216,7 @@ class Satellite:
 
     def passes_contain(self, start_time, end_time=None, period=24):
         start_time = parse_time(start_time).utc_datetime()
-        end_time = parse_time(end_time) if end_time is not None else start_time + timedelta(hours=period)
+        end_time = parse_time(end_time).utc_datetime() if end_time is not None else start_time + timedelta(hours=period)
         return self.passes is not None and len(self.passes) > 0 and \
             self.passes_start_time <= start_time and self.passes_end_time >= end_time
 

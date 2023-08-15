@@ -308,8 +308,7 @@ class TargetTracker:
                                           f" in {m:.0f} minutes and {s:.0f} seconds")
 
             # Check if a pass is already going on
-            pos = self.target.pos_at(now)
-            if pos.altaz()[0].degrees > 0:
+            if now >= next_pass.t_aos:
                 await self.module.send_event("aos", target=self.target, rotators=self.rotators)
                 self.status = TrackerStatus.TRACKING
 
@@ -321,9 +320,8 @@ class TargetTracker:
 
         elif self.status == TrackerStatus.AOS:
 
-            # Is the satellite over the horizon
-            pos = self.target.pos_at(now)
-            if pos.altaz()[0].degrees > 0:  # Above the horizon?
+            # Did AOS happen?
+            if now >= next_pass.t_aos:
                 await self.module.send_event("aos", target=self.target, rotators=self.rotators)
                 self.status = TrackerStatus.TRACKING
 
@@ -334,8 +332,7 @@ class TargetTracker:
         elif self.status == TrackerStatus.TRACKING:
 
             # Calculate the position 1 second in the future
-            now += datetime.timedelta(seconds=1)
-            pos = self.target.pos_at(now)
+            pos = self.target.pos_at(now + datetime.timedelta(seconds=1))
 
             # TODO: check that works for celestial targets also
             el, az, range, _, _, range_rate = pos.frame_latlon_and_rates(self.module.gs)
@@ -350,8 +347,8 @@ class TargetTracker:
             await self.module.broadcast_pointing(self.target, self.rotators, az=az.degrees, el=el.degrees,
                                                  range=range.m, range_rate=range_rate.m_per_s)
 
-            # Is the satellite below the horizon
-            if el.degrees < 0:
+            # Did LOS happen?
+            if now >= next_pass.t_los:
                 await self.module.send_event("los", target=self.target, rotators=self.rotators)
                 self.status = TrackerStatus.LOS
 
