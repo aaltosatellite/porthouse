@@ -247,19 +247,24 @@ class Satellite:
 
         if sunlit is None and sun_max_elevation is None:
             # Find all the events for the satellite, as before
-            t_event, events = self.sc.find_events(self.gs, start_time, end_time, min_elevation)
+            t_event, events = self.sc.find_events(self.gs, start_time - timedelta(seconds=60),
+                                                  end_time + timedelta(seconds=60), min_elevation)
         else:
             # Use own version of find_events that takes into account sunlit and sun_max_elevation params
             if CelestialObject.EARTH is None:
                 CelestialObject.init_bodies()
             obj_gs = (CelestialObject.EARTH + self.sc) - (CelestialObject.EARTH + self.gs)
-            t_event, events = find_events(obj_gs, start_time, end_time, min_elevation, min_max_elevation,
-                                          CelestialObject.BODIES, sun_max_elevation, sunlit)
+            t_event, events = find_events(obj_gs, start_time - timedelta(seconds=60), end_time + timedelta(seconds=60),
+                                          min_elevation, min_max_elevation, CelestialObject.BODIES,
+                                          sun_max_elevation, sunlit)
 
         self.passes = events_to_passes(self.name, self.sc - self.gs, t_event, events, min_max_elevation,
                                        start_time, end_time)
         self.passes_start_time = start_time.utc_datetime()
         self.passes_end_time = end_time.utc_datetime()
+        if len(self.passes) == 0:
+            print(f"{t_event} | {events} | {start_time - timedelta(seconds=60)} | {end_time + timedelta(seconds=60)} | "
+                  f"{min_elevation} | {min_max_elevation} | {sun_max_elevation} | {sunlit}")
         return self.passes
 
 
