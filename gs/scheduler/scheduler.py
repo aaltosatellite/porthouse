@@ -56,7 +56,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         task.add_done_callback(self.task_done_handler)
 
     async def setup(self):
-        self.gs_rotators = await self.check_rotators(self.gs_config["rotators"])
+        self.gs_rotators = await self.check_rotators(self.gs.config["rotators"])
 
         tle_list = await self.send_rpc_request("tracking", "tle.rpc.get_tle")
         self.tle_sats = [tle["name"] for tle in tle_list["tle"]]
@@ -74,14 +74,18 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Check if rotators are available.
         """
+        await asyncio.sleep(1)
+
         available_rotators = []
         for prefix in rotators:
             try:
-                status = await self.send_rpc_request("rotator", f"{prefix}.rpc.status")
+                status = await self.send_rpc_request("rotator", f"{prefix}.rpc.status", timeout=2)
+                if len(status):
+                    available_rotators.append(prefix)
             except (RPCRequestTimeout, asyncio.exceptions.TimeoutError):
-                self.log.warning("Rotator %s not available", prefix)
-                continue
-            available_rotators.append(prefix)
+                self.log.warning(f"Rotator {prefix} not available")
+
+        self.log.debug(f"Available rotators: {available_rotators}")
         return rotators
 
     async def execute_schedule(self):
@@ -131,10 +135,11 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
         self.maybe_start_schedule_creation()
 
-    def maybe_start_schedule_creation(self, force=False, start_time=None, end_time=None):
+    def maybe_start_schedule_creation(self, start_time=None, end_time=None, force=False, process_name=None):
         """
-        Create new tasks every 24h, up to 48h into the future,
-        starting from the last scheduled task or 24h into the future, whichever is earlier.
+        Create new tasks every 24h, up to 48h into the future, starting from the last scheduled task or 24h into
+        the future, whichever is earlier. Can also be used to force schedule creation for a given time interval,
+        possibly limiting the creation to a certain process only.
         """
         now = datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -156,7 +161,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 end_time = now + timedelta(hours=48)
 
             loop = asyncio.get_event_loop()
-            self._create_schedule_task = loop.create_task(self.create_schedule(start_time, end_time),
+            self._create_schedule_task = loop.create_task(self.create_schedule(start_time, end_time, process_name),
                                                           name="scheduler.create_schedule")
             self._create_schedule_task.add_done_callback(self.task_done_handler)
 
@@ -289,20 +294,23 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         processes = [process.to_dict() for process in self.processes.values() if filter_task(process)]
         return processes
 
-    async def create_schedule(self, start_time: datetime = None, end_time: datetime = None):
+    async def create_schedule(self, start_time: datetime = None, end_time: datetime = None, process_name: str = None):
         """
         Create schedule by predicting passes.
         """
         start_time = start_time or datetime.now(timezone.utc)
         end_time = end_time or start_time + timedelta(hours=24)
 
-        self.log.debug(f"Creating schedule from {start_time.isoformat()} to {end_time.isoformat()}...")
+        self.log.debug(f"Creating schedule from {start_time.isoformat()} to {end_time.isoformat()}"
+                       + ('' if process_name is None else f'for process {process_name} only') + "...")
         self.read_processes()
 
         # sort so that higher priority (low prio number) processes are scheduled first
         added_count = 0
         async with self.schedule_lock:
             for proc in sorted(list(self.processes.values()), key=lambda p: p.priority, reverse=False):
+                if process_name is not None and proc.process_name != process_name:
+                    continue
                 tasks = await self.create_tasks(proc, start_time, end_time)
                 self.log.debug(f"Adding {len(tasks)} tasks for process {proc.process_name}")
                 c = self.add_tasks(tasks, 'procrustean')    # modify added tasks to fit into the schedule
@@ -440,16 +448,19 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             if request_data.get("reset", False):
                 start_time = start_time or datetime.now(timezone.utc)
                 end_time = end_time or start_time + timedelta(hours=48)
+                process_name = request_data.get("process_name", None)
 
                 async with self.schedule_lock:
                     tbr = [task for task in self.schedule
                            if task.status == TaskStatus.SCHEDULED and task.auto_scheduled
-                              and task.start_time >= start_time and task.end_time <= end_time]
+                              and task.start_time >= start_time and task.end_time <= end_time
+                              and (process_name is None or task.process_name == process_name)]
                     for task in tbr:
                         self.schedule.remove(task)
                     self.write_schedule()
 
-            return self.maybe_start_schedule_creation(force=True, start_time=start_time, end_time=end_time)
+            return self.maybe_start_schedule_creation(start_time=start_time, end_time=end_time, force=True,
+                                                      process_name=request_data.get("process_name", None))
 
         elif request_name == "rpc.enable_schedule_file_sync":
             if "enable" not in request_data:

@@ -5,12 +5,16 @@
 """
 
 import socket
-from .controllerbox import RotatorError
+from typing import Optional, Tuple
+
+from .base import RotatorError, RotatorController
 
 __all__ = [
     "HamlibError",
-    "rigctl",
-    "rotctl"
+    "HamlibRadioInterface",
+    "HamlibController",
+    "HamlibErrorString",
+    "parse_address",
 ]
 
 
@@ -37,6 +41,7 @@ HamlibErrorString = {
     -17: "Argument out of domain of func"
 }
 
+
 class HamlibError(RotatorError):
     """
     Exception class for errors returned by Hamlib
@@ -51,41 +56,103 @@ def parse_address(address_str):
     return addr, int(port)
 
 
-class rotctl:
+class HamlibController(RotatorController):
     """
     Wrapper for Hamlib Rotator Interface
     """
 
-    def __init__(self, addr="localhost:4533", debug=False):
-        """
-        """
-        self.connected = False
-        self.target = parse_address(addr)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._connected = False
+        self._target = parse_address(self.address)
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.target_position = (0, 0)
-        self.debug = debug
-
 
     def connect(self):
         """
         Connect to hamlib daemon
         """
         try:
-            self._sock.connect(self.target)
-            self.connected = True
+            self._sock.connect(self._target)
+            self._connected = True
         except ConnectionRefusedError:
             raise
         except socket.error:
             raise
         return True
 
+    def disconnect(self):
+        """
+            Disconnect from the hamlib daemon
+        """
+        self._sock.close()
+        self._connected = False
 
-    def execute(self, command):
+    def stop(self):
+        return self._execute(b"S\n")
+
+    def set_position(self,
+                     az, el,
+                     rounding=1,
+                     shortest_path=True):
+
+        self.position_valid(az, el, raise_error=True)
+        self.target_position = (az, el)
+
+        if shortest_path:
+            # TODO: Mimic sortest path
+            pass
+
+        return self._execute(f"P {round(az, rounding)} {round(el, rounding)}\n")
+
+    def get_position(self):
+        ret = self._execute(b"p\n")
+        try:
+            az, el = tuple(map(float, ret.decode("ascii").split()))
+            self.current_position = az, el
+        except ValueError:
+            raise HamlibError("Failed to cast az/el information to floats")
+
+        self.maybe_enforce_limits()
+        return self.current_position
+
+    def get_position_target(self):
+        return self.target_position
+
+    def get_position_range(self) -> Tuple[float, float, float, float]:
+        return self.az_min, self.az_max, self.el_min, self.el_max
+
+    def set_position_range(self,
+                           az_min: Optional[float] = None,
+                           az_max: Optional[float] = None,
+                           el_min: Optional[float] = None,
+                           el_max: Optional[float] = None,
+                           rounding: int = 1) -> Tuple[float, float, float, float]:
+        if az_min is not None:
+            self.az_min = az_min
+        if az_max is not None:
+            self.az_max = az_max
+        if el_min is not None:
+            self.el_min = el_min
+        if el_max is not None:
+            self.el_max = el_max
+        return self.get_position_range()
+
+    def reset_position(self, az: float, el: float) -> None:
+        raise NotImplementedError("reset_position not implemented")
+
+    def get_dutycycle_range(self) -> Tuple[int, int, int, int]:
+        pass
+
+    def set_dutycycle_range(self, az_duty_min: Optional[int] = None, az_duty_max: Optional[int] = None,
+                            el_duty_min: Optional[int] = None, el_duty_max: Optional[int] = None) -> None:
+        pass
+
+    def _execute(self, command):
         """
         Execute command
         """
 
-        if not self.connected:
+        if not self._connected:
             self.connect()
 
         if isinstance(command, str):
@@ -113,55 +180,7 @@ class rotctl:
             return response
 
 
-    def disconnect(self):
-        """
-            Disconnect from the hamlib daemon
-        """
-        self._sock.close()
-        self.connected = False
-
-
-    def stop(self):
-        """
-            Stop rotator movement
-        """
-        return self.execute(b"S\n")
-
-
-    def set_position(self,
-                     az, el,
-                     rounding=1,
-                     shortest_path=True):
-        """
-            Set az el
-        """
-        if shortest_path:
-            # TODO: Mimic sortest path
-            pass
-
-        self.target_position = (az, el)
-        return self.execute(f"P {round(az, rounding)} {round(el, rounding)}\n")
-
-
-    def get_position(self):
-        """
-            Request rotator's current position and return it as tuple
-        """
-        ret = self.execute(b"p\n")
-        try:
-            return tuple(map(float, ret.decode("ascii").split()))
-        except ValueError:
-            raise HamlibError("Failed to cast az/el information to floats")
-
-
-    def get_position_target(self):
-        """
-        Get position where the rotator is moving to.
-        """
-        return self.target_position
-
-
-class rigctl:
+class HamlibRadioInterface:
     """
     Wrapper for Hamlib Radio Interface
     """

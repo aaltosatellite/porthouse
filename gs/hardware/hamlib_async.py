@@ -6,78 +6,83 @@
 import asyncio
 
 __all__ = [
-    "HamlibError",
-    "rotctl"
+    "HamlibAsyncController"
 ]
 
-
-# Look up to decode hamlib error codes to strings
-# https://github.com/Hamlib/Hamlib/blob/master/include/hamlib/rig.h#L119
-HamlibErrorString = {
-    0: "No error",
-    -1: "Invalid parameter",
-    -2: "Invalid Configuration (serial,...)",
-    -3: "Memory shortage",
-    -4: "Function not implemented, but will be",
-    -5: "Communication timed out",
-    -6: "IO Error, including open failed",
-    -7: "Internal Hamlib error",
-    -8: "Protocol error",
-    -9: "Command rejected by the rig/rot",
-    -10: "Command performed, but arg truncated",
-    -11: "Function not available",
-    -12: "VFO not targetable",
-    -13: "Error talking on the bus",
-    -14: "Collision on the bus",
-    -15: "NULL RIG handle or any invalid pointer parameter in get arg",
-    -16: "Invalid VFO",
-    -17: "Argument out of domain of func"
-}
-
-class HamlibError(RuntimeError):
-    """
-    Exception class for errors returned by Hamlib
-    """
+from porthouse.gs.hardware.hamlib import HamlibController, HamlibError, HamlibErrorString, parse_address
 
 
-def parse_address(address_str):
-    """
-    A util to parse address string to tuple.
-    """
-    addr, port = address_str.split(":")
-    return addr, int(port)
-
-
-class rotctl:
+class HamlibAsyncController(HamlibController):
     """
     Wrapper for Hamlib Rotator Interface
     """
 
-    def __init__(self, addr="localhost:4533", debug=False):
-        """
-        """
-        self.connected = False
-        self.reader = None
-        self.writer = None
-        self.target = parse_address(addr)
-        self.target_position = (0, 0)
-        self.debug = debug
-
+    def __init__(self, *args, **kwargs):
+        super(HamlibController, self).__init__(*args, **kwargs)
+        self._connected = False
+        self._target = parse_address(self.address)
+        self._reader = None
+        self._writer = None
 
     async def connect(self):
         """
         Connect to hamlib daemon
         """
-        self.reader, self.writer = \
-            await asyncio.open_connection(self.target[0], self.target[1])
+        self._reader, self._writer = await asyncio.open_connection(self._target[0], self._target[1])
 
-
-    async def execute(self, command):
+    async def disconnect(self):
         """
-        Execute command
+        Disconnect from the hamlib daemon
         """
 
-        if self.writer is None:
+        self._writer.close()
+        await self._writer.wait_closed()
+
+        self._writer, self._reader = None, None
+
+    async def stop(self):
+        return await self._execute_async(b"S\n")
+
+    async def set_position(self,
+                     az, el,
+                     rounding=1,
+                     shortest_path=True):
+
+        self.position_valid(az, el, raise_error=True)
+        self.target_position = (az, el)
+
+        if shortest_path:
+            # TODO: Mimic sortest path
+            pass
+
+        await self._execute_async(f"P {round(az, rounding)} {round(el, rounding)}\n")
+
+        return await self.get_position()
+
+    async def get_position(self):
+        ret = await self._execute_async(b"p\n")
+        try:
+            az, el = tuple(map(float, ret.decode("ascii").split()))
+            self.current_position = az, el
+        except ValueError:
+            raise HamlibError("Failed to cast az/el information to floats")
+
+        await self.maybe_enforce_limits()
+        return self.current_position
+
+    async def maybe_enforce_limits(self) -> None:
+        # async version of base class maybe_enforce_limits
+        if self.enforce_limits and not self.position_valid(*self.current_position):
+            trg_pos = await self.get_position_target()
+            if not self.position_valid(*trg_pos):
+                await self.set_position(*self.closest_valid_position(*trg_pos), rounding=1, shortest_path=True)
+
+    async def get_position_target(self):
+        await asyncio.sleep(0)  # Just to make the function to a coroutine
+        return self.target_position
+
+    async def _execute_async(self, command):
+        if self._writer is None:
             await self.connect()
 
         if isinstance(command, str):
@@ -88,9 +93,9 @@ class rotctl:
 
         # TODO: Timeout/disconnect
         try:
-            self.writer.write(command)
-            await self.writer.drain()
-            response = await self.reader.read(1024)
+            self._writer.write(command)
+            await self._writer.drain()
+            response = await self._reader.read(1024)
         except Exception as e:
             raise HamlibError("Failed to send or recv") from e
 
@@ -107,64 +112,3 @@ class rotctl:
                 raise HamlibError(HamlibErrorString.get(v, "Unknown error %d" % v))
         else:
             return response
-
-
-    async def disconnect(self):
-        """
-        Disconnect from the hamlib daemon
-        """
-
-        self.writer.close()
-        await self.writer.wait_closed()
-
-        self.writer, self.reader = None, None
-
-
-    async def stop(self):
-        """
-        Stop rotator movement
-        """
-        return await self.execute(b"S\n")
-
-
-    async def set_position(self,
-                     az, el,
-                     rounding=1,
-                     shortest_path=True):
-        """
-        Set azimuth and elevation to precision of rounding and threshold.
-        Additionally, possible to not use shortest path.
-
-        Args:
-            az: Target azimuth angle
-            el: Target elevation angle
-            rounding: Number of decimals
-            shortets_path: Should the rotator try move using shortest path
-
-        Returns:
-            Returns the current rotator position as tuple
-
-        """
-        self.target_position = (az, el)
-        await self.execute(f"P {round(az, rounding)} {round(el, rounding)}\n")
-
-        return await self.get_position()
-
-
-    async def get_position(self):
-        """
-            Request rotator's current position and return it as tuple
-        """
-        ret = await self.execute(b"p\n")
-        try:
-            return tuple(map(float, ret.decode("ascii").split()))
-        except ValueError:
-            raise HamlibError("Failed to cast az/el information to floats")
-
-
-    async def get_position_target(self):
-        """
-        Get position where the rotator is moving to.
-        """
-        await asyncio.sleep(0) # Just to make the function to a coroutine
-        return self.target_position

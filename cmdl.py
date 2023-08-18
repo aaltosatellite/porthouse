@@ -194,7 +194,7 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     print(r"|_|                                               ")
     print(r"             Command line interface               ")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
     loop.run_until_complete(connect_broker(args.amqp_url))
     if args.logger:
         loop.create_task(logger())
