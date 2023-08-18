@@ -23,8 +23,8 @@ class SchedulerInterface:
         else:
             return processes
 
-    async def update_schedule(self, start_time=None, end_time=None):
-        params = dict(start_time=start_time, end_time=end_time)
+    async def update_schedule(self, start_time=None, end_time=None, reset=False, process_name=None):
+        params = dict(start_time=start_time, end_time=end_time, reset=reset, process_name=process_name)
         res = await send_rpc_request("scheduler", "rpc.update_schedule", params)
         return res
 
