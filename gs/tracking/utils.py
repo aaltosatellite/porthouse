@@ -133,6 +133,23 @@ class Pass:
         return self.t_aos < other.t_los < self.t_los
 
 
+class GroundStation:
+    def __init__(self):
+        # Open config file
+        with open(cfg_path("groundstation.yaml")) as f:
+            self.config = yaml.load(f, Loader=yaml.Loader)['groundstation']
+
+        # Create observer from config file
+        self.pos = skyfield.Topos(
+            latitude=skyfield.Angle(degrees=self.config["latitude"]),
+            longitude=skyfield.Angle(degrees=self.config["longitude"]),
+            elevation_m=self.config["elevation"]
+        )
+
+    def __str__(self):
+        return f"GroundStation ({self.config['name']})"
+
+
 class Satellite:
     """ Class to store satellite info """
 
@@ -289,7 +306,7 @@ class CelestialObject:
         """
 
         self.target = target
-        self.gs = gs
+        self.gs = gs or GroundStation().pos
 
         self.file = None
         self.earth = None
@@ -440,17 +457,7 @@ class SkyfieldModuleMixin:
 
         self.satellites: dict[str, Satellite] = {}
         self.celestional_objects: dict[str, CelestialObject] = {}
-
-        # Open config file
-        with open(cfg_path("groundstation.yaml")) as f:
-            self.gs_config = yaml.load(f, Loader=yaml.Loader)['groundstation']
-
-        # Create observer from config file
-        self.gs = skyfield.Topos(
-            latitude=skyfield.Angle(degrees=self.gs_config["latitude"]),
-            longitude=skyfield.Angle(degrees=self.gs_config["longitude"]),
-            elevation_m=self.gs_config["elevation"]
-        )
+        self.gs = GroundStation()
 
     async def get_satellite(self, target: str,
                             start_time: Union[None, str, datetime, skyfield.Time] = None,
@@ -478,7 +485,7 @@ class SkyfieldModuleMixin:
                 self.log.error("Failed to request TLE: %s", e.args[0])
                 return
 
-            sat = Satellite(target, ret["tle1"], ret["tle2"], self.gs)
+            sat = Satellite(target, ret["tle1"], ret["tle2"], self.gs.pos)
 
             self.log.debug(f"Calculating passes for {target}: {pass_calc_kwargs}")
             sat.calculate_passes(**pass_calc_kwargs)
@@ -513,7 +520,7 @@ class SkyfieldModuleMixin:
 
         if obj is None:
             try:
-                obj = CelestialObject(target, self.gs)
+                obj = CelestialObject(target, self.gs.pos)
                 with ThreadPoolExecutor() as executor:
                     await asyncio.get_running_loop().run_in_executor(executor, obj.initialize)
                 with ThreadPoolExecutor() as executor:
@@ -652,3 +659,28 @@ def events_to_passes(obj_name: str, obj_gs: object, t_event: list, events: list,
             t_aos, az_aos, t_max, el_max, t_los, az_los = None, None, None, None, None, None
 
     return passes
+
+
+def spherical2cartesian_deg(az, el, r=1.0):
+    az, el = np.radians(az), np.radians(el)
+    x = r * np.cos(el) * np.cos(az)
+    y = r * np.cos(el) * np.sin(az)
+    z = r * np.sin(el)
+    return x, y, z
+
+
+def angle_between_deg(v1, v2):
+    try:
+        v1 = np.array(v1)
+        v2 = np.array(v2)
+        assert len(v1) == len(v2) == 3 and v1.shape == v2.shape == (3,), "vectors must be 3D"
+    except Exception:
+        raise ValueError("vectors must be 3D, now: v1=%s, v2=%s" % (v1, v2))
+
+    return np.degrees(np.arccos(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))))
+
+
+def angle_between_el_az_deg(az1, el1, az2, el2):
+    v1 = spherical2cartesian_deg(az1, el1)
+    v2 = spherical2cartesian_deg(az2, el2)
+    return angle_between_deg(v1, v2)

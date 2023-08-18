@@ -36,8 +36,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         self.target_trackers = []
 
         # start tracking if we have a default target
-        target_name = self.gs_config.get("default", None)
-        rotators = self.gs_config.get("rotators", None)
+        target_name = self.gs.config.get("default", None)
+        rotators = self.gs.config.get("rotators", None)
         if target_name and rotators:
             loop = asyncio.get_event_loop()
             task = loop.create_task(self.add_target(target_name, rotators), name="orbit_tracker.add_target")
@@ -335,7 +335,7 @@ class TargetTracker:
             pos = self.target.pos_at(now + datetime.timedelta(seconds=1))
 
             # TODO: check that works for celestial targets also
-            el, az, range, _, _, range_rate = pos.frame_latlon_and_rates(self.module.gs)
+            el, az, range, _, _, range_rate = pos.frame_latlon_and_rates(self.module.gs.pos)
 
             if self.module.debug:
                 m, s = divmod((next_pass.t_los - now).total_seconds(), 60)
