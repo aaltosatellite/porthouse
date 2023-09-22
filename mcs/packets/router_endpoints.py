@@ -76,7 +76,7 @@ class ZMQ_Subscriber_Endpoint:
         """ ZMQ receiver task  """
         try:
             while not self._closing.done():
-                packet = await (self._sock.recv_multipart() if self.multipart else self._sock.recv())
+                packet = await (self._sock.recv_multipart() if self._multipart else self._sock.recv())
                 self.m.route_frame(self, packet)
         except:
             import traceback

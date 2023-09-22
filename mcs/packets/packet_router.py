@@ -129,7 +129,7 @@ class PacketRouter(BaseModule):
                     continue
 
                 self.log.debug("Creating new endpoint '%s' (type: %s)", endpoint_name, endpoint_type)
-                persistent = endpoint_params.pop("persistent", "True").lower() == "true "
+                persistent = endpoint_params.pop("persistent", "True").lower() == "true"
                 formatter = endpoint_params.pop("formatter", None)
                 metadata = endpoint_params.pop("metadata", { })
 
@@ -241,8 +241,8 @@ class PacketRouter(BaseModule):
             # Merge all metadata field with priority
             metadata = source.metadata.copy()
             metadata.update(destination.metadata)
-            metadata.update(frame.metadata)
-            frame.metadata = metadata
+            metadata.update(frame.get("metadata", {}))
+            frame["metadata"] = metadata
 
             # Apply the output formatter
             if destination.formatter:
