@@ -184,7 +184,8 @@ class Rotator(BaseModule):
         if self.target_valid:
 
             # the driver will avoid any safe zone violations by changing the target by itself, forgetting the given one
-            if self.moving_to_target and not self.close_positions(self.target_position, self.rotator.target_position):
+            if self.moving_to_target and not self.close_positions(self.target_position,
+                                                                  self.rotator.target_position, accuracy=0.2):
                 self.log.info("Target position changed by driver (%s -> %s), trying to continue to previous target",
                                self.target_position, self.rotator.target_position)
                 self.set_target_position(self.target_position)
