@@ -137,14 +137,14 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     #
     services = [
         {
-            "name": "rotator",
+            "name": "uhf_rotator",
             "class": "porthouse.gs.hardware.interface.RotatorInterface",
             "params": {
                 "prefix": "uhf"
             }
         },
         {
-            "name": "torator",
+            "name": "sband_rotator",
             "class": "porthouse.gs.hardware.interface.RotatorInterface",
             "params": {
                 "prefix": "sband"
