@@ -163,7 +163,11 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             loop = asyncio.get_event_loop()
             self._create_schedule_task = loop.create_task(self.create_schedule(start_time, end_time, process_name),
                                                           name="scheduler.create_schedule")
-            self._create_schedule_task.add_done_callback(self.task_done_handler)
+            self._create_schedule_task.add_done_callback(self.schedule_creation_done_handler)
+
+    def schedule_creation_done_handler(self, task):
+        super().task_done_handler(task)
+        self._create_schedule_task = None
 
     def read_processes(self):
         """
@@ -193,6 +197,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Write schedule to YAML file
         """
+        # NOTE: currently not called from anywhere, should probably use in the future if changes to processes
+        #       through API is implemented
         if not self.sync_schedule_files:
             return
 
@@ -309,7 +315,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         added_count = 0
         async with self.schedule_lock:
             for proc in sorted(list(self.processes.values()), key=lambda p: p.priority, reverse=False):
-                if process_name is not None and proc.process_name != process_name:
+                if process_name is not None and proc.process_name != process_name or not proc.enabled:
                     continue
                 tasks = await self.create_tasks(proc, start_time, end_time)
                 self.log.debug(f"Adding {len(tasks)} tasks for process {proc.process_name}")
@@ -432,7 +438,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         await asyncio.sleep(0)
 
         def date_arg(date_field):
-            if date_field in request_data:
+            if date_field in request_data and request_data[date_field]:
                 return parse_time(request_data[date_field]).utc_datetime()
             return None
 

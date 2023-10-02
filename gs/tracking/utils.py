@@ -498,7 +498,7 @@ class SkyfieldModuleMixin:
             sat.calculate_passes(**pass_calc_kwargs)
 
         if sat.tle_age_days > 14:
-            self.log.warning(f"TLE lines for \"{target}\" are {sat.tle_age_days:%.1f} days old and might be inaccurate!")
+            self.log.warning(f"TLE lines for \"{target}\" are {sat.tle_age_days:.1f} days old and might be inaccurate!")
         if len(sat.passes) == 0:
             self.log.warning(f"No passes generated for \"{target}\"!")
 
