@@ -85,7 +85,7 @@ class RotatorController(abc.ABC):
             assert np.all(np.diff(hm[:, 0]) > 0), "horizon map azimuth values must be in increasing order"
 
         self.min_sun_angle, self.sun = [None] * 2
-        if min_sun_angle is not None and horizon_map_file.strip().lower() not in ('', 'none', 'null'):
+        if min_sun_angle is not None and min_sun_angle.strip().lower() not in ('', 'none', 'null'):
             self.min_sun_angle = min_sun_angle
             self.sun = CelestialObject('cel:Sun')
             self.sun.initialize()
