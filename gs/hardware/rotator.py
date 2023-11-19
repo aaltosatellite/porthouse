@@ -47,10 +47,6 @@ class Rotator(BaseModule):
         # min azimuth, max azimuth, min elevation, max elevation
         assert position_range[0] < position_range[1], "azimuth min must be smaller than azimuth max"
         assert position_range[2] < position_range[3], "elevation min must be smaller than elevation max"
-        assert position_range[0] >= -90, "azimuth min must be >= -90"
-        assert position_range[1] <= 450, "azimuth max must be <= 450"
-        assert position_range[2] >= 0, "elevation min must be >= 0"
-        assert position_range[3] <= 90, "elevation max must be <= 90"
 
         self.threshold = threshold               # only move while position difference is larger, given in degrees
 
