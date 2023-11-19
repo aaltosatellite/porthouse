@@ -69,10 +69,11 @@ class RotatorController(abc.ABC):
         self.current_position = (0.0, 0.0)
         self.target_position = (0.0, 0.0)
 
-        self.horizon_map_file = horizon_map_file
+        self.horizon_map_file = None
         self.horizon_map = None
 
-        if horizon_map_file is not None:
+        if horizon_map_file is not None and horizon_map_file.strip().lower() not in ('', 'none', 'null'):
+            self.horizon_map_file = horizon_map_file
             self.horizon_map = hm = np.load(cfg_path(horizon_map_file))
             assert hm is not None and len(hm.shape) == 2 and hm.shape[1] == 2, \
                 f'horizon map {horizon_map_file} must be an array with two columns (az, el), ' \
@@ -83,9 +84,13 @@ class RotatorController(abc.ABC):
                 "horizon map must start and end at the same elevation (azimuth 0 and 360)"
             assert np.all(np.diff(hm[:, 0]) > 0), "horizon map azimuth values must be in increasing order"
 
-        self.min_sun_angle, self.sun = [None] * 2
-        if min_sun_angle is not None:
-            self.min_sun_angle = min_sun_angle
+        try:
+            self.min_sun_angle, self.sun = [None] * 2
+            self.min_sun_angle = float(min_sun_angle)
+        except (ValueError, TypeError):
+            pass
+
+        if self.min_sun_angle is not None:
             self.sun = CelestialObject('cel:Sun')
             self.sun.initialize()
 
