@@ -418,7 +418,7 @@ class Rotator(BaseModule):
             event_body = json.loads(message.body)
         except ValueError as e:
             self.log.error('Failed to parse json: %s\n%s',
-                           e.args[0], message.body)
+                           e.args[0], message.body, exc_info=True)
             return
 
         if self.prefix not in event_body.get('rotators', []):

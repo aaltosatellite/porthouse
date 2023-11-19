@@ -32,7 +32,7 @@ class SchedulerInterface:
         else affects all processes (default). Affected time range is [start_time, end_time).
         Args:
             start_time: Datetime in ISO format and UTC timezone, e.g. "2020-01-01T00:00:00". Default is now.
-            end_time: Same format as start_time, default is 24 hours from now.
+            end_time: Same format as start_time, default is 48 hours from now.
             reset: bool
             process_name: str
         """
