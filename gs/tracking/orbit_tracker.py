@@ -58,7 +58,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         try:
             event_body = json.loads(message.body)
         except ValueError as e:
-            self.log.error('Failed to parse json: %s\n%s', e.args[0], message.body)
+            self.log.error('Failed to parse json: %s\n%s', e.args[0], message.body, exc_info=True)
             return
 
         if self.TRACKER_TYPE != event_body.get('tracker', ''):
@@ -129,11 +129,11 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         await asyncio.sleep(0)  # Make sure that something is awaited.
 
         if target_name is None or len(target_name) == 0:
-            self.log.error("add_target: Target must not be None or empty")
+            self.log.error("add_target: Target must not be None or empty", exc_info=True)
             return
 
         if rotators is None or len(rotators) == 0:
-            self.log.error("add_target: Rotators must not be None or empty")
+            self.log.error("add_target: Rotators must not be None or empty", exc_info=True)
             return
 
         if target_name in [tt.target.target_name for tt in self.target_trackers]:
@@ -157,12 +157,12 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
                                               sun_max_elevation=sun_max_elevation, sunlit=sunlit)
 
         if target is None:
-            self.log.error(f"add_target: Could not find target {target_name}")
+            self.log.error(f"add_target: Could not find target {target_name}", exc_info=True)
             return
 
         next_pass = target.get_next_pass()
         if next_pass is None:
-            self.log.error(f"add_target: No passes available for {target_name}")
+            self.log.error(f"add_target: No passes available for {target_name}", exc_info=True)
             return
 
         await self.send_event("next_pass", target=target, rotators=rotators, **next_pass.to_dict())

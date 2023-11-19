@@ -239,7 +239,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                     for task in schedule:
                         self.schedule.add(Task.from_dict(task, storage=storage))
                 except ValueError as e:
-                    self.log.error(f"Failed to read schedule file {file}: {e}")
+                    self.log.error(f"Failed to read schedule file {file}: {e}", exc_info=True)
 
     def write_schedule(self):
         """
@@ -588,6 +588,5 @@ class SchedulerError(Exception):
 if __name__ == '__main__':
     Scheduler(
         amqp_url="amqp://guest:guest@localhost:5672/",
-        schedule_file=".schedule.json",
         debug=True
     ).run()

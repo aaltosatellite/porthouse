@@ -148,6 +148,13 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
             }
         },
         {
+            "name": "b_uhf_rotator",
+            "class": "porthouse.gs.hardware.interface.RotatorInterface",
+            "params": {
+                "prefix": "uhf2"
+            }
+        },
+        {
             "name": "sband_rotator",
             "class": "porthouse.gs.hardware.interface.RotatorInterface",
             "params": {

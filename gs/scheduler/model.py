@@ -152,14 +152,14 @@ class Task:
             else:
                 if holes[i - 1][1] < hole_start_time:
                     task = self.copy()
-                    tasks[-1].start_time = holes[i - 1][1] + timedelta(seconds=1)
-                    tasks[-1].end_time = hole_start_time - timedelta(seconds=1)
+                    task.start_time = holes[i - 1][1] + timedelta(seconds=1)
+                    task.end_time = hole_start_time - timedelta(seconds=1)
                     tasks.append(task)
 
             if i == len(holes) - 1:
                 if hole_end_time < self.end_time:
                     task = self.copy()
-                    task.start_time = holes[i - 1][1] + timedelta(seconds=1)
+                    task.start_time = holes[i][1] + timedelta(seconds=1)
                     tasks.append(task)
 
         for lbl, task in zip(iter_all_strings(), tasks):
@@ -199,6 +199,12 @@ class Task:
 
     def __hash__(self):
         return hash((self.task_name,))
+
+    def __str__(self):
+        return f"{self.task_name} ({datetime.isoformat(self.start_time)} - {datetime.isoformat(self.end_time)})"
+
+    def __repr__(self):
+        return str(self)
 
 
 class Process:
@@ -299,8 +305,7 @@ class Schedule:
         if len(overlapping) > 0:
             # NOTE: would get confused if tasks with status EXECUTED or CANCELLED would be still in the *_times lists
             raise ValueError(f"Task {task.task_name} ({task.start_time} - {task.end_time}) "
-                             "overlaps with existing task(s) "
-                             + (', '.join([f"{t.task_name} ({t.start_time} - {t.end_time})" for t in overlapping])))
+                             "overlaps with existing task(s) " + (', '.join([str(t) for t in overlapping])))
 
         self.start_times.add(task)
         self.end_times.add(task)

@@ -1,7 +1,7 @@
 
 from enum import IntEnum
 from datetime import datetime, timedelta, timezone
-from typing import Union, Optional
+from typing import Union, Optional, Callable
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import yaml
@@ -11,7 +11,7 @@ import numpy as np
 from skyfield import searchlib
 from skyfield import vectorlib
 from skyfield.data import hipparcos
-from skyfield.positionlib import position_of_radec, Geometric
+from skyfield.positionlib import position_of_radec, Geometric, Apparent
 import skyfield.api as skyfield
 
 from porthouse.core.config import cfg_path
@@ -262,7 +262,7 @@ class Satellite:
         if el.degrees > min_elevation:
             start_time -= timedelta(minutes=30)
 
-        if sunlit is None and sun_max_elevation is None:
+        if False and sunlit is None and sun_max_elevation is None:
             # Find all the events for the satellite, as before
             t_event, events = self.sc.find_events(self.gs, start_time - timedelta(seconds=60),
                                                   end_time + timedelta(seconds=60), min_elevation)
@@ -270,17 +270,19 @@ class Satellite:
             # Use own version of find_events that takes into account sunlit and sun_max_elevation params
             if CelestialObject.EARTH is None:
                 CelestialObject.init_bodies()
-            obj_gs = (CelestialObject.EARTH + self.sc) - (CelestialObject.EARTH + self.gs)
-            t_event, events = find_events(obj_gs, start_time - timedelta(seconds=60), end_time + timedelta(seconds=60),
+            t_event, events = find_events(CelestialObject.EARTH + self.gs, CelestialObject.EARTH + self.sc,
+                                          start_time - timedelta(seconds=60), end_time + timedelta(seconds=60),
                                           min_elevation, min_max_elevation, CelestialObject.BODIES,
-                                          sun_max_elevation, sunlit)
+                                          sun_max_elevation, sunlit, astrometric=False,
+                                          orbits_per_day=self.sc.model.no_kozai / np.pi / 2 * 60 * 24)
 
-        self.passes = events_to_passes(self.name, self.sc - self.gs, t_event, events, min_max_elevation,
-                                       start_time, end_time)
+        self.passes = events_to_passes(self.name, lambda t: (self.sc - self.gs).at(t).altaz(),
+                                       t_event, events, min_max_elevation, start_time, end_time)
         self.passes_start_time = start_time.utc_datetime()
         self.passes_end_time = end_time.utc_datetime()
         if len(self.passes) == 0:
-            print(f"{t_event} | {events} | {start_time - timedelta(seconds=60)} | {end_time + timedelta(seconds=60)} | "
+            print("No passes found, debug info: "
+                  f"{t_event} | {events} | {start_time - timedelta(seconds=60)} | {end_time + timedelta(seconds=60)} | "
                   f"{min_elevation} | {min_max_elevation} | {sun_max_elevation} | {sunlit}")
         return self.passes
 
@@ -348,9 +350,10 @@ class CelestialObject:
     def target_name(self):
         return self.target
 
-    def pos_at(self, time: Union[None, str, datetime, skyfield.Time]) -> Geometric:
+    def pos_at(self, time: Union[None, str, datetime, skyfield.Time]) -> Apparent:
         assert self._initialized, "CelestialObject not initialized"
-        return (self.obj - (self.earth + self.gs)).at(parse_time(time))
+        t = parse_time(time)
+        return (self.earth + self.gs).at(t).observe(self.obj).apparent()
 
     @staticmethod
     def init_bodies():
@@ -430,10 +433,12 @@ class CelestialObject:
         t1 = parse_time(end_time) if end_time is not None else start_time + timedelta(hours=period)
 
         # calculate passes
-        obj_gs = self.obj - (self.earth + self.gs)
-        t_event, events = find_events(obj_gs, t0, t1, min_elevation, min_max_elevation,
-                                      CelestialObject.BODIES, sun_max_elevation, sunlit)
-        self.passes = events_to_passes(self.name, obj_gs, t_event, events, min_max_elevation, t0, t1)
+        gs = self.earth + self.gs
+        t_event, events = find_events(gs, self.obj, t0, t1, min_elevation, min_max_elevation,
+                                      ephem=CelestialObject.BODIES, max_sun_elevation=sun_max_elevation, sunlit=sunlit,
+                                      astrometric=True, orbits_per_day=1.0, margin_s=12*60*60)
+        self.passes = events_to_passes(self.name, lambda t: gs.at(t).observe(self.obj).apparent().altaz(),
+                                       t_event, events, min_max_elevation, t0, t1)
         self.passes_start_time = t0.utc_datetime()
         self.passes_end_time = t1.utc_datetime()
         return self.passes
@@ -482,7 +487,7 @@ class SkyfieldModuleMixin:
                 self.log.debug("Requesting TLE for %s", target)
                 ret = await self.send_rpc_request("tracking", "tle.rpc.get_tle", {"satellite": target})
             except RPCRequestError as e:
-                self.log.error("Failed to request TLE: %s", e.args[0])
+                self.log.error("Failed to request TLE: %s", e.args[0], exc_info=True)
                 return
 
             sat = Satellite(target, ret["tle1"], ret["tle2"], self.gs.pos)
@@ -529,7 +534,7 @@ class SkyfieldModuleMixin:
 
                 self.celestional_objects[target] = obj
             except Exception as e:
-                self.log.error(f"Failed to initialize celestial object \"{target}\": {e}")
+                self.log.error(f"Failed to initialize celestial object \"{target}\": {e}", exc_info=True)
                 return None
 
         elif not obj.passes_contain(start_time, end_time):
@@ -561,31 +566,61 @@ def parse_time(t: Union[None, str, datetime, skyfield.Time]) -> skyfield.Time:
     return ts.utc(dt)
 
 
-def find_events(obj_gs: vectorlib.VectorFunction, t0: skyfield.Time, t1: skyfield.Time,
+def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0: skyfield.Time, t1: skyfield.Time,
                 min_elevation: float, min_max_elevation: float, ephem=None,
-                max_sun_elevation: Optional[float] = None, sunlit=None) -> tuple[list, list]:
+                max_sun_elevation: Optional[float] = None, sunlit=None, astrometric=True, margin_s=0,
+                orbits_per_day=24/1.5, debug=False) -> tuple[list, list]:
     """
     Find AOS/Max Elevation/LOS events for an object observed from at a groundstation.
     Copied from skyfield.sgp4lib.find_events and slightly modified because sgp4lib didn't support barycentric positions.
     Added optional conditions for sunlit=True/False and max_sun_elevation.
     """
 
+    assert type(t0) == skyfield.Time and type(t1) == skyfield.Time, "t0 and t1 must be of type skyfield.Time"
     assert max_sun_elevation is None or ephem is not None and 'Sun' in ephem, \
         "Sun position required through the ephem param for max_sun_elevation"
-    assert sunlit is None or hasattr(obj_gs, 'is_sunlit') and ephem is not None and 'Sun' in ephem and 'Earth' in ephem, \
+    assert sunlit is None or ephem is not None and 'Sun' in ephem and 'Earth' in ephem, \
         "Sun and Earth positions required through the ephem param for sunlit=True"
 
-    def cheat(t):
-        # still valid for our purposes?
-        t.gast = t.tt * 0.0
-        t.M = t.MT = np.identity(3)
+    day_in_secs = 24 * 60 * 60
+    half_second = 0.5 / day_in_secs
 
-    def elevation(t):
-        cheat(t)
-        return obj_gs.at(t).altaz()[0].degrees
+    if not astrometric:
+        # for close objects such as low Earth orbit satellites, ignores e.g. light travel time
+        def cheat(t):
+            # still valid for our purposes?
+            t.gast = t.tt * 0.0
+            t.M = t.MT = np.identity(3)
 
-    half_second = 0.5 / 24*60*60
+        def elevation(t):
+            cheat(t)
+            return (obj - gs).at(t).altaz()[0].degrees
+
+    else:
+        # for more distant objects such as planets and stars, takes light travel time
+        # and relativistic effects into account
+        def elevation(t):
+            o = gs.at(t).observe(obj).apparent()
+            return o.altaz()[0].degrees
+
+    elevation.step_days = min(0.25, 0.05 / max(orbits_per_day, 1.0))  # determines initial step size
+
+    if debug:
+        eles = elevation(ts.tt_jd(np.linspace(t0.tt, t1.tt, 100)))
+        print(f"Elevations between {t0.tt} and {t1.tt} (step_days: {elevation.step_days}): {eles}")
+
     t_max, el_max = searchlib.find_maxima(t0, t1, elevation, half_second, 12)
+
+    if debug:
+        print(f"Maxima: {t_max.tt}, {el_max}")
+
+    if margin_s > 0:
+        t_max = ts.tt_jd([t0.tt] + list(t_max.tt) + [t1.tt])
+        el_max = np.array([elevation(t_max[0])] + list(el_max) + [elevation(t_max[1])])
+
+    if debug:
+        print(f"Maxima: {t_max.tt} | {el_max}")
+
     if not t_max:
         return t_max, np.ones_like(t_max)
 
@@ -599,34 +634,38 @@ def find_events(obj_gs: vectorlib.VectorFunction, t0: skyfield.Time, t1: skyfiel
     # horizon in between each pair of adjancent maxima.
 
     def unobservable_at(t):
-        cheat(t)
-        obj_above_horizon = obj_gs.at(t).altaz()[0].degrees > min_elevation
+        if not astrometric:
+            cheat(t)
+        obj_above_horizon = elevation(t) > min_elevation
 
-        sun_below_horizon = True
+        sun_below_horizon = np.ones_like(obj_above_horizon)
         if max_sun_elevation is not None:
             # check that its dark (addition by me)
-            sun_below_horizon = obj_gs.at(t).observe(ephem['Sun']).apparent().altaz()[0].degrees < max_sun_elevation
+            sun_below_horizon = gs.at(t).observe(ephem['Sun']).apparent().altaz()[0].degrees < max_sun_elevation
 
-        obj_sunlit = True
+        obj_sunlit = np.ones_like(obj_above_horizon)
         if sunlit is not None:
             # check whether the object is sunlit (addition by me)
-            # obj_sunlit = obj_gs.at(t).observe(ephem['Sun']).apparent()  # slower
-            obj_sunlit = obj_gs.at(t).is_sunlit(ephem)
-            if not sunlit:
-                obj_sunlit = not obj_sunlit
+            if not astrometric:
+                obj_sunlit = (obj - gs).at(t).is_sunlit(ephem)
+            else:
+                obj_sunlit = obj.at(t).observe(ephem['Sun']).apparent().altaz()[0].degrees() > 0  # slower
 
-        return not (obj_above_horizon and sun_below_horizon and obj_sunlit)
+            if not sunlit:
+                obj_sunlit = np.logical_not(obj_sunlit)
+
+        return np.logical_not(np.logical_and.reduce((obj_above_horizon, sun_below_horizon, obj_sunlit)))
 
     # The `jdo` array are the times of maxima, with their averages
     # in between them.  The start and end times are thrown in too,
     # in case a rising or setting is lingering out between a maxima
     # and the ends of our range.  Could this perhaps still miss a
     # stubborn rising or setting near the ends?
-    doublets = np.repeat(np.concatenate(((t0.tt,), jdmax, (t1.tt,))), 2)
+    doublets = np.repeat(np.concatenate(((t0.tt - margin_s,), jdmax, (t1.tt + margin_s,))), 2)
     jdo = (doublets[:-1] + doublets[1:]) / 2.0
 
-    # Use searchlib.find_discrete to find AOS/LOS events
-    trs, rs = searchlib.find_discrete(t0.ts, jdo, unobservable_at, half_second, 8)
+    # Use searchlib._find_discrete to find rising and setting events
+    trs, rs = searchlib._find_discrete(t0.ts, jdo, unobservable_at, half_second, 8)
 
     jd = np.concatenate((jdmax, trs.tt))
     v = np.concatenate((ones, rs * 2))
@@ -635,14 +674,14 @@ def find_events(obj_gs: vectorlib.VectorFunction, t0: skyfield.Time, t1: skyfiel
     return ts.tt_jd(jd[i]), v[i]
 
 
-def events_to_passes(obj_name: str, obj_gs: object, t_event: list, events: list,
+def events_to_passes(obj_name: str, altaz_fn: Callable, t_event: list, events: list,
                      min_max_elevation: float, start_time: skyfield.Time, end_time: skyfield.Time) -> list[Pass]:
     passes = []
     t_aos, az_aos, t_max, el_max, az_max, t_los, az_los = None, None, None, None, None, None, None
 
     # Format the event list to a pass list
     for t, event in zip(t_event, events):
-        el, az, _ = obj_gs.at(t).altaz()
+        el, az, _ = altaz_fn(t)
 
         if event == 0:  # AOS
             t_aos, az_aos = max(t.utc_datetime(), start_time.utc_datetime()), az.degrees
