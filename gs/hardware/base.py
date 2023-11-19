@@ -84,9 +84,13 @@ class RotatorController(abc.ABC):
                 "horizon map must start and end at the same elevation (azimuth 0 and 360)"
             assert np.all(np.diff(hm[:, 0]) > 0), "horizon map azimuth values must be in increasing order"
 
-        self.min_sun_angle, self.sun = [None] * 2
-        if min_sun_angle is not None and min_sun_angle.strip().lower() not in ('', 'none', 'null'):
-            self.min_sun_angle = min_sun_angle
+        try:
+            self.min_sun_angle, self.sun = [None] * 2
+            self.min_sun_angle = float(min_sun_angle)
+        except ValueError:
+            pass
+
+        if self.min_sun_angle is not None:
             self.sun = CelestialObject('cel:Sun')
             self.sun.initialize()
 
