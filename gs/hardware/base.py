@@ -87,7 +87,7 @@ class RotatorController(abc.ABC):
         try:
             self.min_sun_angle, self.sun = [None] * 2
             self.min_sun_angle = float(min_sun_angle)
-        except ValueError:
+        except (ValueError, TypeError):
             pass
 
         if self.min_sun_angle is not None:
