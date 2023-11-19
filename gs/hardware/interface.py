@@ -83,7 +83,6 @@ class RotatorInterface:
         """
         await send_rpc_request("rotator", f"{self.prefix}.rpc.stop")
 
-
     async def set_tracking(
             self,
             enabled: bool=True
@@ -98,3 +97,36 @@ class RotatorInterface:
             "mode": "automatic" if enabled else "manual"
         })
 
+    async def get_position_range(self):
+        """
+        Get allowed position range.
+        """
+        return await send_rpc_request("rotator", f"{self.prefix}.rpc.get_position_range")
+
+    async def set_position_range(self, az_min: float, az_max: float, el_min: float, el_max: float):
+        """
+        Set allowed position range.
+        """
+        return await send_rpc_request("rotator", f"{self.prefix}.rpc.set_position_range", {
+            "az_min": az_min,
+            "az_max": az_max,
+            "el_min": el_min,
+            "el_max": el_max,
+        })
+
+    async def get_dutycycle_range(self):
+        """
+        Get allowed duty cycle range.
+        """
+        return await send_rpc_request("rotator", f"{self.prefix}.rpc.get_dutycycle_range")
+
+    async def set_dutycycle_range(self, az_min: float, az_max: float, el_min: float, el_max: float):
+        """
+        Set allowed duty cycle range.
+        """
+        return await send_rpc_request("rotator", f"{self.prefix}.rpc.set_dutycycle_range", {
+            "az_min": az_min,
+            "az_max": az_max,
+            "el_min": el_min,
+            "el_max": el_max,
+        })
