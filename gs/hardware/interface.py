@@ -41,25 +41,6 @@ class RotatorInterface:
             "az": az, "el": el, "shortest": shortest
         })
 
-    async def calibrate(
-            self,
-            az: float,
-            el: float
-        ):
-        """
-        CAUTION! Moves the rotator to given azimuth-elevation position IGNORING min and max bounds,
-        then sets that position as the new origin/zero position.
-
-        Args:
-            az: Target azimuth angle
-            el: Target elevation angle
-        """
-        # TODO: allow resetting freely to some other azimuth-elevation position other than 0, 0
-        #       - easier elevation calibration as azimuth can remain 90 deg
-        await send_rpc_request("rotator", f"{self.prefix}.rpc.calibrate", {
-            "az": az, "el": el, "force": True, "cal": True
-        }, timeout=15)
-
     async def reset_position(
             self,
             az: float,
@@ -112,7 +93,7 @@ class RotatorInterface:
             "az_max": az_max,
             "el_min": el_min,
             "el_max": el_max,
-        })
+        }, timeout=5)
 
     async def get_dutycycle_range(self):
         """
@@ -129,4 +110,4 @@ class RotatorInterface:
             "az_max": az_max,
             "el_min": el_min,
             "el_max": el_max,
-        })
+        }, timeout=5)
