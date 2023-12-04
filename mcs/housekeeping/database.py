@@ -109,7 +109,7 @@ class HousekeepingDatabase:
             try:
                 raw_type = RAW2PSQL[field.raw]
                 # NOTE: enumerations do not have calibration but they need format
-                if field.calibration or field.enum:
+                if hasattr(field, "calibration") or hasattr(self, "enumeration"):
                     cal_type = FMT2PSQL[field.format]
                 else:
                     cal_type = RAW2PSQL[field.raw]
