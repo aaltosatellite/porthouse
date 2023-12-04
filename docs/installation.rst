@@ -71,7 +71,7 @@ To install Postgres database engine and to create a new user+database for follow
 
 .. code-block:: console
 
-    $ sudo apt-get install postgresql
+    $ sudo apt-get install postgresql-14
     $ sudo -u postgres createuser mcs -P
     $ sudo -u postgres createdb "foresail" -O mcs
 
