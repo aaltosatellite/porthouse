@@ -63,6 +63,34 @@ Alternatively, pip can be also used to install the package in so called "editabl
     $ pip3 install -r requirements.txt
 
 
+Installing PostgreSQL
+---------------------
+
+Some of the modules uses PostgreSQL to store their data so creating a shared database is required.
+To install Postgres database engine and to create a new user+database for following command can be used:
+
+.. code-block:: console
+
+    $ sudo apt-get install postgresql
+    $ sudo -u postgres createuser mcs -P
+    $ sudo -u postgres createdb "foresail" -O mcs
+
+The createuser command requires you input a password (and PASSWORD is recommended for Foresail ground segment).
+
+For running Foresail GS, timescale-DB and tables need to be created. Detailed setup guides for creating the database tables can be found from module specific installation guides such as from:
+
+- [housekeeping](mcs/housekeeping/README.md) 
+
+- [packets](mcs/packets/README.md) modules.
+
+
+When needed a login to PostgreSQL console happens with following command:
+```
+$ sudo -u postgres psql -d foresail
+```
+Alternatively, Postgres permission can be modified to allow more free logins.
+
+
 
 
 Launching the demo setup
@@ -120,27 +148,6 @@ Congratulation! You have now got the first touch to porthouse. |:tada:|
 Next we can start installing more modules and features.
 
 
-Installing PostgreSQL
----------------------
-
-Some of the modules uses PostgreSQL to store their data so creating a shared database
-To install Postgres database engine and to create a new user+database for following command can be used:
-
-.. code-block:: console
-
-    $ sudo apt-get install postgresql-11
-    $ sudo -u postgres createuser mcs -P
-    $ sudo -u postgres createdb "foresail" -O mcs
-
-
-More detailed setup guides for creating the database tables can be found from module specific installation guides such as from  [housekeeping](mcs/housekeeping/README.md) and [packets](mcs/packets/README.md) modules.
-
-
-When needed a login to PostgreSQL console happens with following command:
-```
-$ sudo -u postgres psql -d foresail
-```
-Alternatively, Postgres permission can be modified to allow more free logins.
 
 
 Working with the configuration file
