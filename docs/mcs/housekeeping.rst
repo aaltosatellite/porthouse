@@ -64,6 +64,7 @@ Create new user for database access
     <type a good password here>   # PASSWORD is used in the default configuration :D
 
 Create new database (mcs user is the database owner user)
+
 .. code-block:: console
 
     $ sudo -u postgres createdb "porthouse" -O mcs
@@ -80,11 +81,6 @@ Install the timescale as superuser
     > CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
 
 
-Install psycopg2
-
-.. code-block:: console
-
-    $ sudo apt install python3-psycopg2
-
+You should now be good to create the tables for a mission.
 
 Creating tables for missions is done with a mission specific configuration.
