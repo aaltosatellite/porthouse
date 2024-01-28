@@ -8,6 +8,7 @@ from typing import Optional, List
 from sortedcontainers import SortedList
 
 from porthouse.gs.tracking.orbit_tracker import OrbitTracker
+from porthouse.gs.tracking.utils import parse_time
 
 
 class TaskStatus(enum.Enum):
@@ -40,8 +41,8 @@ class Task:
     def to_dict(self):
         return {
             "task_name": self.task_name,
-            "start_time": self.start_time,
-            "end_time": self.end_time,
+            "start_time": self.start_time.isoformat(),
+            "end_time": self.end_time.isoformat(),
             "rotators": self.rotators,
             "auto_scheduled": self.auto_scheduled,
             "status": self.status.name,
@@ -53,8 +54,8 @@ class Task:
     def from_dict(data, storage=STORAGE_MAIN):
         task = Task()
         task.task_name = data.get("task_name", "unnamed task")
-        task.start_time = data["start_time"]
-        task.end_time = data["end_time"]
+        task.start_time = parse_time(data["start_time"]).utc_datetime()
+        task.end_time = parse_time(data["end_time"]).utc_datetime()
         task.rotators = data["rotators"]
         task.auto_scheduled = data.get("auto_scheduled", False)
         task.status = TaskStatus[data.get("status", "SCHEDULED")]
