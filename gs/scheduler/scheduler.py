@@ -151,10 +151,16 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 self._create_schedule_task.cancel()
                 self._create_schedule_task = None
 
+            if self.schedule_updated_date is None:
+                # first schedule creation after startup, generate from now to 48h into the future
+                start_time = now if start_time is None else start_time
+
             self.schedule_updated_date = now
 
             if start_time is None:
-                start_time = now if len(self.schedule.end_times) == 0 else self.schedule.end_times[-1].end_time
+                end_times = [task.end_time for task in self.schedule.end_times
+                                           if process_name is None or task.get_process_name() == process_name]
+                start_time = now if len(end_times) == 0 else end_times[-1]
                 start_time = min(start_time, now + timedelta(hours=24))
 
             if end_time is None:
@@ -543,8 +549,10 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
         if CelestialObject.is_class_of(process.target):
             obj = await self.get_celestial_object(**kwargs)
+            assert obj is not None, 'Failed to get celestial object'
         else:
             obj = await self.get_satellite(**kwargs)
+            assert obj is not None, 'Failed to get satellite'
 
         tasks = []
         for sc_pass in obj.passes:
