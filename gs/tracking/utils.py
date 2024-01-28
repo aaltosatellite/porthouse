@@ -445,7 +445,7 @@ class CelestialObject:
         t_event, events = find_events(gs, self.obj, t0, t1, min_elevation, min_max_elevation,
                                       ephem=CelestialObject.BODIES, max_sun_elevation=sun_max_elevation, sunlit=sunlit,
                                       accurate=True, orbits_per_day=1.0, margin_s=12 * 60 * 60,
-                                      partial_last_pass=partial_last_pass, debug=True)
+                                      partial_last_pass=partial_last_pass, debug=False)
         self.passes = events_to_passes(self.name, lambda t: gs.at(t).observe(self.obj).apparent().altaz(),
                                        t_event, events, min_max_elevation)
         self.passes_start_time = t0.utc_datetime()
