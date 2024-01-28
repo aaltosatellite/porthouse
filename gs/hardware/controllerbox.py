@@ -159,6 +159,9 @@ class ControllerBox(RotatorController):
         self._write_command(f"P -e {el: .1f}".encode("ascii"))
         self._read_response()
 
+        # set target position to current position
+        self.target_position = (az, el)
+
         # update current_position, also move to valid position if currently invalid
         self.get_position()
 
