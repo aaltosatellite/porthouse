@@ -73,7 +73,7 @@ class Task:
         return task_data
 
     def apply_limits(self, process: 'Process'):
-        process_data = self.get_task_data(process)
+        process_data = self.objget_task_data(process)
 
         if process_data['duration'] is not None and isinstance(process_data['duration'], str) and \
                 process_data['duration'].strip():

@@ -107,7 +107,6 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         # check for tasks that should start
         for task in self.schedule.start_times:
             if task.start_time <= now < task.end_time and task.status == TaskStatus.SCHEDULED:
-                task.status = TaskStatus.ONGOING
                 await self.start_task(task)
             elif task.start_time > now:
                 if self._debug_log_time + timedelta(seconds=10) <= now:
@@ -203,8 +202,6 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Write schedule to YAML file
         """
-        # NOTE: currently not called from anywhere, should probably use in the future if changes to processes
-        #       through API is implemented
         if not self.sync_schedule_files:
             return
 
@@ -222,6 +219,67 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                     yaml.dump(processes, fp, indent=4, sort_keys=False)
             except Exception as e:
                 self.log.error(f"Failed to write schedule file {file}: {e}", exc_info=True)
+
+    def add_process(self, process_dict, deny_main=True):
+        """
+        Add process to the scheduler
+        """
+        process = Process.from_dict(process_dict)
+        if process.process_name in self.processes:
+            raise SchedulerError(f"Process {process.process_name} already exists")
+        if deny_main and process.storage == Process.STORAGE_MAIN:
+            raise SchedulerError(f"Process {process.process_name} is a MAIN-storage process, adding through API "
+                                 f"currently not allowed.")
+
+        self.processes[process.process_name] = process
+        self.write_processes(skip_main=deny_main)
+        return True
+
+    def update_process(self, process_dict, affect_tasks=True, deny_main=True):
+        """
+        Update process in the scheduler
+        """
+        process = Process.from_dict(process_dict)
+        if process.process_name not in self.processes:
+            raise SchedulerError(f"Process {process.process_name} does not exist")
+        if deny_main and process.storage == Process.STORAGE_MAIN:
+            raise SchedulerError(f"Process {process.process_name} is a MAIN-storage process, changes through API "
+                                 f"currently not allowed.")
+
+        state_changed = self.processes[process.process_name].enabled != process.enabled
+        self.processes[process.process_name] = process
+        self.write_processes(skip_main=deny_main)
+
+        if affect_tasks and state_changed:
+            for task in self.schedule:
+                if task.process_name == process.process_name:
+                    if process.enabled and task.status == TaskStatus.NOT_SCHEDULED:
+                        task.status = TaskStatus.SCHEDULED
+                    elif not process.enabled and task.status == TaskStatus.SCHEDULED:
+                        task.status = TaskStatus.NOT_SCHEDULED
+            self.write_schedule()
+        return True
+
+    def remove_process(self, process_name, remove_tasks=True, deny_main=True):
+        """
+        Remove process from the scheduler
+        """
+        if process_name not in self.processes:
+            raise SchedulerError(f"Process {process_name} does not exist")
+        if deny_main and self.processes[process_name].storage == Process.STORAGE_MAIN:
+            raise SchedulerError(f"Process {process_name} is a MAIN-storage process, deletion through API "
+                                 f"currently not allowed.")
+
+        for task in self.schedule:
+            if task.process_name == process_name:
+                if remove_tasks:
+                    self.schedule.remove(task)
+                else:
+                    raise SchedulerError(f"Process {process_name} is still in use by task {task.task_name}")
+
+        del self.processes[process_name]
+        self.write_processes(skip_main=deny_main)
+        return True
 
     async def read_schedule(self):
         """
@@ -268,18 +326,82 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             except Exception as e:
                 self.log.error(f"Failed to write schedule file {file}: {e}", exc_info=True)
 
+    def add_task(self, task_dict, deny_main=True, mode='strict'):
+        """
+        Add task to the schedule
+        """
+        task = Task.from_dict(task_dict)
+        if task.task_name in self.schedule.tasks:
+            raise SchedulerError(f"Task {task.task_name} already exists")
+        if task.process_name not in self.processes:
+            raise SchedulerError(f"Process referred to ({task.process_name}) in task {task.task_name} does not exist")
+        if deny_main and self.processes[task.process_name].storage == Process.STORAGE_MAIN:
+            raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, adding tasks to it "
+                                 f"through the API is currently not allowed.")
+
+        async with self.schedule_lock:
+            self.add_tasks(task, mode=mode)
+            self.write_schedule()
+        return True
+
+    def update_task(self, task_dict, deny_main=True, mode='strict'):
+        """
+        Update task in the schedule
+        """
+        task = Task.from_dict(task_dict)
+        if task.task_name not in self.schedule.tasks:
+            raise SchedulerError(f"Task {task.task_name} does not exist")
+        if task.process_name not in self.processes:
+            raise SchedulerError(f"Process referred to ({task.process_name}) in task {task.task_name} does not exist")
+        if deny_main and (
+                self.schedule.tasks[task.task_name].storage == Task.STORAGE_MAIN
+                or self.processes[task.process_name].storage == Process.STORAGE_MAIN):
+            raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, changing tasks related "
+                                 f"to it through the API is currently not allowed.")
+        async with self.schedule_lock:
+            old_task = self.schedule.tasks[task.task_name]
+            if old_task.status not in (TaskStatus.NOT_SCHEDULED, TaskStatus.SCHEDULED):
+                raise SchedulerError(f"{task.task_name} is in status {task.status}. "
+                                     f"Can only change a tasks with NOT_SCHEDULED or SCHEDULED status.")
+            self.schedule.remove(old_task)
+            self.add_tasks(task, mode=mode)
+            self.write_schedule()
+        return True
+
+    def remove_task(self, task_name, deny_main=True):
+        """
+        Remove task from the schedule
+        """
+        if task_name not in self.schedule.tasks:
+            raise SchedulerError(f"Task {task_name} does not exist")
+        if deny_main and self.schedule.tasks[task_name].storage == Task.STORAGE_MAIN:
+            raise SchedulerError(f"Task {task_name} is a MAIN-storage task, deletion through API "
+                                 f"currently not allowed.")
+
+        async with self.schedule_lock:
+            self.schedule.remove(self.schedule.tasks[task_name])
+            self.write_schedule()
+        return True
+
     async def start_task(self, task):
         self.log.info(f"Start task \"{task.task_name}\" {task.rotators}")
-        await self.publish(task.get_task_data(self.processes[task.process_name]),
-                           exchange="scheduler", routing_key="task.start")
+        task.status = TaskStatus.ONGOING
+
+        # Save current process data to the task so that even if the process is changed later,
+        # the task will retain the data that was used for its execution.
+        process_data = self.processes[task.process_name].to_dict()
+        process_data.update(task.process_overrides or {})
+        task.process_overrides = process_data
+        await self.publish(task.get_task_data(), exchange="scheduler", routing_key="task.start")
 
     async def end_task(self, task):
         self.log.info(f"End task \"{task.task_name}\" {task.rotators}")
-        await self.publish(task.get_task_data(self.processes[task.process_name]),
-                           exchange="scheduler", routing_key="task.end")
+        await self.publish(task.get_task_data(), exchange="scheduler", routing_key="task.end")
 
-    def export_schedule(self, target=None, rotators=None, status=None, limit=None):
+    def export_schedule(self, process_name=None, target=None, rotators=None, status=None, limit=None):
         def filter_task(task):
+            if process_name is not None and task.get_process_name() != process_name:
+                return False
             if target is not None and task.target != target:
                 return False
             if rotators is not None and len(set(rotators).intersection(task.rotators)) == 0:
@@ -291,8 +413,10 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         schedule = [task.to_dict() for task in self.schedule if filter_task(task)][:limit]
         return schedule
 
-    def export_processes(self, target=None, rotators=None, enabled=None, storage=None):
-        def filter_task(process):
+    def export_processes(self, process_name=None, target=None, rotators=None, enabled=None, storage=None):
+        def filter_process(process):
+            if process_name is not None and process.process_name != process_name:
+                return False
             if target is not None and target not in process.target:
                 return False
             if rotators is not None and len(set(rotators).intersection(process.rotators)) == 0:
@@ -303,7 +427,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 return False
             return True
 
-        processes = [process.to_dict() for process in self.processes.values() if filter_task(process)]
+        processes = [process.to_dict() for process in self.processes.values() if filter_process(process)]
         return processes
 
     async def create_schedule(self, start_time: datetime = None, end_time: datetime = None, process_name: str = None):
@@ -448,63 +572,111 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 return parse_time(request_data[date_field]).utc_datetime()
             return None
 
-        if request_name == "rpc.get_schedule":
-            return self.export_schedule(**request_data)
-
-        elif request_name == "rpc.get_processes":
+        if request_name == "rpc.get_processes":
+            #
+            # Get all processes. Can be filtered by process_name, target, rotators, status, and limit.
+            #
             return self.export_processes(**request_data)
 
+        elif request_name == "rpc.add_process":
+            #
+            # Add a new process. Request data must be a dict understood by the Process.from_dict constructor.
+            #
+            request_data["storage"] = Process.STORAGE_MISC  # always use misc storage for new processes added via API
+            ok = self.add_process(**request_data)
+            return {"success": ok}
+
+        elif request_name == "rpc.update_process":
+            #
+            # Update an existing process. Existing process storage type must be MISC.
+            # Request data must be a dict understood by the Process.from_dict constructor.
+            #
+            ok = self.update_process(**request_data)
+            return {"success": ok}
+
+        elif request_name == "rpc.remove_process":
+            #
+            # Remove an existing process. Existing process storage type must be MISC.
+            # All tasks related to the process are also removed.
+            #
+            if "process_name" not in request_data:
+                raise RPCError("process_name (str) parameter not given")
+            ok = self.remove_process(request_data["process_name"])
+            return {"success": ok}
+
+        elif request_name == "rpc.get_schedule":
+            #
+            # Get currently scheduled tasks. Can be filtered by process_name, target, rotators, status, and limit.
+            #
+            return self.export_schedule(**request_data)
+
+        elif request_name == "rpc.add_task":
+            #
+            # Add a new task. Request data must be a dict understood by the Task.from_dict constructor.
+            # The process which the task refers to must be of storage type MISC.
+            #
+            ok = self.add_task(request_data)
+            return {"success": ok}
+
+        elif request_name == "rpc.update_task":
+            #
+            # Update an existing task. Existing task's process storage type must be MISC, also the new task's process.
+            # Request data must be a dict understood by the Task.from_dict constructor.
+            #
+            ok = self.update_task(request_data)
+            return {"success": ok}
+
+        elif request_name == "rpc.remove_task":
+            #
+            # Remove an existing task. Existing task's process storage type must be MISC.
+            #
+            if "task_name" not in request_data:
+                raise RPCError("task_name (str) parameter not given")
+            ok = self.remove_task(request_data["task_name"])
+            return {"success": ok}
+
         elif request_name == "rpc.update_schedule":
+            #
+            # Trigger schedule updating, i.e. generation of new tasks based on currently active processes.
+            # If reset=True, remove all pending tasks before generating new ones.
+            # If start_time and end_time are given, only generate tasks for that time interval.
+            # Same applies to process_name.
+            #
             start_time, end_time = date_arg("start_time"), date_arg("end_time")
 
             if request_data.get("reset", False):
                 start_time = start_time or datetime.now(timezone.utc)
                 end_time = end_time or start_time + timedelta(hours=48)
                 process_name = request_data.get("process_name", None)
+                reset_ongoing = request_data.get("reset_ongoing", False)
+                affected_statuses = [TaskStatus.SCHEDULED] + ([TaskStatus.ONGOING] if reset_ongoing else [])
 
                 async with self.schedule_lock:
-                    tbr = [task for task in self.schedule
-                           if task.status == TaskStatus.SCHEDULED and task.auto_scheduled
+                    tba = [task for task in self.schedule
+                           if task.status in affected_statuses and task.auto_scheduled
                               and task.start_time >= start_time and task.end_time <= end_time
                               and (process_name is None or task.process_name == process_name)]
+                    tbr = [task for task in tba if task.status == TaskStatus.SCHEDULED]
+                    tbc = [task for task in tba if task.status == TaskStatus.ONGOING]
                     for task in tbr:
                         self.schedule.remove(task)
                     self.write_schedule()
+
+                for task in tbc:
+                    await self.send_rpc_request("tracking", "orbit.rpc.remove_target", {"task_name": task.task_name})
 
             return self.maybe_start_schedule_creation(start_time=start_time, end_time=end_time, force=True,
                                                       process_name=request_data.get("process_name", None))
 
         elif request_name == "rpc.enable_schedule_file_sync":
+            #
+            # Enable/disable constant writing of the schedule and processes files so that they can be manually edited
+            # while the scheduler is running
+            #
             if "enable" not in request_data:
-                raise RPCError("enable (bool) parameter not give")
+                raise RPCError("enable (bool) parameter not given")
             self.sync_schedule_files = request_data["enable"]
             return {"success": True}
-
-        elif request_name == "rpc.add_task":
-            #
-            # Schedule new task
-            #
-            task = Task.from_dict(request_data)
-            try:
-                async with self.schedule_lock:
-                    self.add_tasks(task, mode='strict')
-                    self.write_schedule()
-                return {"success": True}
-            except SchedulerError as e:
-                return {"error": "Failed to add task to schedule: " + str(e)}
-
-        elif request_name == "rpc.remove_task":
-            #
-            # Remove task from the schedule
-            #
-            task = self.schedule.tasks.get(request_data["task_name"], None)
-            if task is not None:
-                async with self.schedule_lock:
-                    self.schedule.remove(task)
-                    self.write_schedule()
-                return {"success": True}
-            else:
-                return {"error": "Task not found"}
 
         elif request_name == "rpc.get_potential_tasks":
             #
