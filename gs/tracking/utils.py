@@ -268,17 +268,22 @@ class Satellite:
 
         if False and sunlit is None and sun_max_elevation is None:
             # Find all the events for the satellite, as before
+            # TODO: could be removed as it's not used anymore (see False in if statement)
             t_event, events = self.sc.find_events(self.gs, start_time - timedelta(seconds=60),
                                                   end_time + timedelta(seconds=60), min_elevation)
         else:
             # Use own version of find_events that takes into account sunlit and sun_max_elevation params
             if CelestialObject.EARTH is None:
                 CelestialObject.init_bodies()
+
+            accurate = sunlit is not None or sun_max_elevation is not None
+            margin_s = 12 * 60 * 60 if accurate else 0
             t_event, events = find_events(CelestialObject.EARTH + self.gs, CelestialObject.EARTH + self.sc,
                                           start_time - timedelta(seconds=60), end_time + timedelta(seconds=60),
-                                          min_elevation, min_max_elevation, CelestialObject.BODIES,
-                                          sun_max_elevation, sunlit, accurate=False,
-                                          orbits_per_day=self.sc.model.no_kozai / np.pi / 2 * 60 * 24)
+                                          min_elevation, min_max_elevation, ephem=CelestialObject.BODIES,
+                                          max_sun_elevation=sun_max_elevation, sunlit=sunlit, accurate=accurate,
+                                          orbits_per_day=self.sc.model.no_kozai / np.pi / 2 * 60 * 24,
+                                          margin_s=margin_s, partial_last_pass=False, debug=False)
 
         self.passes = events_to_passes(self.name, lambda t: (self.sc - self.gs).at(t).altaz(),
                                        t_event, events, min_max_elevation)
@@ -490,11 +495,8 @@ class SkyfieldModuleMixin:
         # Ensure recent TLEs used
         if sat is None or sat.tle_age_days > 1:
             try:
-                # TODO: remove the following work-around sleep, which is currently needed so that tle server
-                #       has time to update the TLEs when starting porthouse
-                await asyncio.sleep(5)
                 self.log.debug("Requesting TLE for %s", target)
-                ret = await self.send_rpc_request("tracking", "tle.rpc.get_tle", {"satellite": target})
+                ret = await self.send_rpc_request("tracking", "tle.rpc.get_tle", {"satellite": target}, timeout=6)
             except RPCRequestError as e:
                 self.log.error("Failed to request TLE: %s", e.args[0], exc_info=True)
                 return
@@ -636,7 +638,9 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
             if not accurate:
                 obj_sunlit = (obj - gs).at(t).is_sunlit(ephem)
             else:
-                obj_sunlit = obj.at(t).observe(ephem['Sun']).apparent().altaz()[0].degrees() > 0  # slower
+                # NOTE: the following did not work, so we use the not so accurate method for now
+                # obj_sunlit = obj.at(t).observe(ephem['Sun']).apparent().altaz()[0].degrees() > 0
+                obj_sunlit = (obj - gs).at(t).is_sunlit(ephem)
 
             if not sunlit:
                 obj_sunlit = np.logical_not(obj_sunlit)

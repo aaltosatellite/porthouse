@@ -5,6 +5,7 @@
 import json
 import asyncio
 import datetime
+import time
 from enum import IntEnum
 from typing import Optional, NoReturn, List, Union
 
@@ -40,7 +41,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         rotators = self.gs.config.get("rotators", None)
         if target_name and rotators:
             loop = asyncio.get_event_loop()
-            task = loop.create_task(self.add_target(target_name, rotators), name="orbit_tracker.add_target")
+            task = loop.create_task(self.add_target('default', target_name, rotators), name="orbit_tracker.add_target")
             task.add_done_callback(self.task_done_handler)
 
     @queue()
@@ -72,10 +73,10 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             kwargs = {k: v for k, v in event_body.items() if k in ["start_time", "end_time", "min_elevation",
                                                                    "min_max_elevation", "sun_max_elevation",
                                                                    "sunlit", "preaos_time"]}
-            await self.add_target(event_body["target"], event_body["rotators"], **kwargs)
+            await self.add_target(event_body["task_name"], event_body["target"], event_body["rotators"], **kwargs)
 
         elif routing_key == "task.end":
-            await self.remove_target(event_body["target"], event_body["rotators"])
+            await self.remove_target(event_body["task_name"])
 
     @rpc()
     @bind("tracking", "orbit.rpc.#")
@@ -89,10 +90,13 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             params = {k: v for k, v in request_data.items() if k in ["start_time", "end_time", "min_elevation",
                                                                      "min_max_elevation", "sun_max_elevation",
                                                                      "sunlit", "preaos_time", "high_accuracy"]}
-            await self.add_target(request_data["target"], request_data["rotators"], **params)
+            await self.add_target(request_data["task_name"], request_data["target"], request_data["rotators"], **params)
 
         elif request_name == "rpc.remove_target":
-            await self.remove_target(request_data["target"], request_data["rotators"])
+            if not ("task_name" in request_data or "target" in request_data and "rotators" in request_data):
+                raise RPCError("Must give either task_name or target and rotators")
+            await self.remove_target(request_data.get("task_name", None),
+                                     request_data.get("target", None), request_data.get("rotators", None))
 
         elif request_name == "rpc.status":
             await asyncio.sleep(0)
@@ -114,7 +118,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         else:
             raise RPCError(f"No such command: {request_name}")
 
-    async def add_target(self, target_name: str, rotators: List[str],
+    async def add_target(self, task_name: str, target_name: str, rotators: List[str],
                          start_time: Union[None, str, datetime.datetime, skyfield.api.Time] = None,
                          end_time: Union[None, str, datetime.datetime, skyfield.api.Time] = None,
                          min_elevation: float = 0,
@@ -143,7 +147,13 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
                              f"with {self.target_trackers[i].rotators}")
             return
 
-        self.log.info(f"Starting to track target {target_name} with {rotators}")
+        if task_name in [tt.task_name for tt in self.target_trackers]:
+            i = [tt.task_name for tt in self.target_trackers].index(task_name)
+            self.log.warning(f"add_target: Task {task_name} already tracks target {self.target_trackers[i].target.name}"
+                             f" with {self.target_trackers[i].rotators}")
+            return
+
+        self.log.info(f"Starting to track target {target_name} with {rotators} related to task {task_name}")
 
         # NOTE: Other params except target_name not strictly needed for get_satellite or get_celestial_object
         #       as current pass is only of interest and scheduler takes care of min elevation etc filtering.
@@ -167,34 +177,46 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             self.log.error(f"add_target: No passes available for {target_name}")
             return
 
-        await self.send_event("next_pass", target=target, rotators=rotators, **next_pass.to_dict())
+        await self.send_event("next_pass", task_name=task_name, target=target, rotators=rotators,
+                              **next_pass.to_dict())
 
-        target_tracker = TargetTracker(self, target, rotators, preaos_time=preaos_time, high_accuracy=high_accuracy)
+        target_tracker = TargetTracker(self, task_name, target, rotators,
+                                       preaos_time=preaos_time, high_accuracy=high_accuracy)
         self.target_trackers.append(target_tracker)
         await target_tracker.start()
 
-    async def remove_target(self, target_name: str, rotators: List[str]) -> NoReturn:
+    async def remove_target(self, task_name: str = None, target_name: str = None, rotators: List[str] = None) -> NoReturn:
         await asyncio.sleep(0)
-        rotators = set(rotators)
+        rotators = set(rotators) if rotators is not None else set()
         remove_idxs = []
 
-        self.log.info(f"Stop tracking target {target_name} with {rotators}")
+        if task_name is None:
+            if target_name is None:
+                self.log.info("Stop tracking all targets")
+            else:
+                self.log.info(f"Stop tracking target {target_name} with {rotators}")
+        else:
+            self.log.info(f"Stop tracking related to task {task_name}")
 
         for i, tt in enumerate(self.target_trackers):
-            if tt.target.target_name == target_name and rotators.intersection(tt.rotators):
-                await tt.stop(rotators)
+            stop_rots = tt.rotators if len(rotators) == 0 else rotators.intersection(tt.rotators)
+            if (task_name is None and target_name is None
+                    or tt.task_name == task_name
+                    or tt.target.target_name == target_name) and len(stop_rots) > 0:
+                await tt.stop(stop_rots)
                 if len(tt.rotators) == 0:
                     remove_idxs.append(i)
 
         self.target_trackers = [tt for i, tt in enumerate(self.target_trackers) if i not in remove_idxs]
 
-    async def broadcast_pointing(self, target: Union[Satellite, CelestialObject], rotators: List[str],
+    async def broadcast_pointing(self, task_name: str, target: Union[Satellite, CelestialObject], rotators: List[str],
                                  az: float, el: float, range: float, range_rate: float, timestamp: float) -> None:
         """
         Broadcast pointing information
             - e.g. for the rotator, also for modem software doppler correction
 
         Args:
+            task_name: Task name
             target: Target name
             rotators: List of rotators that should track the target
             az: Target azimuth
@@ -209,6 +231,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             az -= 360
 
         await self.publish({
+            "task_name": task_name,
             "target": target.target_name,
             "rotators": rotators,
             "az": round(az, 2),
@@ -218,13 +241,14 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             "timestamp": timestamp,
         }, exchange="tracking", routing_key="target.position")
 
-    async def send_event(self, event_name, target: Union[Satellite, CelestialObject], rotators: List[str], **params):
+    async def send_event(self, event_name: str, task_name: str, target: Union[Satellite, CelestialObject],
+                         rotators: List[str], **params):
         """
         Send events (next_pass/preaos/aos/los), used e.g. by the rotator
         """
 
-        self.log.info("%s event emitted for %s %s: %s", event_name, target.target_name, rotators, params)
-        params.update({'target': target.target_name, 'rotators': rotators})
+        self.log.info("%s event emitted for %s %s %s: %s", event_name, task_name, target.target_name, rotators, params)
+        params.update({'task_name': task_name, 'target': target.target_name, 'rotators': rotators})
         await self.publish(params, exchange="event", routing_key=event_name)
 
     def _get_status_message(self):
@@ -241,20 +265,28 @@ class TrackerStatus(IntEnum):
 
 
 class TargetTracker:
-    def __init__(self, module: OrbitTracker, target: Union[Satellite, CelestialObject], rotators: List[str],
-                 preaos_time=OrbitTracker.DEFAULT_PREAOS_TIME, status=TrackerStatus.WAITING, high_accuracy=None):
+    TRACKING_INTERVAL = 2.0     # seconds
+
+    def __init__(self, module: OrbitTracker, task_name: str, target: Union[Satellite, CelestialObject],
+                 rotators: List[str], preaos_time=OrbitTracker.DEFAULT_PREAOS_TIME,
+                 status=TrackerStatus.WAITING, high_accuracy=None):
         self.module = module
+        self.task_name = task_name
         self.target = target
         self.rotators = rotators
         self.preaos_time = datetime.timedelta(seconds=preaos_time)
         self.status = status
         self.high_accuracy = isinstance(target, CelestialObject) if high_accuracy is None else high_accuracy
         self.asyncio_task = None
+        self.last_tracking_update = 0.0
 
     async def setup(self) -> None:
         while self.target:
+            update_time = time.time()
+            sleep_time = max(0.0, self.TRACKING_INTERVAL - (update_time - self.last_tracking_update))
+            self.last_tracking_update = update_time
+            await asyncio.sleep(sleep_time)
             await self.update_tracking()
-            await asyncio.sleep(2)
 
     async def start(self) -> None:
         loop = asyncio.get_event_loop()
@@ -272,7 +304,7 @@ class TargetTracker:
             self.target = None
 
         if len(stop_rotators) > 0:
-            await self.module.send_event("los", target=target, rotators=list(stop_rotators))
+            await self.module.send_event("los", task_name=self.task_name, target=target, rotators=list(stop_rotators))
         else:
             # make sure something is awaited
             await asyncio.sleep(0)
@@ -313,12 +345,14 @@ class TargetTracker:
 
             # Check if a pass is already going on
             if now >= next_pass.t_aos:
-                await self.module.send_event("aos", target=self.target, rotators=self.rotators)
+                await self.module.send_event("aos", task_name=self.task_name, target=self.target,
+                                             rotators=self.rotators)
                 self.status = TrackerStatus.TRACKING
 
             # Is AOS about to happen?
             elif now >= next_pass.t_aos - self.preaos_time:
-                await self.module.send_event("preaos", target=self.target, rotators=self.rotators,
+                await self.module.send_event("preaos", task_name=self.task_name, target=self.target,
+                                             rotators=self.rotators,
                                              **next_pass.to_dict())
                 self.status = TrackerStatus.AOS
 
@@ -326,7 +360,8 @@ class TargetTracker:
 
             # Did AOS happen?
             if now >= next_pass.t_aos:
-                await self.module.send_event("aos", target=self.target, rotators=self.rotators)
+                await self.module.send_event("aos", task_name=self.task_name, target=self.target,
+                                             rotators=self.rotators)
                 self.status = TrackerStatus.TRACKING
 
             elif self.module.debug:
@@ -334,8 +369,8 @@ class TargetTracker:
                 self.module.log.debug(f"AOS for {self.target.target_name} {self.rotators} in {sec:.0f} seconds")
 
         elif self.status == TrackerStatus.TRACKING:
-            # Calculate the position 1 second in the future
-            t = now + datetime.timedelta(seconds=1)
+            # Calculate the position TRACKING_INTERVAL seconds in the future
+            t = now + datetime.timedelta(seconds=self.TRACKING_INTERVAL)
             pos = self.target.pos_at(t, accurate=self.high_accuracy)
             el, az, range, _, _, range_rate = pos.frame_latlon_and_rates(self.module.gs.pos)
             if self.high_accuracy:
@@ -348,13 +383,15 @@ class TargetTracker:
                                       f"rr={range_rate.m_per_s:.1f}")
 
             # Broadcast spacecraft position
-            await self.module.broadcast_pointing(self.target, self.rotators, az=az.degrees, el=el.degrees,
+            await self.module.broadcast_pointing(self.task_name, self.target, self.rotators,
+                                                 az=az.degrees, el=el.degrees,
                                                  range=range.m, range_rate=range_rate.m_per_s,
                                                  timestamp=t.timestamp())
 
             # Did LOS happen?
             if now >= next_pass.t_los:
-                await self.module.send_event("los", target=self.target, rotators=self.rotators)
+                await self.module.send_event("los", task_name=self.task_name, target=self.target,
+                                             rotators=self.rotators)
                 self.status = TrackerStatus.LOS
 
         elif self.status == TrackerStatus.LOS:
@@ -386,6 +423,7 @@ class TargetTracker:
                 pass_info = pass_info.to_dict()
 
             status_message = {
+                "task_name": self.task_name,
                 "target": self.target.target_name,
                 "rotators": self.rotators,
                 "status": status,
@@ -394,6 +432,7 @@ class TargetTracker:
 
         else:
             status_message = {
+                "task_name": self.task_name,
                 "target": None,
                 "rotators": self.rotators,
                 "status": None,
