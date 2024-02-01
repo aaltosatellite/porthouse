@@ -64,7 +64,7 @@ class Task:
         task.storage = storage
         return task
 
-    def get_task_data(self, process: Optional['Process']):
+    def get_task_data(self, process: 'Process' = None):
         task_data = {} if process is None else process.to_dict()
         task_data.update(self.process_overrides)
         task_data.update(self.to_dict())
