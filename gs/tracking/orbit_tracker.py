@@ -177,7 +177,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             self.log.error(f"add_target: No passes available for {target_name}")
             return
 
-        await self.send_event("next_pass", target=target, rotators=rotators, **next_pass.to_dict())
+        await self.send_event("next_pass", task_name=task_name, target=target, rotators=rotators,
+                              **next_pass.to_dict())
 
         target_tracker = TargetTracker(self, task_name, target, rotators,
                                        preaos_time=preaos_time, high_accuracy=high_accuracy)
