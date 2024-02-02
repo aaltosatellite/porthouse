@@ -73,10 +73,10 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             kwargs = {k: v for k, v in event_body.items() if k in ["start_time", "end_time", "min_elevation",
                                                                    "min_max_elevation", "sun_max_elevation",
                                                                    "sunlit", "preaos_time"]}
-            await self.add_target(event_body["task"], event_body["target"], event_body["rotators"], **kwargs)
+            await self.add_target(event_body["task_name"], event_body["target"], event_body["rotators"], **kwargs)
 
         elif routing_key == "task.end":
-            await self.remove_target(event_body["task"])
+            await self.remove_target(event_body["task_name"])
 
     @rpc()
     @bind("tracking", "orbit.rpc.#")
