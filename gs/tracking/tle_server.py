@@ -212,7 +212,7 @@ class TLEServer(BaseModule):
             async with httpx.AsyncClient() as client:
                 r = await client.post("https://www.space-track.org/ajaxauth/login",
                                       data=self.credentials,
-                                      timeout=3)
+                                      timeout=5)
             auth_cookies = r.cookies
 
         # Request latest TLE entry for given NORAD ID
@@ -222,7 +222,7 @@ class TLEServer(BaseModule):
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.get(URL.format(id=norad_id),
-                                     cookies=auth_cookies, timeout=3)
+                                     cookies=auth_cookies, timeout=5)
         except httpx.RequestError as e:
             self.log.error("Failed to query TLE from space-track.org: %r", e)
             return None, auth_cookies
@@ -283,7 +283,7 @@ class TLEServer(BaseModule):
                         try:
                             self.log.debug("Downloading %s", weburl)
                             async with httpx.AsyncClient() as client:
-                                response = await client.get(weburl, timeout=3)
+                                response = await client.get(weburl, timeout=5)
 
                         except httpx.RequestError as e:
                             self.log.error("Failed to download file %r: %s", weburl, e, exc_info=True)

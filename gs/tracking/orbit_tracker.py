@@ -189,14 +189,20 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         rotators = set(rotators) if rotators is not None else set()
         remove_idxs = []
 
-        if target_name is None:
-            self.log.info(f"Stop tracking target {target_name} with {rotators}")
+        if task_name is None:
+            if target_name is None:
+                self.log.info("Stop tracking all targets")
+            else:
+                self.log.info(f"Stop tracking target {target_name} with {rotators}")
         else:
             self.log.info(f"Stop tracking related to task {task_name}")
 
         for i, tt in enumerate(self.target_trackers):
-            if tt.task_name == task_name or tt.target.target_name == target_name and rotators.intersection(tt.rotators):
-                await tt.stop(tt.rotators if len(rotators) == 0 else rotators)
+            stop_rots = tt.rotators if len(rotators) == 0 else rotators.intersection(tt.rotators)
+            if (task_name is None and target_name is None
+                    or tt.task_name == task_name
+                    or tt.target.target_name == target_name) and len(stop_rots) > 0:
+                await tt.stop(stop_rots)
                 if len(tt.rotators) == 0:
                     remove_idxs.append(i)
 

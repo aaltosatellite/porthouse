@@ -58,7 +58,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
     async def setup(self):
         self.gs_rotators = await self.check_rotators(self.gs.config["rotators"])
 
-        tle_list = await self.send_rpc_request("tracking", "tle.rpc.get_tle")
+        await asyncio.sleep(5)  # sleep so that tle server has time to load the tles
+        tle_list = await self.send_rpc_request("tracking", "tle.rpc.get_tle", timeout=6)
         self.tle_sats = [tle["name"] for tle in tle_list["tle"]]
 
         # TODO: make the following lines unnecessary by updating the tle server code
@@ -330,7 +331,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Add task to the schedule
         """
-        task = Task.from_dict(task_dict)
+        storage = task_dict.get("storage", Task.STORAGE_MISC)
+        task = Task.from_dict(task_dict, storage=storage)
         if task.task_name in self.schedule.tasks:
             raise SchedulerError(f"Task {task.task_name} already exists")
         if task.process_name not in self.processes:
@@ -339,7 +341,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, adding tasks to it "
                                  f"through the API is currently not allowed.")
 
-        async with self.schedule_lock:
+        with self.schedule_lock:
             self.add_tasks(task, mode=mode)
             self.write_schedule()
         return True
@@ -348,7 +350,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Update task in the schedule
         """
-        task = Task.from_dict(task_dict)
+        storage = task_dict.get("storage", Task.STORAGE_MISC)
+        task = Task.from_dict(task_dict, storage=storage)
         if task.task_name not in self.schedule.tasks:
             raise SchedulerError(f"Task {task.task_name} does not exist")
         if task.process_name not in self.processes:
@@ -358,7 +361,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 or self.processes[task.process_name].storage == Process.STORAGE_MAIN):
             raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, changing tasks related "
                                  f"to it through the API is currently not allowed.")
-        async with self.schedule_lock:
+        with self.schedule_lock:
             old_task = self.schedule.tasks[task.task_name]
             if old_task.status not in (TaskStatus.NOT_SCHEDULED, TaskStatus.SCHEDULED):
                 raise SchedulerError(f"{task.task_name} is in status {task.status}. "
@@ -378,7 +381,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             raise SchedulerError(f"Task {task_name} is a MAIN-storage task, deletion through API "
                                  f"currently not allowed.")
 
-        async with self.schedule_lock:
+        with self.schedule_lock:
             self.schedule.remove(self.schedule.tasks[task_name])
             self.write_schedule()
         return True
@@ -413,7 +416,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         schedule = [task.to_dict() for task in self.schedule if filter_task(task)][:limit]
         return schedule
 
-    def export_processes(self, process_name=None, target=None, rotators=None, enabled=None, storage=None):
+    def export_processes(self, process_name=None, target=None, rotators=None, enabled=None, storage=None, limit=None):
         def filter_process(process):
             if process_name is not None and process.process_name != process_name:
                 return False
@@ -427,7 +430,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 return False
             return True
 
-        processes = [process.to_dict() for process in self.processes.values() if filter_process(process)]
+        processes = [process.to_dict() for process in self.processes.values() if filter_process(process)][:limit]
         return processes
 
     async def create_schedule(self, start_time: datetime = None, end_time: datetime = None, process_name: str = None):
@@ -615,7 +618,9 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             # Add a new task. Request data must be a dict understood by the Task.from_dict constructor.
             # The process which the task refers to must be of storage type MISC.
             #
-            ok = self.add_task(request_data)
+            deny_main = request_data.pop("deny_main", True)
+            mode = request_data.pop("mode", "strict")
+            ok = self.add_task(request_data, deny_main=deny_main, mode=mode)
             return {"success": ok}
 
         elif request_name == "rpc.update_task":
@@ -623,7 +628,9 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             # Update an existing task. Existing task's process storage type must be MISC, also the new task's process.
             # Request data must be a dict understood by the Task.from_dict constructor.
             #
-            ok = self.update_task(request_data)
+            deny_main = request_data.pop("deny_main", True)
+            mode = request_data.pop("mode", "strict")
+            ok = self.update_task(request_data, deny_main=deny_main, mode=mode)
             return {"success": ok}
 
         elif request_name == "rpc.remove_task":
@@ -632,7 +639,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             #
             if "task_name" not in request_data:
                 raise RPCError("task_name (str) parameter not given")
-            ok = self.remove_task(request_data["task_name"])
+            ok = self.remove_task(request_data["task_name"], deny_main=request_data.get("deny_main", True))
             return {"success": ok}
 
         elif request_name == "rpc.update_schedule":
@@ -684,6 +691,9 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             #
             if "target" not in request_data:
                 raise RPCError("No target given")
+            request_data["process_name"] = request_data.get("process_name", "unnamed")
+            request_data["tracker"] = request_data.get("tracker", "orbit")
+            request_data["rotators"] = request_data.get("rotators", [])
 
             start_time, end_time = date_arg("start_time"), date_arg("end_time")
             tasks = await self.create_tasks(Process.from_dict(request_data), start_time, end_time)
@@ -719,12 +729,15 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                       min_elevation=process.min_elevation, min_max_elevation=process.min_max_elevation,
                       sun_max_elevation=process.sun_max_elevation, sunlit=process.obj_sunlit)
 
-        if CelestialObject.is_class_of(process.target):
-            obj = await self.get_celestial_object(**kwargs)
-            assert obj is not None, 'Failed to get celestial object'
-        else:
-            obj = await self.get_satellite(**kwargs)
-            assert obj is not None, 'Failed to get satellite'
+        obj = None
+        try:
+            if CelestialObject.is_class_of(process.target):
+                obj = await self.get_celestial_object(**kwargs)
+            else:
+                obj = await self.get_satellite(**kwargs)
+        except Exception as e:
+            self.log.error(f"Failed to get object {process.target}: {e}", exc_info=True)
+        assert obj is not None, 'Failed to get target object'
 
         tasks = []
         for sc_pass in obj.passes:

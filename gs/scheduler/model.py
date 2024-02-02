@@ -64,7 +64,7 @@ class Task:
         task.storage = storage
         return task
 
-    def get_task_data(self, process: Optional['Process']):
+    def get_task_data(self, process: 'Process' = None):
         task_data = {} if process is None else process.to_dict()
         task_data.update(self.process_overrides)
         task_data.update(self.to_dict())
@@ -73,7 +73,7 @@ class Task:
         return task_data
 
     def apply_limits(self, process: 'Process'):
-        process_data = self.objget_task_data(process)
+        process_data = self.get_task_data(process)
 
         if process_data['duration'] is not None and isinstance(process_data['duration'], str) and \
                 process_data['duration'].strip():
