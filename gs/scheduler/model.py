@@ -269,6 +269,10 @@ class Process:
         process.storage = storage
         return process
 
+    def expired(self):
+        # TODO: expire MISC storage processes after some time that it was last valid?
+        return False
+
 
 class Schedule:
     TASK_NAME_REGEX = re.compile(r"^(.*?)(\s#(\d+))?(\s\w+)?")

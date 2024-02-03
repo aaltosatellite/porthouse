@@ -3,6 +3,7 @@
     Generic Rotator Module
 """
 
+import os
 import time
 import json
 import asyncio
@@ -51,7 +52,6 @@ class Rotator(BaseModule):
         #  - affects how often hardware functions are called
         self.refresh_rate = refresh_rate
         self.log.debug("Refresh rate [Hz]: %s" % (self.refresh_rate,))
-        self.last_state_check = 0.0
 
         self.prev_status = None
 
@@ -69,6 +69,7 @@ class Rotator(BaseModule):
         # tries to avoid unnecessary rotate-calls, state-machine approach could be better
         self.moving_to_target = False
         self.target_valid = False
+        self.pass_ongoing = False
 
         # most recent received position received from hardware
         self.current_position = (0, min_elevation)
@@ -82,10 +83,18 @@ class Rotator(BaseModule):
         if driver_cls is None:
             raise ValueError(f"Unknown rotator driver {driver}")
         self.rotator = driver_cls(address, az_min=position_range[0], az_max=position_range[1],
-                                  el_min=position_range[2], el_max=position_range[3],
+                                  el_min=position_range[2], el_max=position_range[3], prefix=self.prefix,
                                   horizon_map_file=horizon_map_file, min_sun_angle=min_sun_angle, debug=self.debug)
         self.default_dutycycle_range = self.rotator.get_dutycycle_range()
         self.log.debug("Duty-cycle range: %s" % (self.default_dutycycle_range,))
+
+        if self.debug:
+            os.makedirs("logs", exist_ok=True)
+            self.perf_log = open(f"logs/{self.prefix}_perf_{time.time():.0f}.csv", "w")
+            self.perf_log.write("ts_cur, az_cur, el_cur, ts_trg, az_trg, el_trg, d_ts, d_az, d_el, d_dist\n")
+            self.perf_log.flush()
+
+        self.loop_sleep_task = None
 
         # create setup coroutine
         loop = asyncio.get_event_loop()
@@ -104,37 +113,37 @@ class Rotator(BaseModule):
                       (f" (array shape: {self.rotator.horizon_map.shape})" if self.rotator.horizon_map_file else "") +
                       f", and min_sun_angle={self.rotator.min_sun_angle}")
 
-        interval = 1.0 / self.refresh_rate
         while True:
-            check_time = time.time()
-            sleep_time = max(0.0, interval - (check_time - self.last_state_check))
-            self.last_state_check = check_time
-            await asyncio.sleep(sleep_time if self.moving_to_target else 2)
+            t0 = time.time()
             await self.check_state()
+            st = max(0.0, 1.0 / self.refresh_rate - (time.time() - t0)) if self.pass_ongoing else 2.0
+            self.loop_sleep_task = asyncio.ensure_future(asyncio.sleep(st))
+            try:
+                await self.loop_sleep_task
+            except asyncio.CancelledError:
+                pass
 
-    def refresh_rotator_position(self, force_update=False):
+    def refresh_rotator_position(self):
         """
-            returns latest rotator position.
-            If position information is fresh and recent enough it returns just
-            last known value to avoid slowing down hardware interface too much
-            (hardware is SLO-OW down there).
-            Can be forced to poll new position with "force_update".
+        returns latest rotator position
         """
 
         try:
-            # record timestamp for new position
-            self.current_position = self.rotator.get_position()
-            self.position_timestamp = time.time()
+            # only update position if it's been a while since last update
+            if self.position_timestamp is None or time.time() - self.position_timestamp > 0.8 / self.refresh_rate:
+                self.current_position, self.position_timestamp = self.rotator.get_position(with_timestamp=True)
 
-            if self.moving_to_target:
+            if self.target_valid and self.pass_ongoing and self.debug:
                 d_az = self.target_position[0] - self.current_position[0]
                 d_el = self.target_position[1] - self.current_position[1]
                 d_ts = self.target_timestamp - self.position_timestamp
 
-                self.log.debug("pos@%.2f: %.2f %.2f, trg@%.2f: %.2f %.2f => diff@%.2f: |%.2f %.2f| = %.3f",
-                               self.position_timestamp % 1000, *self.current_position,
-                               self.target_timestamp % 1000, *self.target_position,
-                               d_ts, d_az, d_el, (d_az**2 + d_el**2)**0.5)
+                # header: ts_cur, az_cur, el_cur, ts_trg, al_trg, el_trg, d_ts, d_az, d_el, d_dist
+                self.perf_log.write("%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f\n" % (
+                                    self.position_timestamp, self.current_position[0], self.current_position[1],
+                                    self.target_timestamp, self.target_position[0], self.target_position[1],
+                                    d_ts, d_az, d_el, (d_az**2 + d_el**2)**0.5))
+                self.perf_log.flush()
 
         except RotatorError as e:
             self.log.error("Could not get rotator position: %s", e, exc_info=True)
@@ -183,8 +192,7 @@ class Rotator(BaseModule):
         Check rotator's current state
 
         Calls the actual rotate -commands through hardware interface.
-        This method could and should be throttled to some rotator specific
-        safe update speed.
+        This method is called at a rotator specific safe update rate that is set using the refresh_rate parameter.
         """
 
         self.refresh_rotator_position()
@@ -269,7 +277,7 @@ class Rotator(BaseModule):
         # set target to the closest valid position instead of given target position
         valid_position = self.rotator.closest_valid_position(*target)
 
-        self.log.debug(f"Rotating to {valid_position} (original {target})")
+        self.log.debug(f"Currently at {self.current_position} - Rotating to {valid_position} (original {target})")
 
         # rotator function should not be called in here
         # should be done via check_state()
@@ -283,6 +291,9 @@ class Rotator(BaseModule):
         self.target_valid = True
         # target was updated but movement command is not yet sent.
         self.moving_to_target = False
+
+        # cancel the sleep task so that the check_state is called immediately
+        self.loop_sleep_task.cancel()
 
     @rpc()
     @bind(exchange="rotator", routing_key="rpc.#", prefixed=True)
@@ -443,6 +454,7 @@ class Rotator(BaseModule):
             """
                 Satellite position update during the pass
             """
+            self.pass_ongoing = True
 
             new_target = (float(event_body['az']) % 360,
                           float(event_body['el']))
@@ -466,7 +478,7 @@ class Rotator(BaseModule):
             max_az = event_body["az_max"] % 360
             los_az = event_body["az_los"] % 360
 
-            aos_el = self.rotator.az_dependent_min_el(aos_az)
+            aos_el = max(0.0, self.rotator.az_dependent_min_el(aos_az))
 
             ### Might be needed to adapt this when using with different GS ###
             # Over the north-west to east or vice versa or
@@ -500,6 +512,7 @@ class Rotator(BaseModule):
 
         elif routing_key == "aos":
             # Set to default rotation speed
+            self.pass_ongoing = True
             self.log.debug(f"Set AZ duty cycle back to {self.default_dutycycle_range[1]}")
             self.rotator.set_dutycycle_range(az_duty_max=self.default_dutycycle_range[1])
 
@@ -507,6 +520,7 @@ class Rotator(BaseModule):
             """
                 At LOS stop the rotator
             """
+            self.pass_ongoing = False
 
             try:
                 ########### Actual call of rotator command ###########

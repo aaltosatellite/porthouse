@@ -17,18 +17,22 @@ class DummyRotatorController(RotatorController):
     def stop(self) -> None:
         pass
 
-    def get_position(self) -> PositionType:
+    def get_position(self, with_timestamp=False) -> PositionType:
         self.maybe_enforce_limits()
-        return self.current_position
+        self.current_pos_ts = time.time()
+        return self.current_position if not with_timestamp else (self.current_position, self.current_pos_ts)
 
     def set_position(self,
                      az: float,
                      el: float,
+                     ts: Optional[float] = None,
                      rounding: int = 1,
                      shortest_path: bool = True) -> PositionType:
         self.position_valid(az, el, raise_error=True)
         self.target_position = (az, el)
+        self.target_pos_ts = ts or time.time()
         self.current_position = (az, el)
+        self.current_pos_ts = time.time()
         return az, el
 
     def get_position_target(self) -> PositionType:

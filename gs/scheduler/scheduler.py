@@ -225,7 +225,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Add process to the scheduler
         """
-        process = Process.from_dict(process_dict)
+        storage = process_dict.pop("storage", Process.STORAGE_MISC)
+        process = Process.from_dict(process_dict, storage=storage)
         if process.process_name in self.processes:
             raise SchedulerError(f"Process {process.process_name} already exists")
         if deny_main and process.storage == Process.STORAGE_MAIN:
@@ -240,7 +241,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Update process in the scheduler
         """
-        process = Process.from_dict(process_dict)
+        storage = process_dict.pop("storage", Process.STORAGE_MISC)
+        process = Process.from_dict(process_dict, storage=storage)
         if process.process_name not in self.processes:
             raise SchedulerError(f"Process {process.process_name} does not exist")
         if deny_main and process.storage == Process.STORAGE_MAIN:
@@ -371,7 +373,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             self.write_schedule()
         return True
 
-    def remove_task(self, task_name, deny_main=True):
+    async def remove_task(self, task_name, deny_main=True):
         """
         Remove task from the schedule
         """
@@ -382,8 +384,16 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                                  f"currently not allowed.")
 
         with self.schedule_lock:
-            self.schedule.remove(self.schedule.tasks[task_name])
+            task = self.schedule.tasks[task_name]
+            cancel = task.status == TaskStatus.ONGOING
+            if cancel:
+                tracker = self.processes[task.get_process_name()].tracker
+            self.schedule.remove(task)
             self.write_schedule()
+
+        if cancel:
+            await self.send_rpc_request("tracking", f"{tracker}.rpc.remove_target", {"task_name": task_name})
+
         return True
 
     async def start_task(self, task):
@@ -442,7 +452,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         end_time = end_time or start_time + timedelta(hours=24)
 
         self.log.debug(f"Creating schedule from {start_time.isoformat()} to {end_time.isoformat()}"
-                       + ('' if process_name is None else f'for process {process_name} only') + "...")
+                       + ('' if process_name is None else f' for process {process_name} only') + "...")
         self.read_processes()
 
         # sort so that higher priority (low prio number) processes are scheduled first
@@ -586,8 +596,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             #
             # Add a new process. Request data must be a dict understood by the Process.from_dict constructor.
             #
-            request_data["storage"] = Process.STORAGE_MISC  # always use misc storage for new processes added via API
-            ok = self.add_process(**request_data)
+            ok = self.add_process(request_data)
             return {"success": ok}
 
         elif request_name == "rpc.update_process":
@@ -595,7 +604,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             # Update an existing process. Existing process storage type must be MISC.
             # Request data must be a dict understood by the Process.from_dict constructor.
             #
-            ok = self.update_process(**request_data)
+            ok = self.update_process(request_data)
             return {"success": ok}
 
         elif request_name == "rpc.remove_process":
@@ -640,7 +649,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             #
             if "task_name" not in request_data:
                 raise RPCError("task_name (str) parameter not given")
-            ok = self.remove_task(request_data["task_name"], deny_main=request_data.get("deny_main", True))
+            ok = await self.remove_task(request_data["task_name"], deny_main=request_data.get("deny_main", True))
             return {"success": ok}
 
         elif request_name == "rpc.update_schedule":
@@ -653,19 +662,17 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             start_time, end_time = date_arg("start_time"), date_arg("end_time")
 
             if request_data.get("reset", False):
-                start_time = start_time or datetime.now(timezone.utc)
-                end_time = end_time or start_time + timedelta(hours=48)
                 process_name = request_data.get("process_name", None)
                 reset_ongoing = request_data.get("reset_ongoing", False)
                 affected_statuses = [TaskStatus.SCHEDULED] + ([TaskStatus.ONGOING] if reset_ongoing else [])
 
                 async with self.schedule_lock:
-                    tba = [task for task in self.schedule
+                    tbr = [task for task in self.schedule
                            if task.status in affected_statuses and task.auto_scheduled
-                              and task.start_time >= start_time and task.end_time <= end_time
+                              and (start_time is None or task.start_time >= start_time)
+                              and (end_time is None or task.end_time <= end_time)
                               and (process_name is None or task.process_name == process_name)]
-                    tbr = [task for task in tba if task.status == TaskStatus.SCHEDULED]
-                    tbc = [task for task in tba if task.status == TaskStatus.ONGOING]
+                    tbc = [task for task in tbr if task.status == TaskStatus.ONGOING]
                     for task in tbr:
                         self.schedule.remove(task)
                     self.write_schedule()
@@ -673,6 +680,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 for task in tbc:
                     await self.send_rpc_request("tracking", "orbit.rpc.remove_target", {"task_name": task.task_name})
 
+            start_time = start_time or datetime.now(timezone.utc)
+            end_time = end_time or start_time + timedelta(hours=48)
             return self.maybe_start_schedule_creation(start_time=start_time, end_time=end_time, force=True,
                                                       process_name=request_data.get("process_name", None))
 
