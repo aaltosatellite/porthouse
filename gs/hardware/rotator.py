@@ -132,7 +132,7 @@ class Rotator(BaseModule):
                 d_ts = self.target_timestamp - self.position_timestamp
 
                 # header: ts_cur, az_cur, el_cur, ts_trg, al_trg, el_trg, d_ts, d_az, d_el, d_dist
-                self.perf_log.write("%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f" % (
+                self.perf_log.write("%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f\n" % (
                                     self.position_timestamp, self.current_position[0], self.current_position[1],
                                     self.target_timestamp, self.target_position[0], self.target_position[1],
                                     d_ts, d_az, d_el, (d_az**2 + d_el**2)**0.5))
