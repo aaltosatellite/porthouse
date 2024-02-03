@@ -394,6 +394,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         # the task will retain the data that was used for its execution.
         process_data = self.processes[task.process_name].to_dict()
         process_data.update(task.process_overrides or {})
+        process_data = {k: v for k, v in process_data.items() if k not in ("enabled", "process_name")}
         task.process_overrides = process_data
         await self.publish(task.get_task_data(), exchange="scheduler", routing_key="task.start")
 
