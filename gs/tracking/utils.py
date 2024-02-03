@@ -153,12 +153,13 @@ class GroundStation:
 class Satellite:
     """ Class to store satellite info """
 
-    def __init__(self, name: str, tle1: str, tle2: str, gs: skyfield.Topos = None):
+    def __init__(self, name: str, tle1: str, tle2: str, gs: skyfield.Topos = None, earth=None):
         """ Initialize satellite object """
         self.name = name
         self.tle1 = tle1
         self.tle2 = tle2
         self.gs = gs
+        self.earth = earth
 
         self.sc = skyfield.EarthSatellite(self.tle1, self.tle2)
         self.passes = []
@@ -181,8 +182,8 @@ class Satellite:
 
     def pos_at(self, time: Union[None, str, datetime, skyfield.Time], accurate=False) -> Geometric:
         t = parse_time(time)
-        if accurate:
-            return self.gs.at(t).observe(self.sc).apparent()
+        if accurate and self.earth is not None:
+            return (self.earth + self.gs).at(t).observe(self.earth + self.sc).apparent()
         else:
             return (self.sc - self.gs).at(t)
 

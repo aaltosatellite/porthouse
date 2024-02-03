@@ -279,6 +279,10 @@ class TargetTracker:
         self.tracking_interval = tracking_interval
         self.status = status
         self.high_accuracy = isinstance(target, CelestialObject) if high_accuracy is None else high_accuracy
+        if self.high_accuracy:
+            if CelestialObject.BODIES is None:
+                CelestialObject.init_bodies()
+            self.target.earth = CelestialObject.EARTH
         self.asyncio_task = None
         self.last_tracking_update = 0.0
 
