@@ -286,7 +286,7 @@ class TargetTracker:
         while self.target:
             update_time = time.time()
             dt = update_time - self.last_tracking_update
-            sleep_time = max(0.0, self.tracking_intarval - dt)
+            sleep_time = max(0.0, self.tracking_interval - dt)
             self.module.log.info(f"Prev exec time: {dt:.2f}s, will sleep {sleep_time:.2f}s")
             self.last_tracking_update = update_time
             await asyncio.sleep(sleep_time)
