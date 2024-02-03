@@ -10,7 +10,7 @@ import uuid
 import datetime
 import logging
 import logging.handlers
-from typing import Optional
+from typing import Optional, Union
 from .config import load_globals
 import aiormq
 import aiormq.abc
@@ -235,6 +235,19 @@ class BaseModule:
 
         if self.debug:
             self.log.setLevel(logging.DEBUG)
+
+
+    def task_done_handler(self, task: asyncio.Task, cancelled_msg: Union[str, bool, None] = None):
+        """
+        Handle task done callback
+        """
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            if cancelled_msg:
+                self.log.warning(f"Task {task.get_name()} cancelled" if cancelled_msg is True else cancelled_msg)
+        except Exception:
+            self.log.error(f"Task {task.get_name()} failed:", exc_info=True)
 
 
     async def send_rpc_response(self, request: aiormq.abc.DeliveredMessage, data: dict):

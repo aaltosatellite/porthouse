@@ -10,9 +10,19 @@ Main Dependencies:
 - Python 3.7 or newer
 - PostgreSQL version 11
 - Main python dependencies:
-    - amqio
-    - Python AMQP 2.0.3
+    - aiormq
+    - amqp
+    - httpx
+    - numpy
+    - pandas
+    - prompt_toolkit
+    - ptpython
+    - pyserial
+    - pyYAML
+    - pyzmq
+    - requests
     - skyfield
+    - sortedcontainers
 
 
 

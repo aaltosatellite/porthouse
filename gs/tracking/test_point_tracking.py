@@ -5,7 +5,7 @@ import json
 import socket
 
 from porthouse.core.testmodule import TestModule, queue, bind
-from .point_tracker import calculate_azimuth_elevation
+from .gnss_tracker import calculate_azimuth_elevation
 
 
 class PointTrackerTester(TestModule):

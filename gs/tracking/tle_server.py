@@ -55,7 +55,6 @@ def validate_tle(tle1: str, tle2: str) -> bool:
     return False
 
 
-
 class TLEServer(BaseModule):
     """
         Fetches TLE parameters from varioous sources defined in the cfg file
@@ -71,7 +70,8 @@ class TLEServer(BaseModule):
         super().__init__(**kwarg)
 
         self.credentials = None
-        self.tle_data = {}
+        self.tle_data = []
+        self.uncached_tles = []
         self.config_file = cfg_file or cfg_path("tle.yaml")
         self.updating = False
 
@@ -96,12 +96,12 @@ class TLEServer(BaseModule):
 
 
         # Create TLE updater task
-        asyncio.get_event_loop().create_task(self.updater_task())
-
+        task = asyncio.get_event_loop().create_task(self.updater_task(), name="tle_server.updater_task")
+        task.add_done_callback(self.task_done_handler)
 
     @rpc()
     @bind("tracking", "tle.rpc.#")
-    def rpc_handler(self,
+    async def rpc_handler(self,
             request_name: str,
             request_data: Dict[str, Any]
         ):
@@ -121,8 +121,8 @@ class TLEServer(BaseModule):
             if not self.updating:
 
                 # Create new task for immediate update
-                asyncio.get_event_loop().create_task(self.update_tles())
-
+                task = asyncio.get_event_loop().create_task(self.update_tles(), name="tle_server.update_tles")
+                task.add_done_callback(self.task_done_handler)
 
         elif request_name == "tle.rpc.get_tle":
             """
@@ -144,17 +144,37 @@ class TLEServer(BaseModule):
                                    f"System clock difference {diff} s")
 
             if "satellite" in request_data:
-                # Filter by given satellite name
-                for tle in self.tle_data:
-                    if tle["name"] == request_data["satellite"]:
-                        return {
-                            "time": datetime.utcnow().isoformat(' '),
-                            "name": tle["name"],
-                            "tle1": tle["tle1"],
-                            "tle2": tle["tle2"],
-                        }
-                raise RPCError("Could not find satellite '%s' in  %s" % (
-                    request_data["satellite"], [t['name'] for t in self.tle_data]))
+                # Filter by given satellite name or norad id, depending on the format
+                norad_id, tle = None, None
+                if request_data["satellite"][:6].lower() == 'norad:':
+                    norad_id = int(request_data["satellite"][6:])
+
+                for row in (self.tle_data + self.uncached_tles):
+                    if norad_id is None and row["name"] == request_data["satellite"] or \
+                            norad_id is not None and row.get("norad_id", None) == norad_id:
+                        tle = [row["tle1"], row["tle2"]]
+
+                if tle is None and norad_id is not None:
+                    tle, _ = await self.query_spacetrack(norad_id=norad_id)
+                    self.uncached_tles.append({
+                        "name": request_data["satellite"],
+                        "norad_id": norad_id,
+                        "tle1": tle[0],
+                        "tle2": tle[1],
+                    })
+
+                if tle is not None:
+                    return {
+                        "time": datetime.utcnow().isoformat(' '),
+                        "name": request_data["satellite"],
+                        "tle1": tle[0],
+                        "tle2": tle[1],
+                    }
+
+                if norad_id is None:
+                    raise RPCError("Could not find satellite '%s' in  %s" % (
+                        request_data["satellite"], [t['name'] for t in self.tle_data]))
+                raise RPCError(f"Could not find satellite with NORAD ID {norad_id}")
 
             # Return all TLE lines
             return {
@@ -164,7 +184,6 @@ class TLEServer(BaseModule):
 
         else:
             raise RPCError("Unknown command")
-
 
     async def updater_task(self) -> NoReturn:
         """
@@ -183,6 +202,43 @@ class TLEServer(BaseModule):
                 self.log.error("TLE update process failed", exc_info=True)
                 await asyncio.sleep(3600)
 
+    async def query_spacetrack(self, norad_id, auth_cookies=None):
+        if self.credentials is None:
+            self.log.error("No login credential provided fo space-track.org")
+            return None, auth_cookies
+
+        if auth_cookies is None:
+            # Login to space-track.org
+            async with httpx.AsyncClient() as client:
+                r = await client.post("https://www.space-track.org/ajaxauth/login",
+                                      data=self.credentials,
+                                      timeout=5)
+            auth_cookies = r.cookies
+
+        # Request latest TLE entry for given NORAD ID
+        URL = "https://www.space-track.org/basicspacedata/query/class/tle_latest/" \
+              "NORAD_CAT_ID/{id}/orderby/EPOCH%20desc/limit/1/format/tle"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(URL.format(id=norad_id),
+                                     cookies=auth_cookies, timeout=5)
+        except httpx.RequestError as e:
+            self.log.error("Failed to query TLE from space-track.org: %r", e)
+            return None, auth_cookies
+
+        if r.status_code == 200:
+            tle = r.text.split("\n")
+        else:
+            self.log.error("space-track.org responded HTTP error %d: %r",
+                           r.status_code, r.text)
+            return None, auth_cookies
+
+        if validate_tle(tle[0], tle[1]):
+            return tle, auth_cookies
+        else:
+            self.log.error("Could not validate TLE: %s" % (tle,)),
+            return None, auth_cookies
 
     async def update_tles(self) -> None:
         """
@@ -227,9 +283,9 @@ class TLEServer(BaseModule):
                         try:
                             self.log.debug("Downloading %s", weburl)
                             async with httpx.AsyncClient() as client:
-                                response = await client.get(weburl, timeout=3)
+                                response = await client.get(weburl, timeout=5)
 
-                        except httpx.RequestException as e:
+                        except httpx.RequestError as e:
                             self.log.error("Failed to download file %r: %s", weburl, e, exc_info=True)
                             continue
 
@@ -267,46 +323,16 @@ class TLEServer(BaseModule):
                     #
                     # Space-track
                     #
-
-                    if self.credentials is None:
-                        self.log.error("No login credential provided fo space-track.org")
+                    tle, auth_cookies = await self.query_spacetrack(norad_id=satellite["norad_id"],
+                                                                    auth_cookies=auth_cookies)
+                    if tle is None:
                         continue
 
-                    if auth_cookies is None:
-                        # Login to space-track.org
-                        async with httpx.AsyncClient() as client:
-                            r = await client.post("https://www.space-track.org/ajaxauth/login",
-                                                  data=self.credentials,
-                                                  timeout=3)
-                        auth_cookies = r.cookies
-
-                    # Request latest TLE entry for given NORAD ID
-                    URL = "https://www.space-track.org/basicspacedata/query/class/tle_latest/" \
-                        "NORAD_CAT_ID/{id}/orderby/EPOCH%20desc/limit/1/format/tle"
-
-                    try:
-                        async with httpx.AsyncClient() as client:
-                            r = await client.get(URL.format(id=satellite["norad_id"]),
-                                                 cookies=auth_cookies, timeout=3)
-                    except httpx.RequestException as e:
-                        self.log.error("Failed to query TLE from space-track.org: %r", e)
-                        continue
-
-                    if r.status_code == 200:
-                        lines = r.text.split("\n")
-                        entry = {
-                            "name": satellite["name"],
-                            "tle1": lines[0],
-                            "tle2": lines[1]
-                        }
-                    else:
-                        self.log.error("space-track.org responded HTTP error %d: %r",
-                            r.status_code, r.text)
-                        continue
-
-                    if validate_tle(entry["tle1"], entry["tle2"]):
-                        new_tle[satellite.get("name")] = entry
-
+                    new_tle[satellite["name"]] = {
+                        "name": satellite["name"],
+                        "tle1": tle[0],
+                        "tle2": tle[1]
+                    }
 
                 elif source == "lines":
                     #
