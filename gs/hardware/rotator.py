@@ -22,15 +22,10 @@ class Rotator(BaseModule):
     """
     """
 
-    # Statics
-    # minimum update interval for position queries,
-    # affects how often hardware functions are called
-    position_update_interval = 1.0
-
     rotator: RotatorController
 
-    def __init__(self, driver, address, tracking_enabled=False, threshold=0.5, position_range=(-90, 450, 0, 90),
-                 horizon_map_file=None, min_sun_angle=None, **kwargs):
+    def __init__(self, driver, address, tracking_enabled=False, threshold=0.1, refresh_rate=1.0,
+                 position_range=(-90, 450, 0, 90), horizon_map_file=None, min_sun_angle=None, **kwargs):
         """
         Initialize rotator module
 
@@ -48,7 +43,15 @@ class Rotator(BaseModule):
         assert position_range[0] < position_range[1], "azimuth min must be smaller than azimuth max"
         assert position_range[2] < position_range[3], "elevation min must be smaller than elevation max"
 
-        self.threshold = threshold               # only move while position difference is larger, given in degrees
+        # only move while position difference is larger, given in degrees
+        self.threshold = threshold
+        self.log.debug("Threshold: %s" % (self.threshold,))
+
+        # refresh current position info this many times per second when rotating to target
+        #  - affects how often hardware functions are called
+        self.refresh_rate = refresh_rate
+        self.log.debug("Refresh rate [Hz]: %s" % (self.refresh_rate,))
+        self.last_state_check = 0.0
 
         self.prev_status = None
 
@@ -58,6 +61,7 @@ class Rotator(BaseModule):
         min_elevation = position_range[2]
         self.target_position = (0, min_elevation)
         self.old_target_position = (0, min_elevation)
+        self.target_timestamp = time.time()
 
         # Move to target using the shortest path is default behaviour
         self.shortest_path = True
@@ -80,6 +84,8 @@ class Rotator(BaseModule):
         self.rotator = driver_cls(address, az_min=position_range[0], az_max=position_range[1],
                                   el_min=position_range[2], el_max=position_range[3],
                                   horizon_map_file=horizon_map_file, min_sun_angle=min_sun_angle, debug=self.debug)
+        self.default_dutycycle_range = self.rotator.get_dutycycle_range()
+        self.log.debug("Duty-cycle range: %s" % (self.default_dutycycle_range,))
 
         # create setup coroutine
         loop = asyncio.get_event_loop()
@@ -98,9 +104,13 @@ class Rotator(BaseModule):
                       (f" (array shape: {self.rotator.horizon_map.shape})" if self.rotator.horizon_map_file else "") +
                       f", and min_sun_angle={self.rotator.min_sun_angle}")
 
+        interval = 1.0 / self.refresh_rate
         while True:
+            check_time = time.time()
+            sleep_time = max(0.0, interval - (check_time - self.last_state_check))
+            self.last_state_check = check_time
+            await asyncio.sleep(sleep_time if self.moving_to_target else 2)
             await self.check_state()
-            await asyncio.sleep(1 if self.moving_to_target else 2)
 
     def refresh_rotator_position(self, force_update=False):
         """
@@ -111,18 +121,20 @@ class Rotator(BaseModule):
             Can be forced to poll new position with "force_update".
         """
 
-        # check if position information can be considered too old
-        if time.time() < self.position_timestamp + self.position_update_interval and not force_update:
-            self.log.debug("No update! Ellapsed time %f",
-                           time.time() - self.position_timestamp)
-            return
-
         try:
             # record timestamp for new position
             self.current_position = self.rotator.get_position()
             self.position_timestamp = time.time()
 
-            self.log.debug("pos now %f %f", *self.current_position)
+            if self.moving_to_target:
+                d_az = self.target_position[0] - self.current_position[0]
+                d_el = self.target_position[1] - self.current_position[1]
+                d_ts = self.target_timestamp - self.position_timestamp
+
+                self.log.debug("pos@%.2f: %.2f %.2f, trg@%.2f: %.2f %.2f => diff@%.2f: |%.2f %.2f| = %.3f",
+                               self.position_timestamp % 1000, *self.current_position,
+                               self.target_timestamp % 1000, *self.target_position,
+                               d_ts, d_az, d_el, (d_az**2 + d_el**2)**0.5)
 
         except RotatorError as e:
             self.log.error("Could not get rotator position: %s", e, exc_info=True)
@@ -152,6 +164,7 @@ class Rotator(BaseModule):
             "el": self.current_position[1],
             "az_target": self.target_position[0],
             "el_target": self.target_position[1],
+            "ts_target": self.target_timestamp,
             "tracking": status,
             "rotating": self.moving_to_target,
         }
@@ -181,17 +194,18 @@ class Rotator(BaseModule):
 
             # the driver will avoid any safe zone violations by changing the target by itself, forgetting the given one
             if self.moving_to_target and not self.close_positions(self.target_position,
-                                                                  self.rotator.target_position, accuracy=0.2):
+                                                                  self.rotator.target_position,
+                                                                  accuracy=self.threshold * 2):
                 self.log.info("Target position changed by driver (%s -> %s), trying to continue to previous target",
-                               self.target_position, self.rotator.target_position)
-                self.set_target_position(self.target_position)
+                              self.target_position, self.rotator.target_position)
+                self.set_target_position(self.target_position, ts=self.target_timestamp)
 
             # If antenna is pointing already to current target,
             # don't send additional commands
             if not self.check_pointing():
 
                 # If antenna is already moving towards target position,
-                # don't spam rotate commands
+                # don't spam rotate commands (moving_to_target is set to False at set_target_position)
                 if not self.moving_to_target:
 
                     # Antenna is not at target and not yet moving to most
@@ -228,7 +242,7 @@ class Rotator(BaseModule):
             routing_key="status",
             prefixed=True)
 
-    def check_pointing(self, accuracy=0.1):
+    def check_pointing(self):
         """
         Checks if antenna is pointing to target. Takes finite accuracy of
         rotators into account by allowing some dead-zone.
@@ -236,10 +250,10 @@ class Rotator(BaseModule):
         Returns True if antenna is pointing to target within limits.
         """
 
-        return self.close_positions(self.current_position, self.target_position, accuracy)
+        return self.close_positions(self.current_position, self.target_position, self.threshold)
 
     @staticmethod
-    def close_positions(pos1, pos2, accuracy=0.1):
+    def close_positions(pos1, pos2, accuracy):
         """
         Checks if two positions are close to each other
         """
@@ -247,7 +261,7 @@ class Rotator(BaseModule):
         return abs(pos1[0] - pos2[0]) <= accuracy and \
                abs(pos1[1] - pos2[1]) <= accuracy
 
-    def set_target_position(self, target, shortest_path=True):
+    def set_target_position(self, target, shortest_path=True, ts=None):
         """
         Set new target position
         """
@@ -264,6 +278,7 @@ class Rotator(BaseModule):
         self.old_target_position = self.target_position
         self.target_position = valid_position
         self.shortest_path = shortest_path
+        self.target_timestamp = ts or time.time()
 
         self.target_valid = True
         # target was updated but movement command is not yet sent.
@@ -323,16 +338,17 @@ class Rotator(BaseModule):
             """
 
             target = (float(request_data['az']), float(request_data['el']))
+            timestamp = request_data.get('timestamp', time.time())
 
             # Disable automatic tracking
             self.tracking_enabled = False
 
             try:
                 if "shortest" in request_data:
-                    self.set_target_position(target, request_data["shortest"])
+                    self.set_target_position(target, request_data["shortest"], ts=timestamp)
 
                 else:
-                    self.set_target_position(target)
+                    self.set_target_position(target, ts=timestamp)
 
             except RotatorError as e:
                 self.log.error(
@@ -430,12 +446,10 @@ class Rotator(BaseModule):
 
             new_target = (float(event_body['az']) % 360,
                           float(event_body['el']))
-
-            if new_target[1] < self.threshold:
-                new_target = (new_target[0], self.threshold)
+            timestamp = event_body.get('timestamp', time.time())
 
             try:
-                self.set_target_position(new_target, shortest_path=True)
+                self.set_target_position(new_target, shortest_path=True, ts=timestamp)
             except RotatorError as e:
                 self.log.error(
                     "Failed to update target position! %s",
@@ -445,14 +459,14 @@ class Rotator(BaseModule):
         elif routing_key == "preaos":
             """
                 At preAOS determine the optimal initial azimuth within the
-                full [-90:450] interval. Initial elevation is always min_elevation + threshold.
+                full [-90:450] interval. Initial elevation is always min_elevation.
             """
             # Make sure azimuths are in range [0, 360]
             aos_az = event_body["az_aos"] % 360
             max_az = event_body["az_max"] % 360
             los_az = event_body["az_los"] % 360
 
-            aos_el = self.rotator.az_dependent_min_el(aos_az) + self.threshold
+            aos_el = self.rotator.az_dependent_min_el(aos_az)
 
             ### Might be needed to adapt this when using with different GS ###
             # Over the north-west to east or vice versa or
@@ -472,25 +486,22 @@ class Rotator(BaseModule):
             # Initial positioning of the rotator
             try:
                 # Speed up the azimuth rotation speed
-                self.log.info("DEBUG raise duty cycle up to 100")
+                self.log.debug("Raise AZ duty cycle up to 100")
                 self.rotator.set_dutycycle_range(az_duty_max=100)
 
                 # Needs to go to position defined by full [-90, +450] angle
                 self.set_target_position(initial_target, shortest_path=False)
 
             except RotatorError as e:
-                self.log.error(
-                    "Failed to set initial target position! %s",
-                    str(e), exc_info=True)
+                self.log.error("Failed to set initial target position! %s", str(e), exc_info=True)
                 return
 
-            self.log.info("Rotator ready for the next pass (%s)",
-                          event_body.get("satellite", "-"))
+            self.log.info("Rotator ready for the next pass (%s)", event_body.get("satellite", "-"))
 
         elif routing_key == "aos":
             # Set to default rotation speed
-            self.log.info("DEBUG set duty cycle back to 60")
-            self.rotator.set_dutycycle_range(az_duty_max=60)
+            self.log.debug(f"Set AZ duty cycle back to {self.default_dutycycle_range[1]}")
+            self.rotator.set_dutycycle_range(az_duty_max=self.default_dutycycle_range[1])
 
         elif routing_key == "los":
             """
@@ -502,8 +513,7 @@ class Rotator(BaseModule):
                 self.rotator.stop()
 
             except RotatorError as e:
-                self.log.error("Failed to reset target position! %s",
-                    e.args[0], exc_info=True)
+                self.log.error("Failed to reset target position! %s", e.args[0], exc_info=True)
                 return
 
 

@@ -180,6 +180,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         await self.send_event("next_pass", task_name=task_name, target=target, rotators=rotators,
                               **next_pass.to_dict())
 
+        if high_accuracy is None:
+            high_accuracy = isinstance(target, CelestialObject) or sunlit is not None or sun_max_elevation is not None
         target_tracker = TargetTracker(self, task_name, target, rotators,
                                        preaos_time=preaos_time, high_accuracy=high_accuracy)
         self.target_trackers.append(target_tracker)
@@ -265,16 +267,16 @@ class TrackerStatus(IntEnum):
 
 
 class TargetTracker:
-    TRACKING_INTERVAL = 2.0     # seconds
 
     def __init__(self, module: OrbitTracker, task_name: str, target: Union[Satellite, CelestialObject],
-                 rotators: List[str], preaos_time=OrbitTracker.DEFAULT_PREAOS_TIME,
+                 rotators: List[str], preaos_time=OrbitTracker.DEFAULT_PREAOS_TIME, tracking_interval=2.0,
                  status=TrackerStatus.WAITING, high_accuracy=None):
         self.module = module
         self.task_name = task_name
         self.target = target
         self.rotators = rotators
         self.preaos_time = datetime.timedelta(seconds=preaos_time)
+        self.tracking_interval = tracking_interval
         self.status = status
         self.high_accuracy = isinstance(target, CelestialObject) if high_accuracy is None else high_accuracy
         self.asyncio_task = None
@@ -283,7 +285,9 @@ class TargetTracker:
     async def setup(self) -> None:
         while self.target:
             update_time = time.time()
-            sleep_time = max(0.0, self.TRACKING_INTERVAL - (update_time - self.last_tracking_update))
+            dt = update_time - self.last_tracking_update
+            sleep_time = max(0.0, self.tracking_intarval - dt)
+            self.module.log.info(f"Prev exec time: {dt:.2f}s, will sleep {sleep_time:.2f}s")
             self.last_tracking_update = update_time
             await asyncio.sleep(sleep_time)
             await self.update_tracking()
@@ -369,8 +373,8 @@ class TargetTracker:
                 self.module.log.debug(f"AOS for {self.target.target_name} {self.rotators} in {sec:.0f} seconds")
 
         elif self.status == TrackerStatus.TRACKING:
-            # Calculate the position TRACKING_INTERVAL seconds in the future
-            t = now + datetime.timedelta(seconds=self.TRACKING_INTERVAL)
+            # Calculate the position tracking_interval seconds in the future
+            t = now + datetime.timedelta(seconds=self.tracking_interval)
             pos = self.target.pos_at(t, accurate=self.high_accuracy)
             el, az, range, _, _, range_rate = pos.frame_latlon_and_rates(self.module.gs.pos)
             if self.high_accuracy:
