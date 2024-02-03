@@ -701,13 +701,13 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
     i = np.array(list(zip(jd, v)), dtype=[('jd', 'f8'), ('v', 'f8')]).argsort(order=('jd', 'v'))
     jd, v = jd[i], v[i]
 
-    if v[0] == 1:
+    if len(v) > 0 and v[0] == 1:
         # The first event is a maximum, so the satellite is already up, add a rising event at the start.
         #   - Partial pass at the beginning is ok as we want to get a currently visible pass included also.
         jd = np.concatenate(([t0.tt - 1/3600/24], jd))
         v = np.concatenate(([0], v))
 
-    if partial_last_pass and v[-1] == 1:
+    if partial_last_pass and len(v) > 0 and v[-1] == 1:
         # The last event is a maximum, so the satellite is still up, add a setting event at the end.
         #  - Best not used for scheduling, instead better to wait for later addition of that pass, otherwise
         #    will the pass will be split into two unnecessarily. For tracking its no problem though.
