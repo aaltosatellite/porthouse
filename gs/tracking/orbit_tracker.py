@@ -284,22 +284,16 @@ class TargetTracker:
                 CelestialObject.init_bodies()
             self.target.earth = CelestialObject.EARTH
         self.asyncio_task = None
-        self.last_tracking_update = 0.0
 
     async def setup(self) -> None:
+        t0, st = 0.0, 0.0
         while self.target:
-            update_time = time.time()
-            dt = update_time - self.last_tracking_update
-            sleep_time = max(0.0, 2 * self.tracking_interval - dt)
-            self.last_tracking_update = update_time
-            self.module.log.debug(f"Prev exec time: {dt:.2f}s, will sleep {sleep_time:.2f}s")
-            await asyncio.sleep(sleep_time)
+            t1 = time.time()
+            dt, t0 = t1 - t0 - st, t1
+            st = max(0.0, self.tracking_interval - dt)
+            self.module.log.debug(f"Prev exec time: {dt:.2f}s, will sleep {st:.2f}s")
+            await asyncio.sleep(st)
             await self.update_tracking()
-
-    #         t1 = time.time()
-    #         if t0 is not None and t1 - t0 < 1 / max_rate:
-    #             time.sleep(1 / max_rate - (t1 - t0))
-    #         t0 = t1
 
     async def start(self) -> None:
         loop = asyncio.get_event_loop()

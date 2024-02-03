@@ -43,7 +43,8 @@ class RotatorController(abc.ABC):
                  el_max: float = 90,
                  horizon_map_file: Optional[str] = None,
                  min_sun_angle: Optional[float] = None,
-                 debug: bool = False):
+                 debug: bool = False,
+                 prefix: str = ""):
         """
         Initialize controller hardware driver including any serial com.
 

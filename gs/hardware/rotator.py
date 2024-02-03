@@ -52,7 +52,6 @@ class Rotator(BaseModule):
         #  - affects how often hardware functions are called
         self.refresh_rate = refresh_rate
         self.log.debug("Refresh rate [Hz]: %s" % (self.refresh_rate,))
-        self.last_state_check = 0.0
 
         self.prev_status = None
 
@@ -83,7 +82,7 @@ class Rotator(BaseModule):
         if driver_cls is None:
             raise ValueError(f"Unknown rotator driver {driver}")
         self.rotator = driver_cls(address, az_min=position_range[0], az_max=position_range[1],
-                                  el_min=position_range[2], el_max=position_range[3],
+                                  el_min=position_range[2], el_max=position_range[3], prefix=self.prefix,
                                   horizon_map_file=horizon_map_file, min_sun_angle=min_sun_angle, debug=self.debug)
         self.default_dutycycle_range = self.rotator.get_dutycycle_range()
         self.log.debug("Duty-cycle range: %s" % (self.default_dutycycle_range,))
@@ -110,12 +109,12 @@ class Rotator(BaseModule):
                       (f" (array shape: {self.rotator.horizon_map.shape})" if self.rotator.horizon_map_file else "") +
                       f", and min_sun_angle={self.rotator.min_sun_angle}")
 
-        interval = 1.0 / self.refresh_rate
+        t0, st = 0.0, 0.0
         while True:
-            check_time = time.time()
-            sleep_time = max(0.0, 2 * interval - (check_time - self.last_state_check))
-            self.last_state_check = check_time
-            await asyncio.sleep(sleep_time if self.moving_to_target else 2)
+            t1 = time.time()
+            dt, t0 = t1 - t0 - st, t1
+            st = max(0.0, 1.0 / self.refresh_rate - dt)
+            await asyncio.sleep(st if self.moving_to_target else 2)
             await self.check_state()
 
     def refresh_rotator_position(self):
