@@ -91,6 +91,7 @@ class Rotator(BaseModule):
             os.makedirs("logs", exist_ok=True)
             self.perf_log = open(f"logs/{self.prefix}_perf_{time.time():.0f}.csv", "w")
             self.perf_log.write("ts_cur, az_cur, el_cur, ts_trg, az_trg, el_trg, d_ts, d_az, d_el, d_dist\n")
+            self.perf_log.flush()
 
         # create setup coroutine
         loop = asyncio.get_event_loop()
@@ -137,6 +138,7 @@ class Rotator(BaseModule):
                                     self.position_timestamp, self.current_position[0], self.current_position[1],
                                     self.target_timestamp, self.target_position[0], self.target_position[1],
                                     d_ts, d_az, d_el, (d_az**2 + d_el**2)**0.5))
+                self.perf_log.flush()
 
         except RotatorError as e:
             self.log.error("Could not get rotator position: %s", e, exc_info=True)
@@ -467,7 +469,7 @@ class Rotator(BaseModule):
             max_az = event_body["az_max"] % 360
             los_az = event_body["az_los"] % 360
 
-            aos_el = self.rotator.az_dependent_min_el(aos_az)
+            aos_el = max(0.0, self.rotator.az_dependent_min_el(aos_az))
 
             ### Might be needed to adapt this when using with different GS ###
             # Over the north-west to east or vice versa or
