@@ -25,13 +25,14 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
     TRACKER_TYPE = 'orbit'
     DEFAULT_PREAOS_TIME = 120
 
-    def __init__(self, **kwargs):
+    def __init__(self, tracking_interval=2.1, scheduler_enabled=True, **kwargs):
         """
         Initialize module.
         """
         super().__init__(**kwargs)
 
-        self.scheduler_enabled = kwargs.get("scheduler_enabled", True)
+        self.tracking_interval = tracking_interval
+        self.scheduler_enabled = scheduler_enabled
 
         # list of targets, associated rotators, and tracking status
         self.target_trackers = []
@@ -182,7 +183,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
 
         if high_accuracy is None:
             high_accuracy = isinstance(target, CelestialObject) or sunlit is not None or sun_max_elevation is not None
-        target_tracker = TargetTracker(self, task_name, target, rotators,
+        target_tracker = TargetTracker(self, task_name, target, rotators, tracking_interval=self.tracking_interval,
                                        preaos_time=preaos_time, high_accuracy=high_accuracy)
         self.target_trackers.append(target_tracker)
         await target_tracker.start()
@@ -212,7 +213,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         self.target_trackers = [tt for i, tt in enumerate(self.target_trackers) if i not in remove_idxs]
 
     async def broadcast_pointing(self, task_name: str, target: Union[Satellite, CelestialObject], rotators: List[str],
-                                 az: float, el: float, range: float, range_rate: float, timestamp: float) -> None:
+                                 az: float, el: float, range: float, az_rate: float, el_rate: float, range_rate: float,
+                                 timestamp: float) -> None:
         """
         Broadcast pointing information
             - e.g. for the rotator, also for modem software doppler correction
@@ -224,6 +226,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             az: Target azimuth
             el: Target elevation
             range: Target distance
+            az_rate: Target azimuth rate
+            el_rate: Target elevation rate
             range_rate: Target distance change rate
         """
 
@@ -239,6 +243,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             "az": round(az, 2),
             "el": round(el, 2),
             "range": round(range, 2),
+            "az_rate": round(az_rate, 6),
+            "el_rate": round(el_rate, 6),
             "range_rate": round(range_rate, 2),
             "timestamp": timestamp,
         }, exchange="tracking", routing_key="target.position")
@@ -279,17 +285,19 @@ class TargetTracker:
         self.tracking_interval = tracking_interval
         self.status = status
         self.high_accuracy = isinstance(target, CelestialObject) if high_accuracy is None else high_accuracy
+        if self.high_accuracy:
+            if CelestialObject.BODIES is None:
+                CelestialObject.init_bodies()
+            self.target.earth = CelestialObject.EARTH
         self.asyncio_task = None
-        self.last_tracking_update = 0.0
 
     async def setup(self) -> None:
+        t0, st = 0.0, 0.0
         while self.target:
-            update_time = time.time()
-            dt = update_time - self.last_tracking_update
-            sleep_time = max(0.0, self.tracking_interval - dt)
-            self.module.log.info(f"Prev exec time: {dt:.2f}s, will sleep {sleep_time:.2f}s")
-            self.last_tracking_update = update_time
-            await asyncio.sleep(sleep_time)
+            t1 = time.time()
+            dt, t0 = t1 - t0 - st, t1
+            st = max(0.0, self.tracking_interval - dt)
+            await asyncio.sleep(st)
             await self.update_tracking()
 
     async def start(self) -> None:
@@ -376,19 +384,21 @@ class TargetTracker:
             # Calculate the position tracking_interval seconds in the future
             t = now + datetime.timedelta(seconds=self.tracking_interval)
             pos = self.target.pos_at(t, accurate=self.high_accuracy)
-            el, az, range, _, _, range_rate = pos.frame_latlon_and_rates(self.module.gs.pos)
+            el, az, range, el_rate, az_rate, range_rate = pos.frame_latlon_and_rates(self.module.gs.pos)
             if self.high_accuracy:
                 el, az, _ = pos.altaz('standard')  # include effect from atmospheric refraction
 
             if self.module.debug:
                 m, s = divmod((next_pass.t_los - now).total_seconds(), 60)
-                self.module.log.debug(f"LOS for {self.target.target_name} {self.rotators} in {m:.0f} minutes "
-                                      f"{s:.0f} seconds, az={az.degrees:.1f} el={el.degrees:.1f} "
+                self.module.log.debug(f"LOS for {self.target.target_name} {self.rotators} in {m:.0f}min "
+                                      f"{s:.0f}s, az={az.degrees:.1f} el={el.degrees:.1f} r={range.km:.1f} "
+                                      f"azr={az_rate.degrees.per_second:.3f} elr={el_rate.degrees.per_second:.3f} "
                                       f"rr={range_rate.m_per_s:.1f}")
 
             # Broadcast spacecraft position
             await self.module.broadcast_pointing(self.task_name, self.target, self.rotators,
                                                  az=az.degrees, el=el.degrees,
+                                                 az_rate=az_rate.degrees.per_second, el_rate=el_rate.degrees.per_second,
                                                  range=range.m, range_rate=range_rate.m_per_s,
                                                  timestamp=t.timestamp())
 

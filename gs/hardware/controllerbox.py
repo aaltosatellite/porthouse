@@ -2,10 +2,11 @@
     Interface class for controlling Aalto Satellites Rotator controller.
 """
 
+import os
 import time
 import serial  # serial_asyncio
 
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, Union
 
 from .base import RotatorController, RotatorError, PositionType
 
@@ -28,7 +29,8 @@ class ControllerBox(RotatorController):
                  el_max: float = 90,
                  horizon_map_file: Optional[str] = None,
                  min_sun_angle: Optional[float] = None,
-                 debug: bool = False):
+                 debug: bool = False,
+                 prefix="") -> None:
         """
         Initialize controller box including serial com to controller box.
 
@@ -50,7 +52,8 @@ class ControllerBox(RotatorController):
         self.err_cnt = 0
 
         if self.debug:
-            self.log = open(f"controlbox_debug_{time.time():.0f}.log", "w")
+            os.makedirs("logs", exist_ok=True)
+            self.log = open(f"logs/{prefix}_debug_{time.time():.0f}.log", "w")
 
         # Creates and opens serial com
         self.ser = serial.Serial(port=address, baudrate=baudrate, timeout=0.5)
@@ -78,23 +81,26 @@ class ControllerBox(RotatorController):
         self._write_command(b"S")
         self._read_response()
 
-    def get_position(self) -> PositionType:
+    def get_position(self, with_timestamp=False) -> Union[PositionType, Tuple[PositionType, float]]:
         self._write_command(b"P -s")
+        self.current_pos_ts = time.time()
         self.current_position = self._parse_position_output(self._read_response())
         self.err_cnt = 0  # Reset error counter
 
         self.maybe_enforce_limits()
-        return self.current_position
+        return self.current_position if not with_timestamp else (self.current_position, self.current_pos_ts)
 
     def set_position(self,
                      az: float,
                      el: float,
+                     ts: Optional[float] = None,
                      rounding: int = 1,
                      shortest_path: bool = True) -> PositionType:
 
         # Check whether az and el are within allowed limits
         self.position_valid(az, el, raise_error=True)
         self.target_position = (az, el)
+        self.target_pos_ts = ts or time.time()
 
         if shortest_path:
             self._write_command(f"MS -a {round(az, rounding)}".encode("ascii"))
@@ -154,12 +160,13 @@ class ControllerBox(RotatorController):
 
         # Force current position to be az, el
         self._write_command(f"P -a {az: .1f}".encode("ascii"))
-        self._read_response()
-
         self._write_command(f"P -e {el: .1f}".encode("ascii"))
-        self._read_response()
 
         # set target position to current position
+        self._write_command(f"MS -a {az: .1f}".encode("ascii"))
+        self._write_command(f"MS -e {el: .1f}".encode("ascii"))
+
+        self._read_response()
         self.target_position = (az, el)
 
         # update current_position, also move to valid position if currently invalid

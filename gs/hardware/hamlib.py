@@ -5,6 +5,7 @@
 """
 
 import socket
+import time
 from typing import Optional, Tuple
 
 from .base import RotatorError, RotatorController
@@ -92,11 +93,13 @@ class HamlibController(RotatorController):
 
     def set_position(self,
                      az, el,
+                     ts=None,
                      rounding=1,
                      shortest_path=True):
 
         self.position_valid(az, el, raise_error=True)
         self.target_position = (az, el)
+        self.target_pos_ts = ts or time.time()
 
         if shortest_path:
             # TODO: Mimic sortest path
@@ -104,8 +107,9 @@ class HamlibController(RotatorController):
 
         return self._execute(f"P {round(az, rounding)} {round(el, rounding)}\n")
 
-    def get_position(self):
+    def get_position(self, with_timestamp=False):
         ret = self._execute(b"p\n")
+        self.current_pos_ts = time.time()
         try:
             az, el = tuple(map(float, ret.decode("ascii").split()))
             self.current_position = az, el
@@ -113,7 +117,7 @@ class HamlibController(RotatorController):
             raise HamlibError("Failed to cast az/el information to floats")
 
         self.maybe_enforce_limits()
-        return self.current_position
+        return self.current_position if not with_timestamp else (self.current_position, self.current_pos_ts)
 
     def get_position_target(self):
         return self.target_position

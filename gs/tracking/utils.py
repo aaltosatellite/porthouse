@@ -153,12 +153,13 @@ class GroundStation:
 class Satellite:
     """ Class to store satellite info """
 
-    def __init__(self, name: str, tle1: str, tle2: str, gs: skyfield.Topos = None):
+    def __init__(self, name: str, tle1: str, tle2: str, gs: skyfield.Topos = None, earth=None):
         """ Initialize satellite object """
         self.name = name
         self.tle1 = tle1
         self.tle2 = tle2
         self.gs = gs
+        self.earth = earth
 
         self.sc = skyfield.EarthSatellite(self.tle1, self.tle2)
         self.passes = []
@@ -181,8 +182,8 @@ class Satellite:
 
     def pos_at(self, time: Union[None, str, datetime, skyfield.Time], accurate=False) -> Geometric:
         t = parse_time(time)
-        if accurate:
-            return self.gs.at(t).observe(self.sc).apparent()
+        if accurate and self.earth is not None:
+            return (self.earth + self.gs).at(t).observe(self.earth + self.sc).apparent()
         else:
             return (self.sc - self.gs).at(t)
 
@@ -700,13 +701,13 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
     i = np.array(list(zip(jd, v)), dtype=[('jd', 'f8'), ('v', 'f8')]).argsort(order=('jd', 'v'))
     jd, v = jd[i], v[i]
 
-    if v[0] == 1:
+    if len(v) > 0 and v[0] == 1:
         # The first event is a maximum, so the satellite is already up, add a rising event at the start.
         #   - Partial pass at the beginning is ok as we want to get a currently visible pass included also.
         jd = np.concatenate(([t0.tt - 1/3600/24], jd))
         v = np.concatenate(([0], v))
 
-    if partial_last_pass and v[-1] == 1:
+    if partial_last_pass and len(v) > 0 and v[-1] == 1:
         # The last event is a maximum, so the satellite is still up, add a setting event at the end.
         #  - Best not used for scheduling, instead better to wait for later addition of that pass, otherwise
         #    will the pass will be split into two unnecessarily. For tracking its no problem though.

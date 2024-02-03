@@ -3,6 +3,7 @@
 
     $ sudo apt-get install -y hamlib-utils
 """
+import time
 import asyncio
 
 __all__ = [
@@ -45,11 +46,13 @@ class HamlibAsyncController(HamlibController):
 
     async def set_position(self,
                      az, el,
+                     ts=None,
                      rounding=1,
                      shortest_path=True):
 
         self.position_valid(az, el, raise_error=True)
         self.target_position = (az, el)
+        self.target_pos_ts = ts or time.time()
 
         if shortest_path:
             # TODO: Mimic sortest path
@@ -59,8 +62,9 @@ class HamlibAsyncController(HamlibController):
 
         return await self.get_position()
 
-    async def get_position(self):
+    async def get_position(self, with_timestamp=False):
         ret = await self._execute_async(b"p\n")
+        self.current_pos_ts = time.time()
         try:
             az, el = tuple(map(float, ret.decode("ascii").split()))
             self.current_position = az, el
@@ -68,7 +72,7 @@ class HamlibAsyncController(HamlibController):
             raise HamlibError("Failed to cast az/el information to floats")
 
         await self.maybe_enforce_limits()
-        return self.current_position
+        return self.current_position if not with_timestamp else (self.current_position, self.current_pos_ts)
 
     async def maybe_enforce_limits(self) -> None:
         # async version of base class maybe_enforce_limits
