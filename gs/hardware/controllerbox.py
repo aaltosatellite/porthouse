@@ -2,6 +2,7 @@
     Interface class for controlling Aalto Satellites Rotator controller.
 """
 
+import os
 import time
 import serial  # serial_asyncio
 
@@ -28,7 +29,8 @@ class ControllerBox(RotatorController):
                  el_max: float = 90,
                  horizon_map_file: Optional[str] = None,
                  min_sun_angle: Optional[float] = None,
-                 debug: bool = False):
+                 debug: bool = False,
+                 prefix="") -> None:
         """
         Initialize controller box including serial com to controller box.
 
@@ -50,7 +52,8 @@ class ControllerBox(RotatorController):
         self.err_cnt = 0
 
         if self.debug:
-            self.log = open(f"controlbox_debug_{time.time():.0f}.log", "w")
+            os.makedirs("logs", exist_ok=True)
+            self.log = open(f"logs/{prefix}_debug_{time.time():.0f}.log", "w")
 
         # Creates and opens serial com
         self.ser = serial.Serial(port=address, baudrate=baudrate, timeout=0.5)

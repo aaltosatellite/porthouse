@@ -3,6 +3,7 @@
     Generic Rotator Module
 """
 
+import os
 import time
 import json
 import asyncio
@@ -88,7 +89,8 @@ class Rotator(BaseModule):
         self.log.debug("Duty-cycle range: %s" % (self.default_dutycycle_range,))
 
         if self.debug:
-            self.perf_log = open(f"{self.prefix}_perf_{time.time():.0f}.csv", "w")
+            os.makedirs("logs", exist_ok=True)
+            self.perf_log = open(f"logs/{self.prefix}_perf_{time.time():.0f}.csv", "w")
             self.perf_log.write("ts_cur, az_cur, el_cur, ts_trg, az_trg, el_trg, d_ts, d_az, d_el, d_dist\n")
 
         # create setup coroutine
@@ -111,7 +113,7 @@ class Rotator(BaseModule):
         interval = 1.0 / self.refresh_rate
         while True:
             check_time = time.time()
-            sleep_time = max(0.0, interval - (check_time - self.last_state_check))
+            sleep_time = max(0.0, 2 * interval - (check_time - self.last_state_check))
             self.last_state_check = check_time
             await asyncio.sleep(sleep_time if self.moving_to_target else 2)
             await self.check_state()
