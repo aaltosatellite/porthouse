@@ -87,6 +87,10 @@ class Rotator(BaseModule):
         self.default_dutycycle_range = self.rotator.get_dutycycle_range()
         self.log.debug("Duty-cycle range: %s" % (self.default_dutycycle_range,))
 
+        if self.debug:
+            self.perf_log = open(f"{self.prefix}_perf_{time.time():.0f}.csv", "w")
+            self.perf_log.write("ts_cur, az_cur, el_cur, ts_trg, az_trg, el_trg, d_ts, d_az, d_el, d_dist\n")
+
         # create setup coroutine
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.setup(), name="rotator.setup")
@@ -112,13 +116,9 @@ class Rotator(BaseModule):
             await asyncio.sleep(sleep_time if self.moving_to_target else 2)
             await self.check_state()
 
-    def refresh_rotator_position(self, force_update=False):
+    def refresh_rotator_position(self):
         """
-            returns latest rotator position.
-            If position information is fresh and recent enough it returns just
-            last known value to avoid slowing down hardware interface too much
-            (hardware is SLO-OW down there).
-            Can be forced to poll new position with "force_update".
+        returns latest rotator position
         """
 
         try:
@@ -126,15 +126,16 @@ class Rotator(BaseModule):
             self.current_position = self.rotator.get_position()
             self.position_timestamp = time.time()
 
-            if self.moving_to_target:
+            if self.moving_to_target and self.debug:
                 d_az = self.target_position[0] - self.current_position[0]
                 d_el = self.target_position[1] - self.current_position[1]
                 d_ts = self.target_timestamp - self.position_timestamp
 
-                self.log.debug("pos@%.2f: %.2f %.2f, trg@%.2f: %.2f %.2f => diff@%.2f: |%.2f %.2f| = %.3f",
-                               self.position_timestamp % 1000, *self.current_position,
-                               self.target_timestamp % 1000, *self.target_position,
-                               d_ts, d_az, d_el, (d_az**2 + d_el**2)**0.5)
+                # header: ts_cur, az_cur, el_cur, ts_trg, al_trg, el_trg, d_ts, d_az, d_el, d_dist
+                self.perf_log.write("%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f" % (
+                                    self.position_timestamp, self.current_position[0], self.current_position[1],
+                                    self.target_timestamp, self.target_position[0], self.target_position[1],
+                                    d_ts, d_az, d_el, (d_az**2 + d_el**2)**0.5))
 
         except RotatorError as e:
             self.log.error("Could not get rotator position: %s", e, exc_info=True)
@@ -183,8 +184,7 @@ class Rotator(BaseModule):
         Check rotator's current state
 
         Calls the actual rotate -commands through hardware interface.
-        This method could and should be throttled to some rotator specific
-        safe update speed.
+        This method is called at a rotator specific safe update rate that is set using the refresh_rate parameter.
         """
 
         self.refresh_rotator_position()
