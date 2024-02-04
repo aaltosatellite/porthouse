@@ -25,13 +25,14 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
     TRACKER_TYPE = 'orbit'
     DEFAULT_PREAOS_TIME = 120
 
-    def __init__(self, **kwargs):
+    def __init__(self, tracking_interval=2.1, scheduler_enabled=True, **kwargs):
         """
         Initialize module.
         """
         super().__init__(**kwargs)
 
-        self.scheduler_enabled = kwargs.get("scheduler_enabled", True)
+        self.tracking_interval = tracking_interval
+        self.scheduler_enabled = scheduler_enabled
 
         # list of targets, associated rotators, and tracking status
         self.target_trackers = []
@@ -182,7 +183,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
 
         if high_accuracy is None:
             high_accuracy = isinstance(target, CelestialObject) or sunlit is not None or sun_max_elevation is not None
-        target_tracker = TargetTracker(self, task_name, target, rotators,
+        target_tracker = TargetTracker(self, task_name, target, rotators, tracking_interval=self.tracking_interval,
                                        preaos_time=preaos_time, high_accuracy=high_accuracy)
         self.target_trackers.append(target_tracker)
         await target_tracker.start()

@@ -129,11 +129,9 @@ class Rotator(BaseModule):
         """
 
         try:
-            exec = 0
             # only update position if it's been a while since last update
             if self.position_timestamp is None or time.time() - self.position_timestamp > 0.8 / self.refresh_rate:
                 self.current_position, self.position_timestamp = self.rotator.get_position(with_timestamp=True)
-                exec = 1
 
             if self.target_valid and self.pass_ongoing and self.debug:
                 d_az = self.target_position[0] - self.current_position[0]
@@ -141,8 +139,8 @@ class Rotator(BaseModule):
                 d_ts = self.target_timestamp - self.position_timestamp
 
                 # header: ts_cur, az_cur, el_cur, ts_trg, al_trg, el_trg, d_ts, d_az, d_el, d_dist
-                self.perf_log.write("%d: %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f\n" % (
-                                    exec, time.time(), self.position_timestamp, self.current_position[0], self.current_position[1],
+                self.perf_log.write("%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f\n" % (
+                                    self.position_timestamp, self.current_position[0], self.current_position[1],
                                     self.target_timestamp, self.target_position[0], self.target_position[1],
                                     d_ts, d_az, d_el, (d_az**2 + d_el**2)**0.5))
                 self.perf_log.flush()
@@ -279,7 +277,7 @@ class Rotator(BaseModule):
         # set target to the closest valid position instead of given target position
         valid_position = self.rotator.closest_valid_position(*target)
 
-        self.log.debug(f"Rotating to {valid_position} (original {target})")
+        self.log.debug(f"Currently at {self.current_position} - Rotating to {valid_position} (original {target})")
 
         # rotator function should not be called in here
         # should be done via check_state()

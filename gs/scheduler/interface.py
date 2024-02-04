@@ -70,7 +70,7 @@ class SchedulerInterface:
         Remove a task from the schedule.
         """
         data = {k: v for k, v in locals().items() if k in ("task_name", "deny_main")}
-        res = await send_rpc_request("scheduler", "rpc.add_task", data)
+        res = await send_rpc_request("scheduler", "rpc.remove_task", data)
         return res
 
     async def get_potential_tasks(self, target, start_time=None, end_time=None, min_elevation=0,

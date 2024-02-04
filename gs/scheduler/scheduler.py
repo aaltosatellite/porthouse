@@ -442,7 +442,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         end_time = end_time or start_time + timedelta(hours=24)
 
         self.log.debug(f"Creating schedule from {start_time.isoformat()} to {end_time.isoformat()}"
-                       + ('' if process_name is None else f'for process {process_name} only') + "...")
+                       + ('' if process_name is None else f' for process {process_name} only') + "...")
         self.read_processes()
 
         # sort so that higher priority (low prio number) processes are scheduled first
@@ -653,19 +653,17 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             start_time, end_time = date_arg("start_time"), date_arg("end_time")
 
             if request_data.get("reset", False):
-                start_time = start_time or datetime.now(timezone.utc)
-                end_time = end_time or start_time + timedelta(hours=48)
                 process_name = request_data.get("process_name", None)
                 reset_ongoing = request_data.get("reset_ongoing", False)
                 affected_statuses = [TaskStatus.SCHEDULED] + ([TaskStatus.ONGOING] if reset_ongoing else [])
 
                 async with self.schedule_lock:
-                    tba = [task for task in self.schedule
+                    tbr = [task for task in self.schedule
                            if task.status in affected_statuses and task.auto_scheduled
-                              and task.start_time >= start_time and task.end_time <= end_time
+                              and (start_time is None or task.start_time >= start_time)
+                              and (end_time is None or task.end_time <= end_time)
                               and (process_name is None or task.process_name == process_name)]
-                    tbr = [task for task in tba if task.status == TaskStatus.SCHEDULED]
-                    tbc = [task for task in tba if task.status == TaskStatus.ONGOING]
+                    tbc = [task for task in tbr if task.status == TaskStatus.ONGOING]
                     for task in tbr:
                         self.schedule.remove(task)
                     self.write_schedule()
@@ -673,6 +671,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 for task in tbc:
                     await self.send_rpc_request("tracking", "orbit.rpc.remove_target", {"task_name": task.task_name})
 
+            start_time = start_time or datetime.now(timezone.utc)
+            end_time = end_time or start_time + timedelta(hours=48)
             return self.maybe_start_schedule_creation(start_time=start_time, end_time=end_time, force=True,
                                                       process_name=request_data.get("process_name", None))
 
