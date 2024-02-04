@@ -4,7 +4,7 @@
 
 import time
 import abc
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, Union
 
 import numpy as np
 
@@ -22,7 +22,9 @@ PositionType = Tuple[float, float]
 class RotatorController(abc.ABC):
     address: str
     current_position: PositionType
+    current_pos_ts: float
     target_position: PositionType
+    target_pos_ts: float
 
     az_min: float
     az_max: float
@@ -68,7 +70,9 @@ class RotatorController(abc.ABC):
         self.debug = debug
         self.enforce_limits = True
         self.current_position = (0.0, 0.0)
+        self.current_pos_ts = 0.0
         self.target_position = (0.0, 0.0)
+        self.target_pos_ts = 0.0
 
         self.horizon_map_file = None
         self.horizon_map = None
@@ -118,7 +122,7 @@ class RotatorController(abc.ABC):
         """
 
     @abc.abstractmethod
-    def get_position(self) -> PositionType:
+    def get_position(self, with_timestamp=False) -> Union[PositionType, Tuple[PositionType, float]]:
         """
         Read rotator's current position. If the position is invalid, move to closest allowed position.
 
@@ -127,12 +131,13 @@ class RotatorController(abc.ABC):
         """
         # Subclasses should have these two lines in the end of the method:
         self.maybe_enforce_limits()
-        return self.current_position
+        return self.current_position if not with_timestamp else (self.current_position, self.current_pos_ts)
 
     @abc.abstractmethod
     def set_position(self,
                      az: float,
                      el: float,
+                     ts: Optional[float] = None,
                      rounding: int = 1,
                      shortest_path: bool = True) -> PositionType:
         """
@@ -142,6 +147,7 @@ class RotatorController(abc.ABC):
         Args:
             az: Target azimuth angle
             el: Target elevation angle
+            ts: Timestamp for the target position
             rounding: Number of decimals
             shortest_path: Should the rotator try move using shortest path
 
@@ -154,6 +160,7 @@ class RotatorController(abc.ABC):
         # Subclasses should have these two lines in the beginning of the method:
         self.position_valid(az, el, raise_error=True)
         self.target_position = (az, el)
+        self.target_pos_ts = ts or time.time()
 
     def get_position_target(self) -> PositionType:
         """

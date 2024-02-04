@@ -69,6 +69,7 @@ class Rotator(BaseModule):
         # tries to avoid unnecessary rotate-calls, state-machine approach could be better
         self.moving_to_target = False
         self.target_valid = False
+        self.pass_ongoing = False
 
         # most recent received position received from hardware
         self.current_position = (0, min_elevation)
@@ -93,6 +94,8 @@ class Rotator(BaseModule):
             self.perf_log.write("ts_cur, az_cur, el_cur, ts_trg, az_trg, el_trg, d_ts, d_az, d_el, d_dist\n")
             self.perf_log.flush()
 
+        self.loop_sleep_task = None
+
         # create setup coroutine
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.setup(), name="rotator.setup")
@@ -110,13 +113,15 @@ class Rotator(BaseModule):
                       (f" (array shape: {self.rotator.horizon_map.shape})" if self.rotator.horizon_map_file else "") +
                       f", and min_sun_angle={self.rotator.min_sun_angle}")
 
-        t0, st = 0.0, 0.0
         while True:
-            t1 = time.time()
-            dt, t0 = t1 - t0 - st, t1
-            st = max(0.0, 1.0 / self.refresh_rate - dt)
-            await asyncio.sleep(st if self.moving_to_target else 2)
+            t0 = time.time()
             await self.check_state()
+            st = max(0.0, 1.0 / self.refresh_rate - (time.time() - t0)) if self.pass_ongoing else 2.0
+            self.loop_sleep_task = asyncio.ensure_future(asyncio.sleep(st))
+            try:
+                await self.loop_sleep_task
+            except asyncio.CancelledError:
+                pass
 
     def refresh_rotator_position(self):
         """
@@ -124,18 +129,20 @@ class Rotator(BaseModule):
         """
 
         try:
-            # record timestamp for new position
-            self.current_position = self.rotator.get_position()
-            self.position_timestamp = time.time()
+            exec = 0
+            # only update position if it's been a while since last update
+            if self.position_timestamp is None or time.time() - self.position_timestamp > 0.8 / self.refresh_rate:
+                self.current_position, self.position_timestamp = self.rotator.get_position(with_timestamp=True)
+                exec = 1
 
-            if self.moving_to_target and self.debug:
+            if self.target_valid and self.pass_ongoing and self.debug:
                 d_az = self.target_position[0] - self.current_position[0]
                 d_el = self.target_position[1] - self.current_position[1]
                 d_ts = self.target_timestamp - self.position_timestamp
 
                 # header: ts_cur, az_cur, el_cur, ts_trg, al_trg, el_trg, d_ts, d_az, d_el, d_dist
-                self.perf_log.write("%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f\n" % (
-                                    self.position_timestamp, self.current_position[0], self.current_position[1],
+                self.perf_log.write("%d: %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f\n" % (
+                                    exec, time.time(), self.position_timestamp, self.current_position[0], self.current_position[1],
                                     self.target_timestamp, self.target_position[0], self.target_position[1],
                                     d_ts, d_az, d_el, (d_az**2 + d_el**2)**0.5))
                 self.perf_log.flush()
@@ -286,6 +293,9 @@ class Rotator(BaseModule):
         self.target_valid = True
         # target was updated but movement command is not yet sent.
         self.moving_to_target = False
+
+        # cancel the sleep task so that the check_state is called immediately
+        self.loop_sleep_task.cancel()
 
     @rpc()
     @bind(exchange="rotator", routing_key="rpc.#", prefixed=True)
@@ -446,6 +456,7 @@ class Rotator(BaseModule):
             """
                 Satellite position update during the pass
             """
+            self.pass_ongoing = True
 
             new_target = (float(event_body['az']) % 360,
                           float(event_body['el']))
@@ -503,6 +514,7 @@ class Rotator(BaseModule):
 
         elif routing_key == "aos":
             # Set to default rotation speed
+            self.pass_ongoing = True
             self.log.debug(f"Set AZ duty cycle back to {self.default_dutycycle_range[1]}")
             self.rotator.set_dutycycle_range(az_duty_max=self.default_dutycycle_range[1])
 
@@ -510,6 +522,7 @@ class Rotator(BaseModule):
             """
                 At LOS stop the rotator
             """
+            self.pass_ongoing = False
 
             try:
                 ########### Actual call of rotator command ###########
