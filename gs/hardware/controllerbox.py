@@ -160,12 +160,13 @@ class ControllerBox(RotatorController):
 
         # Force current position to be az, el
         self._write_command(f"P -a {az: .1f}".encode("ascii"))
-        self._read_response()
-
         self._write_command(f"P -e {el: .1f}".encode("ascii"))
-        self._read_response()
 
         # set target position to current position
+        self._write_command(f"MS -a {az: .1f}".encode("ascii"))
+        self._write_command(f"MS -e {el: .1f}".encode("ascii"))
+
+        self._read_response()
         self.target_position = (az, el)
 
         # update current_position, also move to valid position if currently invalid
