@@ -26,7 +26,8 @@ class Rotator(BaseModule):
     rotator: RotatorController
 
     def __init__(self, driver, address, tracking_enabled=False, threshold=0.1, refresh_rate=1.0,
-                 position_range=(-90, 450, 0, 90), horizon_map_file=None, min_sun_angle=None, **kwargs):
+                 position_range=(-90, 450, 0, 90), rotator_model=None, horizon_map_file=None,
+                 min_sun_angle=None, **kwargs):
         """
         Initialize rotator module
 
@@ -84,6 +85,7 @@ class Rotator(BaseModule):
             raise ValueError(f"Unknown rotator driver {driver}")
         self.rotator = driver_cls(address, az_min=position_range[0], az_max=position_range[1],
                                   el_min=position_range[2], el_max=position_range[3], prefix=self.prefix,
+                                  rotator_model=rotator_model,
                                   horizon_map_file=horizon_map_file, min_sun_angle=min_sun_angle, debug=self.debug)
         self.default_dutycycle_range = self.rotator.get_dutycycle_range()
         self.log.debug("Duty-cycle range: %s" % (self.default_dutycycle_range,))
@@ -109,6 +111,7 @@ class Rotator(BaseModule):
 
         self.log.info(f"Rotator prefix={self.prefix} initialized with driver {self.rotator.__class__.__name__}, " +
                       f"position_range={self.rotator.get_position_range()}, "
+                      f"rotator_mode={self.rotator.rotator_model}, " +
                       f"horizon_map_file={self.rotator.horizon_map_file}" +
                       (f" (array shape: {self.rotator.horizon_map.shape})" if self.rotator.horizon_map_file else "") +
                       f", and min_sun_angle={self.rotator.min_sun_angle}")
@@ -277,7 +280,8 @@ class Rotator(BaseModule):
         # set target to the closest valid position instead of given target position
         valid_position = self.rotator.closest_valid_position(*target)
 
-        self.log.debug(f"Currently at {self.current_position} - Rotating to {valid_position} (original {target})")
+        self.log.debug(f"Currently at {[round(p, 2) for p in self.current_position]} - "
+                       f"Rotating to {[round(p, 2) for p in valid_position]} (original {target})")
 
         # rotator function should not be called in here
         # should be done via check_state()
@@ -478,7 +482,8 @@ class Rotator(BaseModule):
             max_az = event_body["az_max"] % 360
             los_az = event_body["az_los"] % 360
 
-            aos_el = max(0.0, self.rotator.az_dependent_min_el(aos_az))
+            min_el = self.rotator.az_dependent_min_el(aos_az)
+            aos_el = max(0.0, min_el) if min_el is not None else 0.0
 
             ### Might be needed to adapt this when using with different GS ###
             # Over the north-west to east or vice versa or

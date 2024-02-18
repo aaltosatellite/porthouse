@@ -1,8 +1,21 @@
 import sys
 import setuptools
+from setuptools.command.install import install
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
+
+
+class PostInstallCommand(install):
+    """Post-installation for installation mode."""
+    def run(self):
+        install.run(self)
+        #
+        # Auto-create the configuration files
+        #
+        from porthouse.core.config import create_template_config
+        create_template_config()
+
 
 setuptools.setup(
     name="porthouse",
@@ -21,6 +34,7 @@ setuptools.setup(
         "amqp",
         "httpx",
         "numpy",
+        "quaternion",
         "pandas",
         "prompt_toolkit",
         "ptpython",
@@ -38,8 +52,10 @@ setuptools.setup(
     ],
     scripts=[
         "bin/porthouse"
-    ]
-
+    ],
+    cmdclass={
+        'install': PostInstallCommand,
+    }
 )
 
 if "develop" in sys.argv and "--user" in sys.argv:
@@ -67,9 +83,3 @@ if "develop" in sys.argv and "--user" in sys.argv:
         pass
     print(f"Making symbolic link: {src!r} -> {dst!r}")
     os.symlink(dst, src)
-
-#
-# Auto-create the configuration files
-#
-from porthouse.core.config import create_template_config
-create_template_config()
