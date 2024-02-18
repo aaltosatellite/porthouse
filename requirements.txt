@@ -2,6 +2,7 @@ aiormq
 amqp
 httpx
 numpy
+quaternion
 pandas
 prompt_toolkit
 ptpython

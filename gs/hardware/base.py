@@ -10,6 +10,7 @@ import numpy as np
 
 from ...core.config import cfg_path
 from ..tracking.utils import CelestialObject, angle_between_el_az_deg
+from .geometry import AzElRotator
 
 
 class RotatorError(Exception):
@@ -43,6 +44,7 @@ class RotatorController(abc.ABC):
                  az_max: float = 450,
                  el_min: float = 0,
                  el_max: float = 90,
+                 rotator_model: Optional[dict] = None,
                  horizon_map_file: Optional[str] = None,
                  min_sun_angle: Optional[float] = None,
                  debug: bool = False,
@@ -56,6 +58,8 @@ class RotatorController(abc.ABC):
             az_max: Maximum allowed azimuth angle
             el_min: Minimum allowed elevation angle
             el_max: Maximum allowed elevation angle
+            rotator_model: A dictionary containing the rotator model that is used to transform real azimuth and
+                           elevation values to motor angles.
             horizon_map_file: A file that can be read with numpy load and results in two column array (az, el) [deg],
                               where rows are points on the horizon. If set, the horizon map is used to limit
                               the elevation.
@@ -74,6 +78,7 @@ class RotatorController(abc.ABC):
         self.target_position = (0.0, 0.0)
         self.target_pos_ts = 0.0
 
+        self.rotator_model = AzElRotator(**(rotator_model or {}))
         self.horizon_map_file = None
         self.horizon_map = None
 

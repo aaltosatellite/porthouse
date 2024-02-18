@@ -27,6 +27,7 @@ class ControllerBox(RotatorController):
                  az_max: float = 450,
                  el_min: float = 0,
                  el_max: float = 90,
+                 rotator_model: Optional[dict] = None,
                  horizon_map_file: Optional[str] = None,
                  min_sun_angle: Optional[float] = None,
                  debug: bool = False,
@@ -41,13 +42,16 @@ class ControllerBox(RotatorController):
             az_max: Maximum allowed azimuth angle
             el_min: Minimum allowed elevation angle
             el_max: Maximum allowed elevation angle
-            horizon_map_file: A file that can be read with numpy load and restults in two column array (az, el), where
+            rotator_model: A dictionary containing the rotator model that is used to transform real azimuth and
+                           elevation values to motor angles.
+            horizon_map_file: A file that can be read with numpy load and results in two column array (az, el), where
                               rows are points on the horizon. If set, the horizon map is used to limit the elevation.
             min_sun_angle: Minimum allowed sun angle
             debug: Debug flag. If true, debug information is logged to a file during runtime.
         """
 
-        super().__init__(address, az_min, az_max, el_min, el_max, horizon_map_file, min_sun_angle, debug)
+        super().__init__(address, az_min, az_max, el_min, el_max, rotator_model, horizon_map_file,
+                         min_sun_angle, debug)
 
         self.err_cnt = 0
 
@@ -84,7 +88,8 @@ class ControllerBox(RotatorController):
     def get_position(self, with_timestamp=False) -> Union[PositionType, Tuple[PositionType, float]]:
         self._write_command(b"P -s")
         self.current_pos_ts = time.time()
-        self.current_position = self._parse_position_output(self._read_response())
+        motor_pos = self._parse_position_output(self._read_response())
+        self.current_position = self.rotator_model.to_real(*motor_pos)
         self.err_cnt = 0  # Reset error counter
 
         self.maybe_enforce_limits()
@@ -101,13 +106,14 @@ class ControllerBox(RotatorController):
         self.position_valid(az, el, raise_error=True)
         self.target_position = (az, el)
         self.target_pos_ts = ts or time.time()
+        maz, mel = self.rotator_model.to_motor(az, el)
 
         if shortest_path:
-            self._write_command(f"MS -a {round(az, rounding)}".encode("ascii"))
-            self._write_command(f"MS -e {round(el, rounding)}".encode("ascii"))
+            self._write_command(f"MS -a {round(maz, rounding)}".encode("ascii"))
+            self._write_command(f"MS -e {round(mel, rounding)}".encode("ascii"))
         else:
-            self._write_command(f"M -a {round(az, rounding)}".encode("ascii"))
-            self._write_command(f"M -e {round(el, rounding)}".encode("ascii"))
+            self._write_command(f"M -a {round(maz, rounding)}".encode("ascii"))
+            self._write_command(f"M -e {round(mel, rounding)}".encode("ascii"))
 
         self._read_response()
 
@@ -115,10 +121,14 @@ class ControllerBox(RotatorController):
 
     def get_position_target(self) -> PositionType:
         self._write_command(b"M -s")
-        self.target_position = ControllerBox._parse_position_output(self._read_response())
+        trg_motor_pos = self._parse_position_output(self._read_response())
+        self.target_position = self.rotator_model.to_real(*trg_motor_pos)
         return self.target_position
 
     def get_position_range(self) -> Tuple[float, float, float, float]:
+        """
+        Get the allowed position range in motor angles from the controller
+        """
         self._write_command(b"R+ -s")
         self.az_max, self.el_max = ControllerBox._parse_position_output(self._read_response())
 
@@ -133,7 +143,9 @@ class ControllerBox(RotatorController):
                            el_min: Optional[float] = None,
                            el_max: Optional[float] = None,
                            rounding: int = 1):
-
+        """
+        Set the allowed position range in motor angles from the controller
+        """
         super().set_position_range(az_min, az_max, el_min, el_max, rounding)
 
         if az_min is not None:
@@ -158,13 +170,15 @@ class ControllerBox(RotatorController):
                        az: float,
                        el: float) -> None:
 
+        maz, mel = self.rotator_model.to_motor(az, el)
+
         # Force current position to be az, el
-        self._write_command(f"P -a {az: .1f}".encode("ascii"))
-        self._write_command(f"P -e {el: .1f}".encode("ascii"))
+        self._write_command(f"P -a {maz: .1f}".encode("ascii"))
+        self._write_command(f"P -e {mel: .1f}".encode("ascii"))
 
         # set target position to current position
-        self._write_command(f"MS -a {az: .1f}".encode("ascii"))
-        self._write_command(f"MS -e {el: .1f}".encode("ascii"))
+        self._write_command(f"MS -a {maz: .1f}".encode("ascii"))
+        self._write_command(f"MS -e {mel: .1f}".encode("ascii"))
 
         self._read_response()
         self.target_position = (az, el)
