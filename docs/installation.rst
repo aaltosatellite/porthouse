@@ -14,6 +14,7 @@ Main Dependencies:
     - amqp
     - httpx
     - numpy
+    - quaternion
     - pandas
     - prompt_toolkit
     - ptpython
