@@ -268,19 +268,23 @@ class RotatorController(abc.ABC):
         """
         valid = True
 
-        if az < self.az_min or az > self.az_max:
+        maz, mel = self.rotator_model.to_motor(az, el)
+
+        if maz < self.az_min or maz > self.az_max:
             valid = False
             if raise_error:
-                raise RotatorError(f"Azimuth value {az} is outside allowed limits [{self.az_min}, {self.az_max}].")
+                raise RotatorError(f"Azimuth value {az} ({maz}) is outside allowed limits "
+                                   f"[({self.az_min}), ({self.az_max})].")
 
         # use horizon map if set to get the min elevation for the given azimuth
         el_min = self.az_dependent_min_el(az)
 
-        if el < el_min or el > self.el_max:
+        if el_min is not None and el < el_min or mel < self.el_min or mel > self.el_max:
             valid = False
             if raise_error:
-                raise RotatorError(f"Elevation value {el} is outside allowed limits [{el_min}, {self.el_max}]" +
-                                         (f" given current azimuth {az}." if self.horizon_map is not None else "."))
+                raise RotatorError(f"Elevation value {el} ({mel}) is outside allowed limits "
+                                   f"[{el_min} ({self.el_min}), ({self.el_max})]" +
+                                   (f" given current azimuth {az} ({maz})." if self.horizon_map is not None else "."))
 
         if self.min_sun_angle is not None:
             sun_angle, _, _ = self.get_sun_angle(az, el)
@@ -301,13 +305,11 @@ class RotatorController(abc.ABC):
             valid_position = self.closest_valid_position(*self.current_position)
             self.set_position(*valid_position, rounding=1, shortest_path=True)
 
-    def az_dependent_min_el(self, az: float) -> float:
+    def az_dependent_min_el(self, az: float) -> Optional[float]:
         if self.horizon_map is not None:
             el_min = np.interp(az % 360, self.horizon_map[:, 0], self.horizon_map[:, 1])
-            el_min = max(el_min, self.el_min)
-        else:
-            el_min = self.el_min
-        return round(el_min, 2)
+            return np.floor(el_min/100)*100
+        return None
 
     def get_sun_angle(self, az: float, el: float) -> Tuple[float, float, float]:
         """
@@ -342,16 +344,22 @@ class RotatorController(abc.ABC):
         Returns:
             Tuple of closest allowed azimuth and elevation angles
         """
+        # TODO: come up with some more efficient algorithm to avoid the sun
+
         # use horizon map if set to get the min elevation for the given azimuth
         el_min = self.az_dependent_min_el(az)
+        if el_min is not None:
+            el = max(el_min, el)
 
-        az = max(self.az_min, min(self.az_max, az))
-        el = max(el_min, min(self.el_max, el))
+        maz, mel = self.rotator_model.to_motor(az, el)
+        maz = max(self.az_min, min(self.az_max, maz))
+        mel = max(self.el_min, min(self.el_max, mel))
+        az, el = self.rotator_model.to_real(maz, mel)
 
         if self.min_sun_angle is not None:
             sun_angle, sun_az, sun_el = self.get_sun_angle(az, el)
             if sun_angle < self.min_sun_angle:
-                az, el = self.closest_valid_position(az + (1 if az > sun_az else -1),
-                                                     el + (1 if el > sun_el else -1))
+                az, el = self.closest_valid_position(az + (2 if az > sun_az else -2),
+                                                     el + (2 if el > sun_el else -2))
 
         return az, el
