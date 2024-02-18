@@ -323,6 +323,7 @@ class RotatorController(abc.ABC):
             Tuple of sun angle, sun azimuth and sun elevation
         """
         assert self.sun is not None, 'min_sun_angle set after initialization, sun object is not initialized'
+        sun_el, sun_az = [None] * 2
         try:
             sun_el, sun_az, _ = self.sun.pos_at(None).altaz()
             sun_az, sun_el = sun_az.degrees, sun_el.degrees
@@ -345,6 +346,7 @@ class RotatorController(abc.ABC):
             Tuple of closest allowed azimuth and elevation angles
         """
         # TODO: come up with some more efficient algorithm to avoid the sun
+        # oaz, oel = az, el
 
         # use horizon map if set to get the min elevation for the given azimuth
         el_min = self.az_dependent_min_el(az)
@@ -359,6 +361,7 @@ class RotatorController(abc.ABC):
         if self.min_sun_angle is not None:
             sun_angle, sun_az, sun_el = self.get_sun_angle(az, el)
             if sun_angle < self.min_sun_angle:
+                # print(f"{oaz:.2f}, {oel:.2f} -> {az:.2f}, {el:.2f} -> sun_angle={sun_angle:.2f}")
                 az, el = self.closest_valid_position(az + (2 if az > sun_az else -2),
                                                      el + (2 if el > sun_el else -2))
 

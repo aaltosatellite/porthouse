@@ -37,7 +37,7 @@ def main():
     def lossfn(params) -> float:
         rotator = AzElRotator.from_dict(dict(zip(('el_off', 'az_off', 'el_gain', 'az_gain',
                                                   'tilt_az', 'tilt_angle', 'lateral_tilt'), params)))
-        err = data[:, 2:] - np.array([rotator.to_real(az, el) for az, el in data[:, :2]])
+        err = data[:, 2:] - np.array([rotator.to_real(az, el, wrap=True) for az, el in data[:, :2]])
         err[:, 0] = wrapdeg(err[:, 0])
         err = err.flatten()
         return err if args.leastsq else np.mean(err ** 2)
@@ -71,8 +71,8 @@ def main():
 
     if args.debug_model:
         for az, el in data[:, :2]:
-            az1, el1 = rotator.to_real(az, el)
-            az2, el2 = rotator.to_motor(az1, el1)
+            az1, el1 = rotator.to_real(az, el, wrap=True)
+            az2, el2 = rotator.to_motor(az1, el1, wrap=True)
             print(f'az={az:.2f}, el={el:.2f} -> az1={az1:.2f}, el1={el1:.2f} -> az2={az2:.2f}, el2={el2:.2f}')
 
     # plot
@@ -80,7 +80,7 @@ def main():
         import matplotlib.pyplot as plt
         plt.plot(data[:, 0], data[:, 1], '+', label='measured')
         plt.plot(data[:, 2], data[:, 3], 'o', label='ground truth', markerfacecolor='none')
-        plt.plot(*zip(*[rotator.to_real(az, el) for az, el in data[:, :2]]), 'x', label='fitted')
+        plt.plot(*zip(*[rotator.to_real(az, el, wrap=True) for az, el in data[:, :2]]), 'x', label='fitted')
         plt.xlabel('azimuth')
         plt.ylabel('elevation')
         plt.legend()
@@ -115,11 +115,12 @@ class AzElRotator:
         with open(filename, 'w') as fh:
             json.dump(self.to_dict(), fh)
 
-    def to_real(self, az, el, az_dot=None, el_dot=None):
+    def to_real(self, az, el, az_dot=None, el_dot=None, wrap=False):
         # Assumes x-axis points to the north, y-axis to the east and z-axis down (az=0 is north, el=0 is horizon),
         # and x-axis ends up pointing to the given az & el.
 
         # TODO: transform also angular velocities if given
+        oaz = az
 
         # real az and el without the effect of the tilted base
         az1 = az * self.az_gain + self.az_off
@@ -132,13 +133,19 @@ class AzElRotator:
 
         x_axis = q_times_v(q2 * q1, np.array([1, 0, 0]))
         neg_el, az, _ = to_spherical(*x_axis)
-        return wrapdeg(np.rad2deg(az)), np.rad2deg(-neg_el)
+        az, el = wrapdeg(np.rad2deg(az)), np.rad2deg(-neg_el)
 
-    def to_motor(self, az, el, az_dot=None, el_dot=None):
+        if not wrap:
+            az = (az + 360) if abs(az - oaz) > 180 else az
+
+        return az, el
+
+    def to_motor(self, az, el, az_dot=None, el_dot=None, wrap=False):
         # Assumes x-axis points to the north, y-axis to the east and z-axis down (az=0 is north, el=0 is horizon),
         # and x-axis ends up pointing to the given az & el.
 
         # TODO: transform also angular velocities if given
+        oaz = az
 
         # real x-axis after lateral tilt compensation
         q1 = eul_to_q((np.deg2rad(az), np.deg2rad(el), np.deg2rad(-self.lateral_tilt)), 'zyz')
@@ -151,9 +158,13 @@ class AzElRotator:
         neg_el, az, _ = to_spherical(*x_axis)
 
         # add the effect of offsets and gains
-        az1 = (np.rad2deg(az) - self.az_off) / self.az_gain
+        az1 = wrapdeg((np.rad2deg(az) - self.az_off) / self.az_gain)
         el1 = (np.rad2deg(-neg_el) - self.el_off) / self.el_gain
-        return wrapdeg(az1), el1
+
+        if not wrap:
+            az1 = (az1 + 360) if abs(az1 - oaz) > 180 else az1
+
+        return az1, el1
 
     def __str__(self):
         return f'AzElRotator(el_off={self.el_off:.3f}, az_off={self.az_off:.3f}, el_gain={self.el_gain:.4f}, ' \
