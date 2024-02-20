@@ -280,7 +280,8 @@ class Rotator(BaseModule):
         # set target to the closest valid position instead of given target position
         valid_position = self.rotator.closest_valid_position(*target)
 
-        self.log.debug(f"Currently at {self.current_position} - Rotating to {valid_position} (original {target})")
+        self.log.debug(f"Currently at {[round(p, 2) for p in self.current_position]} - "
+                       f"Rotating to {[round(p, 2) for p in valid_position]} (original {target})")
 
         # rotator function should not be called in here
         # should be done via check_state()
@@ -481,7 +482,8 @@ class Rotator(BaseModule):
             max_az = event_body["az_max"] % 360
             los_az = event_body["az_los"] % 360
 
-            aos_el = max(0.0, self.rotator.az_dependent_min_el(aos_az))
+            min_el = self.rotator.az_dependent_min_el(aos_az)
+            aos_el = max(0.0, min_el) if min_el is not None else 0.0
 
             ### Might be needed to adapt this when using with different GS ###
             # Over the north-west to east or vice versa or

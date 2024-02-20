@@ -181,7 +181,9 @@ class ControllerBox(RotatorController):
         self._write_command(f"MS -e {mel: .1f}".encode("ascii"))
 
         self._read_response()
-        self.target_position = (az, el)
+
+        # TODO: when fixed in rotator controller, just do self.target_position = (az, el)
+        self.set_position(az, el, rounding=1)
 
         # update current_position, also move to valid position if currently invalid
         self.get_position()
