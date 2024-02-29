@@ -136,6 +136,11 @@ class Rotator(BaseModule):
             if self.position_timestamp is None or time.time() - self.position_timestamp > 0.8 / self.refresh_rate:
                 self.current_position, self.position_timestamp = self.rotator.get_position(with_timestamp=True)
 
+                # TODO: might crowd out the connection, need to try this out
+                #  - if too heavy, reduce sampling rate, need to get average duty cycles then
+                if self.target_valid and self.pass_ongoing and self.debug:
+                    self.rotator.pop_motion_log()
+
             if self.target_valid and self.pass_ongoing and self.debug:
                 d_az = self.target_position[0] - self.current_position[0]
                 d_el = self.target_position[1] - self.current_position[1]

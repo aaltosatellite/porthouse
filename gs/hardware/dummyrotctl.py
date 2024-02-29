@@ -83,3 +83,6 @@ class DummyRotatorController(RotatorController):
 
         if el_duty_max is not None:
             self._el_dc_max = el_duty_max
+
+    def pop_motion_log(self):
+        pass
