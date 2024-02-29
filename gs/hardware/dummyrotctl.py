@@ -26,7 +26,6 @@ class DummyRotatorController(RotatorController):
                      az: float,
                      el: float,
                      ts: Optional[float] = None,
-                     rounding: int = 1,
                      shortest_path: bool = True) -> PositionType:
         self.position_valid(az, el, raise_error=True)
         self.target_position = (az, el)
@@ -45,8 +44,7 @@ class DummyRotatorController(RotatorController):
                            az_min: Optional[float] = None,
                            az_max: Optional[float] = None,
                            el_min: Optional[float] = None,
-                           el_max: Optional[float] = None,
-                           rounding: int = 1):
+                           el_max: Optional[float] = None) -> Tuple[float, float, float, float]:
         if az_min is not None:
             self.az_min = az_min
 
@@ -64,14 +62,14 @@ class DummyRotatorController(RotatorController):
     def reset_position(self, az: float, el: float):
         self.current_position = az, el
 
-    def get_dutycycle_range(self) -> Tuple[int, int, int, int]:
+    def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
         return self._az_dc_min, self._az_dc_max, self._el_dc_min, self._el_dc_max
 
     def set_dutycycle_range(self,
-                            az_duty_min: Optional[int] = None,
-                            az_duty_max: Optional[int] = None,
-                            el_duty_min: Optional[int] = None,
-                            el_duty_max: Optional[int] = None) -> None:
+                            az_duty_min: Optional[float] = None,
+                            az_duty_max: Optional[float] = None,
+                            el_duty_min: Optional[float] = None,
+                            el_duty_max: Optional[float] = None) -> None:
         if az_duty_min is not None:
             self._az_dc_min = az_duty_min
 

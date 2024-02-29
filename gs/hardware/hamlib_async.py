@@ -47,7 +47,6 @@ class HamlibAsyncController(HamlibController):
     async def set_position(self,
                      az, el,
                      ts=None,
-                     rounding=1,
                      shortest_path=True):
 
         self.position_valid(az, el, raise_error=True)
@@ -58,7 +57,7 @@ class HamlibAsyncController(HamlibController):
             # TODO: Mimic sortest path
             pass
 
-        await self._execute_async(f"P {round(az, rounding)} {round(el, rounding)}\n")
+        await self._execute_async(f"P {round(az, 2)} {round(el, 2)}\n")
 
         return await self.get_position()
 
@@ -79,7 +78,7 @@ class HamlibAsyncController(HamlibController):
         if self.enforce_limits and not self.position_valid(*self.current_position):
             trg_pos = await self.get_position_target()
             if not self.position_valid(*trg_pos):
-                await self.set_position(*self.closest_valid_position(*trg_pos), rounding=1, shortest_path=True)
+                await self.set_position(*self.closest_valid_position(*trg_pos), shortest_path=True)
 
     async def get_position_target(self):
         await asyncio.sleep(0)  # Just to make the function to a coroutine
