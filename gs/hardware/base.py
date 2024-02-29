@@ -143,7 +143,6 @@ class RotatorController(abc.ABC):
                      az: float,
                      el: float,
                      ts: Optional[float] = None,
-                     rounding: int = 1,
                      shortest_path: bool = True) -> PositionType:
         """
         Set azimuth and elevation to precision of rounding and threshold.
@@ -153,7 +152,6 @@ class RotatorController(abc.ABC):
             az: Target azimuth angle
             el: Target elevation angle
             ts: Timestamp for the target position
-            rounding: Number of decimals
             shortest_path: Should the rotator try move using shortest path
 
         Returns:
@@ -195,8 +193,7 @@ class RotatorController(abc.ABC):
                            az_min: Optional[float] = None,
                            az_max: Optional[float] = None,
                            el_min: Optional[float] = None,
-                           el_max: Optional[float] = None,
-                           rounding: int = 1) -> Tuple[float, float, float, float]:
+                           el_max: Optional[float] = None) -> Tuple[float, float, float, float]:
         """
         Sets azimuth and elevation range limits.
 
@@ -211,6 +208,8 @@ class RotatorController(abc.ABC):
             self.el_min = el_min
         if el_max is not None:
             self.el_max = el_max
+
+        return self.get_position_range()
 
     @abc.abstractmethod
     def reset_position(self, az: float, el: float) -> None:
@@ -232,10 +231,10 @@ class RotatorController(abc.ABC):
 
     @abc.abstractmethod
     def set_dutycycle_range(self,
-                            az_duty_min: Optional[int] = None,
-                            az_duty_max: Optional[int] = None,
-                            el_duty_min: Optional[int] = None,
-                            el_duty_max: Optional[int] = None) -> None:
+                            az_duty_min: Optional[float] = None,
+                            az_duty_max: Optional[float] = None,
+                            el_duty_min: Optional[float] = None,
+                            el_duty_max: Optional[float] = None) -> None:
         """
             Set duty cycle range for azimuth and elevation.
 
@@ -306,7 +305,7 @@ class RotatorController(abc.ABC):
         """
         if self.enforce_limits and not self.position_valid(*self.current_position):
             valid_position = self.closest_valid_position(*self.current_position)
-            self.set_position(*valid_position, rounding=1, shortest_path=True)
+            self.set_position(*valid_position, shortest_path=True)
 
     def az_dependent_min_el(self, az: float) -> Optional[float]:
         if self.horizon_map is not None:

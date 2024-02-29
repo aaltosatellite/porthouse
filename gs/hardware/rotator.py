@@ -14,7 +14,7 @@ from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, queue, bi
 from porthouse.gs.hardware.base import RotatorController, RotatorError
 from porthouse.gs.hardware.hamlib_async import HamlibAsyncController
 
-from .controllerbox import ControllerBox
+from .controllerbox import ControllerBox, ControllerBoxError
 from .hamlib import HamlibController
 from .dummyrotctl import DummyRotatorController
 
@@ -27,7 +27,7 @@ class Rotator(BaseModule):
 
     def __init__(self, driver, address, tracking_enabled=False, threshold=0.1, refresh_rate=1.0,
                  position_range=(-90, 450, 0, 90), rotator_model=None, horizon_map_file=None,
-                 min_sun_angle=None, **kwargs):
+                 min_sun_angle=None, motion_logging=False, **kwargs):
         """
         Initialize rotator module
 
@@ -40,6 +40,9 @@ class Rotator(BaseModule):
         # TOGGLES between manual rotator use or tracker-controlled automatic mode.
         self.tracking_enabled = tracking_enabled
         self.log.debug("Tracking enabled: %s" % (self.tracking_enabled,))
+
+        self.motion_logging = motion_logging
+        self.log.debug("Motion logging enabled: %s" % (self.motion_logging,))
 
         # min azimuth, max azimuth, min elevation, max elevation
         assert position_range[0] < position_range[1], "azimuth min must be smaller than azimuth max"
@@ -138,8 +141,11 @@ class Rotator(BaseModule):
 
                 # TODO: might crowd out the connection, need to try this out
                 #  - if too heavy, reduce sampling rate, need to get average duty cycles then
-                if self.target_valid and self.pass_ongoing and self.debug:
-                    self.rotator.pop_motion_log()
+                if self.target_valid and self.motion_logging:
+                    try:
+                        self.rotator.pop_motion_log()
+                    except ControllerBoxError as e:
+                        self.log.warning("Failed to read properly the motion log: %s", e)
 
             if self.target_valid and self.pass_ongoing and self.debug:
                 d_az = self.target_position[0] - self.current_position[0]
@@ -420,10 +426,10 @@ class Rotator(BaseModule):
 
         elif request_name == "rpc.set_dutycycle_range":
             ########### Actual call of rotator command ###########
-            self.rotator.set_dutycycle_range(int(request_data["az_min"]),
-                                             int(request_data["az_max"]),
-                                             int(request_data["el_min"]),
-                                             int(request_data["el_max"]))
+            self.rotator.set_dutycycle_range(float(request_data["az_min"]),
+                                             float(request_data["az_max"]),
+                                             float(request_data["el_min"]),
+                                             float(request_data["el_max"]))
 
         elif request_name == "rpc.status":
             """
