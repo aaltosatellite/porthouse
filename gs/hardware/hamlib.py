@@ -151,6 +151,9 @@ class HamlibController(RotatorController):
                             el_duty_min: Optional[int] = None, el_duty_max: Optional[int] = None) -> None:
         pass
 
+    def pop_motion_log(self):
+        pass
+
     def _execute(self, command):
         """
         Execute command
