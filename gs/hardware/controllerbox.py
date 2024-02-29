@@ -60,6 +60,10 @@ class ControllerBox(RotatorController):
         self.log = None
         self.mlog = None
 
+        if self.debug:  # TODO: where would be best to put this?
+            os.makedirs("logs", exist_ok=True)
+            self.log = open(f"logs/{self.prefix}_debug_{time.time():.0f}.log", "w")
+
         # Creates and opens serial com
         self.ser = serial.Serial(port=address, baudrate=baudrate, timeout=0.5)
         self.set_position_range(az_min, az_max, el_min, el_max)
@@ -72,9 +76,6 @@ class ControllerBox(RotatorController):
     def open(self):
         self.flush_buffers()
         self.ser.open()
-        if self.debug:
-            os.makedirs("logs", exist_ok=True)
-            self.log = open(f"logs/{self.prefix}_debug_{time.time():.0f}.log", "w")
 
     def close(self):
         self.ser.close()
@@ -111,7 +112,6 @@ class ControllerBox(RotatorController):
                      az: float,
                      el: float,
                      ts: Optional[float] = None,
-                     rounding: int = 1,
                      shortest_path: bool = True) -> PositionType:
 
         # Check whether az and el are within allowed limits
@@ -121,11 +121,11 @@ class ControllerBox(RotatorController):
         maz, mel = self.rotator_model.to_motor(az, el)
 
         if shortest_path:
-            self._write_command(f"MS -a {round(maz, rounding)}".encode("ascii"))
-            self._write_command(f"MS -e {round(mel, rounding)}".encode("ascii"))
+            self._write_command(f"MS -a {maz:.2f}".encode("ascii"))
+            self._write_command(f"MS -e {mel:.2f}".encode("ascii"))
         else:
-            self._write_command(f"M -a {round(maz, rounding)}".encode("ascii"))
-            self._write_command(f"M -e {round(mel, rounding)}".encode("ascii"))
+            self._write_command(f"M -a {maz:.2f}".encode("ascii"))
+            self._write_command(f"M -e {mel:.2f}".encode("ascii"))
 
         self._read_response()
 
@@ -153,27 +153,26 @@ class ControllerBox(RotatorController):
                            az_min: Optional[float] = None,
                            az_max: Optional[float] = None,
                            el_min: Optional[float] = None,
-                           el_max: Optional[float] = None,
-                           rounding: int = 1):
+                           el_max: Optional[float] = None) -> Tuple[float, float, float, float]:
         """
         Set the allowed position range in motor angles from the controller
         """
-        super().set_position_range(az_min, az_max, el_min, el_max, rounding)
+        super().set_position_range(az_min, az_max, el_min, el_max)
 
         if az_min is not None:
-            self._write_command(f"R- -a {round(az_min, rounding)}".encode("ascii"))
+            self._write_command(f"R- -a {az_min:.2f}".encode("ascii"))
             self._read_response()  # Just "OK" ack
 
         if az_max is not None:
-            self._write_command(f"R+ -a {round(az_max, rounding)}".encode("ascii"))
+            self._write_command(f"R+ -a {az_max:.2f}".encode("ascii"))
             self._read_response()  # Just "OK" ack
 
         if el_min is not None:
-            self._write_command(f"R- -e {round(el_min, rounding)}".encode("ascii"))
+            self._write_command(f"R- -e {el_min:.2f}".encode("ascii"))
             self._read_response()  # Just "OK" ack
 
         if el_max is not None:
-            self._write_command(f"R+ -e {round(el_max, rounding)}".encode("ascii"))
+            self._write_command(f"R+ -e {el_max:.2f}".encode("ascii"))
             self._read_response()  # Just "OK" ack
 
         return self.get_position_range()
@@ -185,50 +184,50 @@ class ControllerBox(RotatorController):
         maz, mel = self.rotator_model.to_motor(az, el)
 
         # Force current position to be az, el
-        self._write_command(f"P -a {maz: .1f}".encode("ascii"))
-        self._write_command(f"P -e {mel: .1f}".encode("ascii"))
+        self._write_command(f"P -a {maz: .2f}".encode("ascii"))
+        self._write_command(f"P -e {mel: .2f}".encode("ascii"))
 
         # set target position to current position
-        self._write_command(f"MS -a {maz: .1f}".encode("ascii"))
-        self._write_command(f"MS -e {mel: .1f}".encode("ascii"))
+        self._write_command(f"MS -a {maz: .2f}".encode("ascii"))
+        self._write_command(f"MS -e {mel: .2f}".encode("ascii"))
 
         self._read_response()
 
         # TODO: when fixed in rotator controller, just do self.target_position = (az, el)
-        self.set_position(az, el, rounding=1)
+        self.set_position(az, el)
 
         # update current_position, also move to valid position if currently invalid
         self.get_position()
 
-    def get_dutycycle_range(self) -> Tuple[int, int, int, int]:
+    def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
         self._write_command(b"D+ -s")
         range_max = ControllerBox._parse_position_output(self._read_response())
 
         self._write_command(b"D- -s")
         range_min = ControllerBox._parse_position_output(self._read_response())
 
-        return int(range_min[0]), int(range_max[0]), int(range_min[1]), int(range_max[1])
+        return float(range_min[0]), float(range_max[0]), float(range_min[1]), float(range_max[1])
 
     def set_dutycycle_range(self,
-                            az_duty_min: Optional[int]=None,
-                            az_duty_max: Optional[int]=None,
-                            el_duty_min: Optional[int]=None,
-                            el_duty_max: Optional[int]=None) -> None:
+                            az_duty_min: Optional[float]=None,
+                            az_duty_max: Optional[float]=None,
+                            el_duty_min: Optional[float]=None,
+                            el_duty_max: Optional[float]=None) -> None:
 
         if az_duty_min is not None:
-            self._write_command(f"D- -a {az_duty_min:d}".encode("ascii"))
+            self._write_command(f"D- -a {az_duty_min:.2f}".encode("ascii"))
             self._read_response()
 
         if az_duty_max is not None:
-            self._write_command(f"D+ -a {az_duty_max:d}".encode("ascii"))
+            self._write_command(f"D+ -a {az_duty_max:.2f}".encode("ascii"))
             self._read_response()
 
         if el_duty_min is not None:
-            self._write_command(f"D- -e {el_duty_min:d}".encode("ascii"))
+            self._write_command(f"D- -e {el_duty_min:.2f}".encode("ascii"))
             self._read_response()
 
         if el_duty_max is not None:
-            self._write_command(f"D+ -e {el_duty_max:d}".encode("ascii"))
+            self._write_command(f"D+ -e {el_duty_max:.2f}".encode("ascii"))
             self._read_response()
 
     def pop_motion_log(self):
@@ -241,7 +240,12 @@ class ControllerBox(RotatorController):
 
         ts = struct.pack('<f', time.time())
         self._write_command(b"L")
-        bytes = self._read_bin_resp(struct.pack('<Iffff', 0, math.nan, math.nan, math.nan, math.nan))
+        sep = struct.pack('<Iffff', 0, math.nan, math.nan, math.nan, math.nan)
+        bytes = self._read_bin_resp(sep)
+        if not bytes.endswith(sep):
+            raise ControllerBoxError(f"Failed to read motion log, total bytes read: "
+                                     f"{len(bytes)}, last 20 bytes: 0x{bytes[-20:].hex()}, "
+                                     f"should have been 0x{sep.hex()}")
         self.mlog.write(ts)
         self.mlog.write(bytes)
         self.mlog.flush()
@@ -255,7 +259,10 @@ class ControllerBox(RotatorController):
         """
         rsp = b''
         while not rsp.endswith(end_seq):
-            rsp += self.ser.read_until(end_seq)
+            tmp = self.ser.read_until(end_seq)
+            rsp += tmp
+            if len(tmp) == 0:
+                break
         return rsp
 
     def _read_response(self) -> bytes:
@@ -322,7 +329,7 @@ class ControllerBox(RotatorController):
         """
         Parse azimuth and elevation output of rotator control box.
 
-        Expected input format: "Az: xxx.x <units> El: xxx.x <units>"
+        Expected input format: "Az: xxx.xx <units> El: xxx.xx <units>"
         """
 
         if not isinstance(output, bytes):

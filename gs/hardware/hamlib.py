@@ -94,7 +94,6 @@ class HamlibController(RotatorController):
     def set_position(self,
                      az, el,
                      ts=None,
-                     rounding=1,
                      shortest_path=True):
 
         self.position_valid(az, el, raise_error=True)
@@ -105,7 +104,7 @@ class HamlibController(RotatorController):
             # TODO: Mimic sortest path
             pass
 
-        return self._execute(f"P {round(az, rounding)} {round(el, rounding)}\n")
+        return self._execute(f"P {round(az, 2)} {round(el, 2)}\n")
 
     def get_position(self, with_timestamp=False):
         ret = self._execute(b"p\n")
@@ -129,8 +128,7 @@ class HamlibController(RotatorController):
                            az_min: Optional[float] = None,
                            az_max: Optional[float] = None,
                            el_min: Optional[float] = None,
-                           el_max: Optional[float] = None,
-                           rounding: int = 1) -> Tuple[float, float, float, float]:
+                           el_max: Optional[float] = None) -> Tuple[float, float, float, float]:
         if az_min is not None:
             self.az_min = az_min
         if az_max is not None:
@@ -144,11 +142,11 @@ class HamlibController(RotatorController):
     def reset_position(self, az: float, el: float) -> None:
         raise NotImplementedError("reset_position not implemented")
 
-    def get_dutycycle_range(self) -> Tuple[int, int, int, int]:
+    def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
         pass
 
-    def set_dutycycle_range(self, az_duty_min: Optional[int] = None, az_duty_max: Optional[int] = None,
-                            el_duty_min: Optional[int] = None, el_duty_max: Optional[int] = None) -> None:
+    def set_dutycycle_range(self, az_duty_min: Optional[float] = None, az_duty_max: Optional[float] = None,
+                            el_duty_min: Optional[float] = None, el_duty_max: Optional[float] = None) -> None:
         pass
 
     def pop_motion_log(self):

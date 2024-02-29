@@ -383,7 +383,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             raise SchedulerError(f"Task {task_name} is a MAIN-storage task, deletion through API "
                                  f"currently not allowed.")
 
-        with self.schedule_lock:
+        async with self.schedule_lock:
             task = self.schedule.tasks[task_name]
             cancel = task.status == TaskStatus.ONGOING
             if cancel:

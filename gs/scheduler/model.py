@@ -112,8 +112,9 @@ class Task:
             limits = [w.split("|") for w in process_data['date_ranges'] if "|" in w]
             within_limits = False
             for start, end in limits:
-                start = datetime.strptime(start, "%Y-%m-%d") if start.strip() else datetime.now(timezone.utc)
-                end = datetime.strptime(end, "%Y-%m-%d") if end.strip() else None
+                start = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc) if start.strip() else \
+                    datetime.now(timezone.utc)
+                end = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc) if end.strip() else None
                 if start <= self.start_time and (end is None or self.start_time <= end) \
                         and start <= self.end_time and (end is None or self.end_time <= end):
                     within_limits = True
