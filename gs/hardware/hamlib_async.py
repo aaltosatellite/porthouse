@@ -85,6 +85,9 @@ class HamlibAsyncController(HamlibController):
         await asyncio.sleep(0)  # Just to make the function to a coroutine
         return self.target_position
 
+    def pop_motion_log(self):
+        pass
+
     async def _execute_async(self, command):
         if self._writer is None:
             await self.connect()

@@ -249,6 +249,9 @@ class RotatorController(abc.ABC):
             `RotatorError` - in case the controller encountered an error.
         """
 
+    def pop_motion_log(self):
+        pass
+
     def position_valid(self, az: float, el: float, raise_error: bool = False) -> bool:
         """
         Check if the given position is valid, i.e. within allowed limits. If horizon_map or min_sun_angle is set,

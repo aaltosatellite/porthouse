@@ -4,6 +4,8 @@
 
 import os
 import time
+import math
+import struct
 import serial  # serial_asyncio
 
 from typing import Tuple, Optional, List, Union
@@ -54,23 +56,33 @@ class ControllerBox(RotatorController):
                          min_sun_angle, debug)
 
         self.err_cnt = 0
-
-        if self.debug:
-            os.makedirs("logs", exist_ok=True)
-            self.log = open(f"logs/{prefix}_debug_{time.time():.0f}.log", "w")
+        self.prefix = prefix
+        self.log = None
+        self.mlog = None
 
         # Creates and opens serial com
         self.ser = serial.Serial(port=address, baudrate=baudrate, timeout=0.5)
         self.set_position_range(az_min, az_max, el_min, el_max)
         self.get_position()         # get current_position, also move to valid position if currently invalid
 
+    def _open_mlog(self):
+        os.makedirs("logs", exist_ok=True)
+        self.mlog = open(f"logs/{self.prefix}_motion_{time.time():.0f}.bin", "wb")
+
     def open(self):
         self.flush_buffers()
         self.ser.open()
+        if self.debug:
+            os.makedirs("logs", exist_ok=True)
+            self.log = open(f"logs/{self.prefix}_debug_{time.time():.0f}.log", "w")
 
     def close(self):
         self.ser.close()
         self.flush_buffers()
+        if self.debug:
+            self.log.close()
+        if self.mlog:
+            self.mlog.close()
 
     def reset(self, wait_time=1):
         self.close()
@@ -218,6 +230,33 @@ class ControllerBox(RotatorController):
         if el_duty_max is not None:
             self._write_command(f"D+ -e {el_duty_max:d}".encode("ascii"))
             self._read_response()
+
+    def pop_motion_log(self):
+        """
+        Reads, resets and returns the motion log from the controller box. Call this function
+        frequently enough to avoid log overflow.
+        """
+        if not self.mlog:
+            self._open_mlog()
+
+        ts = struct.pack('<f', time.time())
+        self._write_command(b"L")
+        bytes = self._read_bin_resp(struct.pack('<Iffff', 0, math.nan, math.nan, math.nan, math.nan))
+        self.mlog.write(ts)
+        self.mlog.write(bytes)
+        self.mlog.flush()
+
+    def _read_bin_resp(self, end_seq: bytes) -> bytes:
+        """
+        Read until `end_seq` from the serial port.
+
+        Returns:
+            Received `bytes` from the controller box
+        """
+        rsp = b''
+        while not rsp.endswith(end_seq):
+            rsp += self.ser.read_until(end_seq)
+        return rsp
 
     def _read_response(self) -> bytes:
         """
