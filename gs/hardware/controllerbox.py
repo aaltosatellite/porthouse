@@ -186,18 +186,13 @@ class ControllerBox(RotatorController):
         # Force current position to be az, el
         self._write_command(f"P -a {maz: .2f}".encode("ascii"))
         self._write_command(f"P -e {mel: .2f}".encode("ascii"))
-
-        # set target position to current position
-        self._write_command(f"MS -a {maz: .2f}".encode("ascii"))
-        self._write_command(f"MS -e {mel: .2f}".encode("ascii"))
-
         self._read_response()
 
-        # TODO: when fixed in rotator controller, just do self.target_position = (az, el)
-        self.set_position(az, el)
+        self.target_position = (az, el)
 
         # update current_position, also move to valid position if currently invalid
         self.get_position()
+
 
     def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
         self._write_command(b"D+ -s")
@@ -252,7 +247,7 @@ class ControllerBox(RotatorController):
 
     def _read_bin_resp(self, end_seq: bytes) -> bytes:
         """
-        Read until `end_seq` from the serial port.
+        Read until (and including) `end_seq` from the serial port.
 
         Returns:
             Received `bytes` from the controller box
@@ -260,6 +255,9 @@ class ControllerBox(RotatorController):
         rsp = b''
         while not rsp.endswith(end_seq):
             tmp = self.ser.read_until(end_seq)
+            if self.ser.in_waiting >= len(end_seq):
+                # read also the end sequence
+                tmp += self.ser.read(len(end_seq))
             rsp += tmp
             if len(tmp) == 0:
                 break

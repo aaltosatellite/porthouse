@@ -141,7 +141,7 @@ class Rotator(BaseModule):
 
                 # TODO: might crowd out the connection, need to try this out
                 #  - if too heavy, reduce sampling rate, need to get average duty cycles then
-                if self.target_valid and self.motion_logging:
+                if self.moving_to_target and self.motion_logging:
                     try:
                         self.rotator.pop_motion_log()
                     except ControllerBoxError as e:
@@ -430,6 +430,7 @@ class Rotator(BaseModule):
                                              float(request_data["az_max"]),
                                              float(request_data["el_min"]),
                                              float(request_data["el_max"]))
+            self.rotator.default_dutycycle_range = self.rotator.get_dutycycle_range()
 
         elif request_name == "rpc.status":
             """
