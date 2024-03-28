@@ -47,7 +47,9 @@ class RotatorController(abc.ABC):
                  rotator_model: Optional[dict] = None,
                  horizon_map_file: Optional[str] = None,
                  min_sun_angle: Optional[float] = None,
+                 control_sw_version = 1,
                  debug: bool = False,
+                 log=None,
                  prefix: str = ""):
         """
         Initialize controller hardware driver including any serial com.
@@ -76,7 +78,11 @@ class RotatorController(abc.ABC):
         self.current_position = (0.0, 0.0)
         self.current_pos_ts = 0.0
         self.target_position = (0.0, 0.0)
+        self.target_velocity = (0.0, 0.0)
         self.target_pos_ts = 0.0
+
+        self.log = log
+        self.control_sw_version = control_sw_version
 
         self.rotator_model = AzElRotator(**(rotator_model or {}))
         self.horizon_map_file = None
@@ -142,6 +148,7 @@ class RotatorController(abc.ABC):
     def set_position(self,
                      az: float,
                      el: float,
+                     vel: Optional[Tuple[float, float]] = None,
                      ts: Optional[float] = None,
                      shortest_path: bool = True) -> PositionType:
         """
@@ -151,6 +158,7 @@ class RotatorController(abc.ABC):
         Args:
             az: Target azimuth angle
             el: Target elevation angle
+            vel: Tuple of target azimuth and elevation angular velocities in deg/s
             ts: Timestamp for the target position
             shortest_path: Should the rotator try move using shortest path
 
@@ -163,6 +171,7 @@ class RotatorController(abc.ABC):
         # Subclasses should have these two lines in the beginning of the method:
         self.position_valid(az, el, raise_error=True)
         self.target_position = (az, el)
+        self.target_velocity = vel or (0, 0)
         self.target_pos_ts = ts or time.time()
 
     def get_position_target(self) -> PositionType:
