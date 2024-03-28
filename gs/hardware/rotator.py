@@ -164,6 +164,11 @@ class Rotator(BaseModule):
 
         except RotatorError as e:
             self.log.error("Could not get rotator position: %s", e, exc_info=True)
+            self.moving_to_target = False
+            try:
+                self.rotator.stop()
+            except RotatorError as e:
+                self.log.error("Failed to stop rotator: %s", e.args[0], exc_info=True)
             return
 
     def get_status_msg(self):
