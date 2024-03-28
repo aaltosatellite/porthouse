@@ -37,9 +37,9 @@ class Pass:
     def __init__(self,
             name: str,
             gs: str,
-            t_aos: datetime, az_aos: float,
-            t_max: datetime, el_max: float, az_max: float,
-            t_los: datetime, az_los: float,
+            t_aos: datetime, az_aos: float, el_aos: float,
+            t_max: datetime, az_max: float, el_max: float,
+            t_los: datetime, az_los: float, el_los: float,
             orb_no: int = None, status: PassStatus = PassStatus.WAITING):
         """ Initialize pass """
         self.name = name
@@ -48,11 +48,13 @@ class Pass:
 
         self.t_aos = t_aos
         self.az_aos = az_aos
+        self.el_aos = el_aos
         self.t_max = t_max
-        self.el_max = el_max
         self.az_max = az_max
+        self.el_max = el_max
         self.t_los = t_los
         self.az_los = az_los
+        self.el_los = el_los
 
         self.orb_no = orb_no
 
@@ -69,11 +71,13 @@ class Pass:
             "status": self.status.name,
             "t_aos": self.t_aos.isoformat(),
             "az_aos": self.az_aos,
-            "el_max": self.el_max,
+            "el_aos": self.el_aos,
+            "t_max": self.t_max.isoformat(),
             "az_max": self.az_max,
+            "el_max": self.el_max,
             "t_los": self.t_los.isoformat(),
             "az_los": self.az_los,
-            "elevation": self.el_max
+            "el_los": self.el_los,
         }
         if self.orb_no is not None:
             info["orb_no"] = self.orb_no
@@ -723,7 +727,7 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
 def events_to_passes(obj_name: str, altaz_fn: Callable, t_event: list, events: list,
                      min_max_elevation: float) -> list[Pass]:
     passes = []
-    t_aos, t_max, el_max, t_los = [None] * 4
+    t_aos, t_max, az_max, el_max, t_los = [None] * 5
 
     # Format the event list to a pass list
     for t, event in zip(t_event, events):
@@ -734,21 +738,22 @@ def events_to_passes(obj_name: str, altaz_fn: Callable, t_event: list, events: l
             # we keep the highest one
             _t_max = t
             _el_max, _az_max, _ = altaz_fn(_t_max)
-            if el_max is None or _el_max.degrees > el_max:
-                t_max, el_max, az_max = _t_max, _el_max.degrees, _az_max.degrees
+            if el_max is None or _el_max.degrees > el_max.degrees:
+                t_max, az_max, el_max = _t_max, _az_max, _el_max
         elif event == 2:  # LOS
             t_los = t
 
             # Make sure we have all details
             if t_aos is not None and t_max is not None:
-                if el_max > min_max_elevation:
+                if el_max.degrees > min_max_elevation:
                     el_aos, az_aos, _ = altaz_fn(t_aos)
                     el_los, az_los, _ = altaz_fn(t_los)
-                    passes.append(Pass(obj_name, "oh2ags", t_aos.utc_datetime(), az_aos.degrees,
-                                       t_max.utc_datetime(), el_max, az_max,
-                                       t_los.utc_datetime(), az_los.degrees, 1))
+                    passes.append(Pass(obj_name, "oh2ags",
+                                       t_aos.utc_datetime(), az_aos.degrees, el_aos.degrees,
+                                       t_max.utc_datetime(), az_max.degrees, el_max.degrees,
+                                       t_los.utc_datetime(), az_los.degrees, el_los.degrees))
 
-            t_aos, t_max, el_max, t_los = [None] * 4
+            t_aos, t_max, az_max, el_max, t_los = [None] * 5
         else:
             assert False, "Invalid event: %s" % event
 

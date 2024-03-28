@@ -25,14 +25,18 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
     TRACKER_TYPE = 'orbit'
     DEFAULT_PREAOS_TIME = 120
 
-    def __init__(self, tracking_interval=2.1, scheduler_enabled=True, **kwargs):
+    def __init__(self, tracking_interval=2.0, tracking_delay=0.1, scheduler_enabled=True, **kwargs):
         """
         Initialize module.
         """
         super().__init__(**kwargs)
 
         self.tracking_interval = tracking_interval
+        self.tracking_delay = tracking_delay
         self.scheduler_enabled = scheduler_enabled
+
+        self.log.debug("Orbit tracker initialized with tracking interval %s and delay %s",
+                       tracking_interval, tracking_delay)
 
         # list of targets, associated rotators, and tracking status
         self.target_trackers = []
@@ -184,6 +188,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         if high_accuracy is None:
             high_accuracy = isinstance(target, CelestialObject) or sunlit is not None or sun_max_elevation is not None
         target_tracker = TargetTracker(self, task_name, target, rotators, tracking_interval=self.tracking_interval,
+                                       tracking_delay=self.tracking_delay,
                                        preaos_time=preaos_time, high_accuracy=high_accuracy)
         self.target_trackers.append(target_tracker)
         await target_tracker.start()
@@ -275,7 +280,8 @@ class TrackerStatus(IntEnum):
 class TargetTracker:
 
     def __init__(self, module: OrbitTracker, task_name: str, target: Union[Satellite, CelestialObject],
-                 rotators: List[str], preaos_time=OrbitTracker.DEFAULT_PREAOS_TIME, tracking_interval=2.0,
+                 rotators: List[str], preaos_time=OrbitTracker.DEFAULT_PREAOS_TIME,
+                 tracking_interval=2.0, tracking_delay=0.1,
                  status=TrackerStatus.WAITING, high_accuracy=None):
         self.module = module
         self.task_name = task_name
@@ -283,6 +289,7 @@ class TargetTracker:
         self.rotators = rotators
         self.preaos_time = datetime.timedelta(seconds=preaos_time)
         self.tracking_interval = tracking_interval
+        self.tracking_delay = tracking_delay
         self.status = status
         self.high_accuracy = isinstance(target, CelestialObject) if high_accuracy is None else high_accuracy
         if self.high_accuracy:
@@ -381,8 +388,8 @@ class TargetTracker:
                 self.module.log.debug(f"AOS for {self.target.target_name} {self.rotators} in {sec:.0f} seconds")
 
         elif self.status == TrackerStatus.TRACKING:
-            # Calculate the position tracking_interval seconds in the future
-            t = now + datetime.timedelta(seconds=self.tracking_interval)
+            # Calculate the position tracking_delay seconds in the future
+            t = now + datetime.timedelta(seconds=self.tracking_delay)
             pos = self.target.pos_at(t, accurate=self.high_accuracy)
             el, az, range, el_rate, az_rate, range_rate = pos.frame_latlon_and_rates(self.module.gs.pos)
             if self.high_accuracy:

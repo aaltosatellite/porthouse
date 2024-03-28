@@ -27,7 +27,7 @@ class Rotator(BaseModule):
 
     def __init__(self, driver, address, tracking_enabled=False, threshold=0.1, refresh_rate=1.0,
                  position_range=(-90, 450, 0, 90), rotator_model=None, horizon_map_file=None,
-                 min_sun_angle=None, motion_logging=False, **kwargs):
+                 min_sun_angle=None, preaos_sequence=True, motion_logging=False, **kwargs):
         """
         Initialize rotator module
 
@@ -43,6 +43,9 @@ class Rotator(BaseModule):
 
         self.motion_logging = motion_logging
         self.log.debug("Motion logging enabled: %s" % (self.motion_logging,))
+
+        self.preaos_sequence = preaos_sequence
+        self.log.debug("Pre-AOS sequence is enabled: %s" % (self.preaos_sequence,))
 
         # min azimuth, max azimuth, min elevation, max elevation
         assert position_range[0] < position_range[1], "azimuth min must be smaller than azimuth max"
@@ -65,6 +68,7 @@ class Rotator(BaseModule):
         min_elevation = position_range[2]
         self.target_position = (0, min_elevation)
         self.old_target_position = (0, min_elevation)
+        self.target_velocity = (0, 0)
         self.target_timestamp = time.time()
 
         # Move to target using the shortest path is default behaviour
@@ -139,8 +143,6 @@ class Rotator(BaseModule):
             if self.position_timestamp is None or time.time() - self.position_timestamp > 0.8 / self.refresh_rate:
                 self.current_position, self.position_timestamp = self.rotator.get_position(with_timestamp=True)
 
-                # TODO: might crowd out the connection, need to try this out
-                #  - if too heavy, reduce sampling rate, need to get average duty cycles then
                 if self.moving_to_target and self.motion_logging:
                     try:
                         self.rotator.pop_motion_log()
@@ -153,9 +155,10 @@ class Rotator(BaseModule):
                 d_ts = self.target_timestamp - self.position_timestamp
 
                 # header: ts_cur, az_cur, el_cur, ts_trg, al_trg, el_trg, d_ts, d_az, d_el, d_dist
-                self.perf_log.write("%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f\n" % (
+                self.perf_log.write("%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.6f, %.6f, %.3f, %.3f, %.3f, %.3f\n" % (
                                     self.position_timestamp, self.current_position[0], self.current_position[1],
                                     self.target_timestamp, self.target_position[0], self.target_position[1],
+                                    self.target_velocity[0], self.target_velocity[1],
                                     d_ts, d_az, d_el, (d_az**2 + d_el**2)**0.5))
                 self.perf_log.flush()
 
@@ -187,6 +190,8 @@ class Rotator(BaseModule):
             "el": self.current_position[1],
             "az_target": self.target_position[0],
             "el_target": self.target_position[1],
+            "az_vel_trg": self.target_velocity[0],
+            "el_vel_trg": self.target_velocity[1],
             "ts_target": self.target_timestamp,
             "tracking": status,
             "rotating": self.moving_to_target,
@@ -220,7 +225,8 @@ class Rotator(BaseModule):
                                                                   accuracy=self.threshold * 2):
                 self.log.info("Target position changed by driver (%s -> %s), trying to continue to previous target",
                               self.target_position, self.rotator.target_position)
-                self.set_target_position(self.target_position, ts=self.target_timestamp)
+                self.set_target_position(self.target_position, vel=self.target_velocity, ts=self.target_timestamp,
+                                         shortest_path=self.shortest_path)
 
             # If antenna is pointing already to current target,
             # don't send additional commands
@@ -237,7 +243,8 @@ class Rotator(BaseModule):
                         self.target_position = self.rotator.closest_valid_position(*self.target_position)
 
                         ########### Actual call of rotator command ###########
-                        r = self.rotator.set_position(*self.target_position, shortest_path=self.shortest_path)
+                        r = self.rotator.set_position(*self.target_position, shortest_path=self.shortest_path,
+                                                      vel=self.target_velocity)
 
                         # toggle this on to avoid calling set_position
                         # multiple times in a row
@@ -283,7 +290,7 @@ class Rotator(BaseModule):
         return abs(pos1[0] - pos2[0]) <= accuracy and \
                abs(pos1[1] - pos2[1]) <= accuracy
 
-    def set_target_position(self, target, shortest_path=True, ts=None):
+    def set_target_position(self, target, shortest_path=True, vel=None, ts=None):
         """
         Set new target position
         """
@@ -301,6 +308,7 @@ class Rotator(BaseModule):
         self.old_target_position = self.target_position
         self.target_position = valid_position
         self.shortest_path = shortest_path
+        self.target_velocity = vel or (0, 0)
         self.target_timestamp = ts or time.time()
 
         self.target_valid = True
@@ -370,11 +378,12 @@ class Rotator(BaseModule):
             self.tracking_enabled = False
 
             try:
+                kwargs = {}
                 if "shortest" in request_data:
-                    self.set_target_position(target, request_data["shortest"], ts=timestamp)
-
-                else:
-                    self.set_target_position(target, ts=timestamp)
+                    kwargs["shortest_path"] = request_data["shortest"]
+                if "velocity" in request_data:
+                    kwargs["vel"] = request_data["velocity"]
+                self.set_target_position(target, ts=timestamp, **kwargs)
 
             except RotatorError as e:
                 self.log.error(
@@ -475,9 +484,10 @@ class Rotator(BaseModule):
             new_target = (float(event_body['az']) % 360,
                           float(event_body['el']))
             timestamp = event_body.get('timestamp', time.time())
+            velocity = (event_body.get('az_rate', 0), event_body.get('el_rate', 0))
 
             try:
-                self.set_target_position(new_target, shortest_path=True, ts=timestamp)
+                self.set_target_position(new_target, shortest_path=True, vel=velocity, ts=timestamp)
             except RotatorError as e:
                 self.log.error(
                     "Failed to update target position! %s",
@@ -489,13 +499,18 @@ class Rotator(BaseModule):
                 At preAOS determine the optimal initial azimuth within the
                 full [-90:450] interval. Initial elevation is always min_elevation.
             """
+            if not self.preaos_sequence:
+                # PreAOS sequence might be handled elsewhere, e.g. at mission control system if need to do some
+                # automatic calibrations etc.
+                return
+
             # Make sure azimuths are in range [0, 360]
-            aos_az = event_body["az_aos"] % 360
-            max_az = event_body["az_max"] % 360
-            los_az = event_body["az_los"] % 360
+            aos_az, aos_el = event_body["az_aos"] % 360, event_body["el_aos"]
+            max_az, max_el = event_body["az_max"] % 360, event_body["el_max"]
+            los_az, los_el = event_body["az_los"] % 360, event_body["el_los"]
 
             min_el = self.rotator.az_dependent_min_el(aos_az)
-            aos_el = max(0.0, min_el) if min_el is not None else 0.0
+            aos_el = max(aos_el, min_el) if min_el is not None else aos_el
 
             ### Might be needed to adapt this when using with different GS ###
             # Over the north-west to east or vice versa or

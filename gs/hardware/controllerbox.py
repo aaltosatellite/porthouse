@@ -111,12 +111,14 @@ class ControllerBox(RotatorController):
     def set_position(self,
                      az: float,
                      el: float,
+                     vel: Optional[Tuple[float, float]] = None,
                      ts: Optional[float] = None,
                      shortest_path: bool = True) -> PositionType:
 
         # Check whether az and el are within allowed limits
         self.position_valid(az, el, raise_error=True)
         self.target_position = (az, el)
+        self.target_velocity = vel or (0.0, 0.0)
         self.target_pos_ts = ts or time.time()
         maz, mel = self.rotator_model.to_motor(az, el)
 
@@ -129,13 +131,29 @@ class ControllerBox(RotatorController):
 
         self._read_response()
 
+        # set target velocities
+        mazv, melv = self.target_velocity  # TODO: convert velocities to motor velocities
+        try:
+            # TODO: deploy new code to all controllers (UHF & S-band also)
+            self._write_command(f"MV -a {mazv:.4f}".encode("ascii"))
+            self._write_command(f"MV -e {melv:.4f}".encode("ascii"))
+            self._read_response()
+        except ControllerBoxError as e:
+            pass
+
         return self.get_position_target()
 
-    def get_position_target(self) -> PositionType:
+    def get_position_target(self, get_vel=False) -> PositionType | Tuple[PositionType, PositionType]:
         self._write_command(b"M -s")
         trg_motor_pos = self._parse_position_output(self._read_response())
         self.target_position = self.rotator_model.to_real(*trg_motor_pos)
-        return self.target_position
+
+        if get_vel:
+            self._write_command(b"MV -s")   # NOTE: not yet deployed for original UHF controller
+            trg_motor_vel = self._parse_position_output(self._read_response())
+            self.target_velocity = trg_motor_vel  # TODO: self.rotator_model.to_real_vel(*trg_motor_vel)
+
+        return self.target_position if not get_vel else (self.target_position, self.target_velocity)
 
     def get_position_range(self) -> Tuple[float, float, float, float]:
         """
@@ -233,7 +251,7 @@ class ControllerBox(RotatorController):
         if not self.mlog:
             self._open_mlog()
 
-        ts = struct.pack('<f', time.time())
+        ts = struct.pack('<Q', time.time_ns())
         self._write_command(b"L")
         sep = struct.pack('<Iffff', 0, math.nan, math.nan, math.nan, math.nan)
         bytes = self._read_bin_resp(sep)
@@ -255,9 +273,6 @@ class ControllerBox(RotatorController):
         rsp = b''
         while not rsp.endswith(end_seq):
             tmp = self.ser.read_until(end_seq)
-            if self.ser.in_waiting >= len(end_seq):
-                # read also the end sequence
-                tmp += self.ser.read(len(end_seq))
             rsp += tmp
             if len(tmp) == 0:
                 break
