@@ -27,7 +27,7 @@ class Rotator(BaseModule):
 
     def __init__(self, driver, address, tracking_enabled=False, threshold=0.1, refresh_rate=1.0,
                  position_range=(-90, 450, 0, 90), rotator_model=None, horizon_map_file=None,
-                 min_sun_angle=None, preaos_sequence=True, motion_logging=False, **kwargs):
+                 control_sw_version=1, min_sun_angle=None, preaos_sequence=True, motion_logging=False, **kwargs):
         """
         Initialize rotator module
 
@@ -92,7 +92,7 @@ class Rotator(BaseModule):
             raise ValueError(f"Unknown rotator driver {driver}")
         self.rotator = driver_cls(address, az_min=position_range[0], az_max=position_range[1],
                                   el_min=position_range[2], el_max=position_range[3], prefix=self.prefix,
-                                  rotator_model=rotator_model,
+                                  rotator_model=rotator_model, control_sw_version=control_sw_version,
                                   horizon_map_file=horizon_map_file, min_sun_angle=min_sun_angle, debug=self.debug)
         self.default_dutycycle_range = self.rotator.get_dutycycle_range()
         self.log.debug("Duty-cycle range: %s" % (self.default_dutycycle_range,))

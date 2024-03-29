@@ -32,6 +32,7 @@ class ControllerBox(RotatorController):
                  rotator_model: Optional[dict] = None,
                  horizon_map_file: Optional[str] = None,
                  min_sun_angle: Optional[float] = None,
+                 control_sw_version=1,
                  debug: bool = False,
                  prefix="") -> None:
         """
@@ -53,7 +54,7 @@ class ControllerBox(RotatorController):
         """
 
         super().__init__(address, az_min, az_max, el_min, el_max, rotator_model, horizon_map_file,
-                         min_sun_angle, debug)
+                         min_sun_angle, control_sw_version, debug)
 
         self.err_cnt = 0
         self.prefix = prefix
@@ -132,14 +133,12 @@ class ControllerBox(RotatorController):
         self._read_response()
 
         # set target velocities
-        mazv, melv = self.target_velocity  # TODO: convert velocities to motor velocities
-        try:
+        if self.control_sw_version > 1:
+            mazv, melv = self.target_velocity  # TODO: convert velocities to motor velocities
             # TODO: deploy new code to all controllers (UHF & S-band also)
             self._write_command(f"MV -a {mazv:.4f}".encode("ascii"))
             self._write_command(f"MV -e {melv:.4f}".encode("ascii"))
             self._read_response()
-        except ControllerBoxError as e:
-            pass
 
         return self.get_position_target()
 
@@ -148,7 +147,7 @@ class ControllerBox(RotatorController):
         trg_motor_pos = self._parse_position_output(self._read_response())
         self.target_position = self.rotator_model.to_real(*trg_motor_pos)
 
-        if get_vel:
+        if get_vel and self.control_sw_version > 1:
             self._write_command(b"MV -s")   # NOTE: not yet deployed for original UHF controller
             trg_motor_vel = self._parse_position_output(self._read_response())
             self.target_velocity = trg_motor_vel  # TODO: self.rotator_model.to_real_vel(*trg_motor_vel)

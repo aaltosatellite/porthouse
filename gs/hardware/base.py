@@ -47,6 +47,7 @@ class RotatorController(abc.ABC):
                  rotator_model: Optional[dict] = None,
                  horizon_map_file: Optional[str] = None,
                  min_sun_angle: Optional[float] = None,
+                 control_sw_version = 1,
                  debug: bool = False,
                  prefix: str = ""):
         """
@@ -78,6 +79,8 @@ class RotatorController(abc.ABC):
         self.target_position = (0.0, 0.0)
         self.target_velocity = (0.0, 0.0)
         self.target_pos_ts = 0.0
+
+        self.control_sw_version = control_sw_version
 
         self.rotator_model = AzElRotator(**(rotator_model or {}))
         self.horizon_map_file = None
