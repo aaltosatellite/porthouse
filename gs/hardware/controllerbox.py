@@ -210,7 +210,6 @@ class ControllerBox(RotatorController):
         # update current_position, also move to valid position if currently invalid
         self.get_position()
 
-
     def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
         self._write_command(b"D+ -s")
         range_max = ControllerBox._parse_position_output(self._read_response())
@@ -307,6 +306,7 @@ class ControllerBox(RotatorController):
                         self.log.warning(rsp[7:].decode("ascii").strip())
                     continue
                 raise ControllerBoxError(rsp[7:].decode("ascii").strip())
+            break
 
         return rsp
 
