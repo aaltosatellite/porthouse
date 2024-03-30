@@ -59,11 +59,12 @@ class ControllerBox(RotatorController):
 
         self.err_cnt = 0
         self.prefix = prefix
+        self.dlog = None
         self.mlog = None
 
         if self.debug:  # TODO: where would be best to put this?
             os.makedirs("logs", exist_ok=True)
-            self.log = open(f"logs/{self.prefix}_debug_{time.time():.0f}.log", "w")
+            self.dlog = open(f"logs/{self.prefix}_debug_{time.time():.0f}.log", "w")
 
         # Creates and opens serial com
         self.ser = serial.Serial(port=address, baudrate=baudrate, timeout=0.5)
@@ -82,7 +83,7 @@ class ControllerBox(RotatorController):
         self.ser.close()
         self.flush_buffers()
         if self.debug:
-            self.log.close()
+            self.dlog.close()
         if self.mlog:
             self.mlog.close()
 
@@ -291,8 +292,8 @@ class ControllerBox(RotatorController):
                 rsp = self.ser.readline()
 
                 if self.debug:
-                    self.log.write(f"{time.time()} READ: {rsp}\n")
-                    self.log.flush()
+                    self.dlog.write(f"{time.time()} READ: {rsp}\n")
+                    self.dlog.flush()
 
             except Exception as e:
                 raise ControllerBoxError(
@@ -306,7 +307,7 @@ class ControllerBox(RotatorController):
                         self.log.warning(rsp[7:].decode("ascii").strip())
                     continue
                 raise ControllerBoxError(rsp[7:].decode("ascii").strip())
-    
+
         return rsp
 
     def _write_command(self, cmd: bytes) -> None:
@@ -330,8 +331,8 @@ class ControllerBox(RotatorController):
             ret = self.ser.write(cmd)
 
             if self.debug:
-                self.log.write(f"{time.time()} WRITE (bytes {ret}): {cmd}\n")
-                self.log.flush()
+                self.dlog.write(f"{time.time()} WRITE (bytes {ret}): {cmd}\n")
+                self.dlog.flush()
 
         except serial.SerialTimeoutException as e:
             raise ControllerBoxError("Serial connection to controller box timed out: ", e)
