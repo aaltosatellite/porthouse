@@ -143,8 +143,6 @@ class AzElRotator:
     def to_motor(self, az, el, az_dot=None, el_dot=None, wrap=False):
         # Assumes x-axis points to the north, y-axis to the east and z-axis down (az=0 is north, el=0 is horizon),
         # and x-axis ends up pointing to the given az & el.
-
-        # TODO: transform also angular velocities if given
         oaz = az
 
         # real x-axis after lateral tilt compensation
@@ -163,6 +161,15 @@ class AzElRotator:
 
         if not wrap:
             az1 = (az1 + 360) if abs(az1 - oaz) > 180 else az1
+
+        # transform also angular velocities if given
+        if az_dot is not None:
+            # TODO: verify that rotation matrix is correct by using same also for to_real and comparing
+            #       real=>motor=>real results with errors from the current approach
+            q1 = eul_to_q((np.deg2rad(-self.lateral_tilt),), 'z')
+            az_dot1, el_dot1, _ = quaternion.as_rotation_matrix(q2 * q1).dot(
+                [np.deg2rad(az_dot), np.deg2rad(el_dot), 0])
+            return az1, el1, np.rad2deg(az_dot1/self.az_gain), np.rad2deg(el_dot1/self.el_gain)
 
         return az1, el1
 

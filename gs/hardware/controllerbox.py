@@ -33,6 +33,7 @@ class ControllerBox(RotatorController):
                  horizon_map_file: Optional[str] = None,
                  min_sun_angle: Optional[float] = None,
                  control_sw_version=1,
+                 log=None,
                  debug: bool = False,
                  prefix="") -> None:
         """
@@ -54,11 +55,10 @@ class ControllerBox(RotatorController):
         """
 
         super().__init__(address, az_min, az_max, el_min, el_max, rotator_model, horizon_map_file,
-                         min_sun_angle, control_sw_version, debug)
+                         min_sun_angle, control_sw_version, debug, log)
 
         self.err_cnt = 0
         self.prefix = prefix
-        self.log = None
         self.mlog = None
 
         if self.debug:  # TODO: where would be best to put this?
@@ -121,7 +121,7 @@ class ControllerBox(RotatorController):
         self.target_position = (az, el)
         self.target_velocity = vel or (0.0, 0.0)
         self.target_pos_ts = ts or time.time()
-        maz, mel = self.rotator_model.to_motor(az, el)
+        maz, mel, mazv, melv = self.rotator_model.to_motor(az, el, *self.target_velocity)
 
         if shortest_path:
             self._write_command(f"MS -a {maz:.2f}".encode("ascii"))
@@ -134,7 +134,6 @@ class ControllerBox(RotatorController):
 
         # set target velocities
         if self.control_sw_version > 1:
-            mazv, melv = self.target_velocity  # TODO: convert velocities to motor velocities
             # TODO: deploy new code to all controllers (UHF & S-band also)
             self._write_command(f"MV -a {mazv:.4f}".encode("ascii"))
             self._write_command(f"MV -e {melv:.4f}".encode("ascii"))
@@ -287,23 +286,27 @@ class ControllerBox(RotatorController):
         Raises:
             `ControllerBoxError` - in case the controller box encoutered an error.
         """
+        while True:
+            try:
+                rsp = self.ser.readline()
 
-        try:
-            rsp = self.ser.readline()
+                if self.debug:
+                    self.log.write(f"{time.time()} READ: {rsp}\n")
+                    self.log.flush()
 
-            if self.debug:
-                self.log.write(f"{time.time()} READ: {rsp}\n")
-                self.log.flush()
+            except Exception as e:
+                raise ControllerBoxError(
+                    f"Error while reading message from controller box: {e}"
+                ) from e
 
-        except Exception as e:
-            raise ControllerBoxError(
-                f"Error while reading message from controller box: {e}"
-            ) from e
-
-        # Raise error if the line starts with "Error"
-        if rsp.startswith(b"Error: "):
-            raise ControllerBoxError(str(rsp[7:]))
-
+            # Raise error if the line starts with "Error"
+            if rsp.startswith(b"Error: "):
+                if b"position cannot be sensed" in rsp:
+                    if self.log is not None:
+                        self.log.warning(rsp[7:].decode("ascii").strip())
+                    continue
+                raise ControllerBoxError(rsp[7:].decode("ascii").strip())
+    
         return rsp
 
     def _write_command(self, cmd: bytes) -> None:

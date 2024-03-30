@@ -49,6 +49,7 @@ class RotatorController(abc.ABC):
                  min_sun_angle: Optional[float] = None,
                  control_sw_version = 1,
                  debug: bool = False,
+                 log=None,
                  prefix: str = ""):
         """
         Initialize controller hardware driver including any serial com.
@@ -80,6 +81,7 @@ class RotatorController(abc.ABC):
         self.target_velocity = (0.0, 0.0)
         self.target_pos_ts = 0.0
 
+        self.log = log
         self.control_sw_version = control_sw_version
 
         self.rotator_model = AzElRotator(**(rotator_model or {}))

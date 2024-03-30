@@ -93,7 +93,8 @@ class Rotator(BaseModule):
         self.rotator = driver_cls(address, az_min=position_range[0], az_max=position_range[1],
                                   el_min=position_range[2], el_max=position_range[3], prefix=self.prefix,
                                   rotator_model=rotator_model, control_sw_version=control_sw_version,
-                                  horizon_map_file=horizon_map_file, min_sun_angle=min_sun_angle, debug=self.debug)
+                                  horizon_map_file=horizon_map_file, min_sun_angle=min_sun_angle,
+                                  log=self.log, debug=self.debug)
         self.default_dutycycle_range = self.rotator.get_dutycycle_range()
         self.log.debug("Duty-cycle range: %s" % (self.default_dutycycle_range,))
 
