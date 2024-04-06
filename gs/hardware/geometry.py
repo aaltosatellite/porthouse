@@ -154,7 +154,7 @@ class AzElRotator:
         az_r, el_r = to_azel(q_r)
 
         if not wrap:
-            az_r = (az_r + 360) if abs(az_r - np.rad2deg(az)) > 180 else az_r
+            az_r = (az_r + 360) if abs(az_r - az) > 180 else az_r
 
         if az_dot is not None:
             # as in https://ahrs.readthedocs.io/en/latest/filters/angular.html
@@ -180,7 +180,7 @@ class AzElRotator:
         el_m = el_m * self.el_gain + self.el_off
 
         if not wrap:
-            az_m = (az_m + 360) if abs(az_m - np.rad2deg(az)) > 180 else az_m
+            az_m = (az_m + 360) if abs(az_m - az) > 180 else az_m
 
         if az_dot is not None:
             # as in https://ahrs.readthedocs.io/en/latest/filters/angular.html
