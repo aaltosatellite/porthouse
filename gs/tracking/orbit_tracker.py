@@ -25,7 +25,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
     TRACKER_TYPE = 'orbit'
     DEFAULT_PREAOS_TIME = 120
 
-    def __init__(self, tracking_interval=2.0, tracking_delay=0.1, scheduler_enabled=True, **kwargs):
+    def __init__(self, tracking_interval=2.0, tracking_delay=0.2, scheduler_enabled=True, **kwargs):
         """
         Initialize module.
         """
@@ -281,7 +281,7 @@ class TargetTracker:
 
     def __init__(self, module: OrbitTracker, task_name: str, target: Union[Satellite, CelestialObject],
                  rotators: List[str], preaos_time=OrbitTracker.DEFAULT_PREAOS_TIME,
-                 tracking_interval=2.0, tracking_delay=0.1,
+                 tracking_interval=2.0, tracking_delay=3.0,
                  status=TrackerStatus.WAITING, high_accuracy=None):
         self.module = module
         self.task_name = task_name
@@ -299,13 +299,10 @@ class TargetTracker:
         self.asyncio_task = None
 
     async def setup(self) -> None:
-        t0, st = 0.0, 0.0
         while self.target:
-            t1 = time.time()
-            dt, t0 = t1 - t0 - st, t1
-            st = max(0.0, self.tracking_interval - dt)
-            await asyncio.sleep(st)
+            t0 = time.time()
             await self.update_tracking()
+            await asyncio.sleep(max(0.0, self.tracking_interval - (time.time() - t0)))
 
     async def start(self) -> None:
         loop = asyncio.get_event_loop()

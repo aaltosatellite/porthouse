@@ -257,6 +257,15 @@ class RotatorController(abc.ABC):
             `RotatorError` - in case the controller encountered an error.
         """
 
+    def preaos(self) -> None:
+        pass
+
+    def aos(self) -> None:
+        pass
+
+    def los(self) -> None:
+        pass
+
     def pop_motion_log(self):
         pass
 
