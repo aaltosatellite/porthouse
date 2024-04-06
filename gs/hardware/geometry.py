@@ -1,9 +1,10 @@
 import argparse
 import json
 import math
+from functools import lru_cache
 
 import numpy as np
-import quaternion
+import quaternion   # adds np.quaternion
 
 
 def main():
@@ -115,63 +116,83 @@ class AzElRotator:
         with open(filename, 'w') as fh:
             json.dump(self.to_dict(), fh)
 
+    @property
+    def payload_q(self) -> np.quaternion:
+        """
+        quaternion representing the payload tilt
+        """
+        return self._payload_q(self.lateral_tilt)
+
+    @property
+    def platform_q(self) -> np.quaternion:
+        """
+        quaternion representing the platform tilt
+        """
+        return self._platform_q(self.tilt_az, self.tilt_angle)
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def _payload_q(lateral_tilt) -> np.quaternion:
+        return eul_to_q((np.deg2rad(lateral_tilt),), 'z')
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def _platform_q(tilt_az, tilt_angle) -> np.quaternion:
+        tilt_axis = q_times_v(eul_to_q((np.deg2rad(tilt_az - 90),), 'z'), np.array([1, 0, 0]))
+        return quaternion.from_rotation_vector(tilt_axis * np.deg2rad(tilt_angle))
+
     def to_real(self, az, el, az_dot=None, el_dot=None, wrap=False):
-        # Assumes x-axis points to the north, y-axis to the east and z-axis down (az=0 is north, el=0 is horizon),
-        # and x-axis ends up pointing to the given az & el.
+        # Assumes x-axis points to the north, y-axis to the east and z-axis down (az=0 is north, el=0 is horizon)
 
-        # TODO: transform also angular velocities if given
-        oaz = az
+        # remove the effect of offsets and gains
+        az_m = np.deg2rad(wrapdeg((az - self.az_off) / self.az_gain))
+        el_m = np.deg2rad((el - self.el_off) / self.el_gain)
 
-        # real az and el without the effect of the tilted base
-        az1 = az * self.az_gain + self.az_off
-        el1 = el * self.el_gain + self.el_off
-        q1 = eul_to_q((np.deg2rad(az1), np.deg2rad(el1), np.deg2rad(self.lateral_tilt)), 'zyz')
+        q_m = eul_to_q((az_m, el_m), 'zy')
 
-        # adjust for tilt
-        tilt_axis = q_times_v(eul_to_q((np.deg2rad(self.tilt_az - 90),), 'z'), np.array([1, 0, 0]))
-        q2 = quaternion.from_rotation_vector(tilt_axis * np.deg2rad(self.tilt_angle))
-
-        x_axis = q_times_v(q2 * q1, np.array([1, 0, 0]))
-        neg_el, az, _ = to_spherical(*x_axis)
-        az, el = wrapdeg(np.rad2deg(az)), np.rad2deg(-neg_el)
+        q_r = self.platform_q * q_m * self.payload_q
+        az_r, el_r = to_azel(q_r)
 
         if not wrap:
-            az = (az + 360) if abs(az - oaz) > 180 else az
+            az_r = (az_r + 360) if abs(az_r - np.rad2deg(az)) > 180 else az_r
 
-        return az, el
+        if az_dot is not None:
+            # as in https://ahrs.readthedocs.io/en/latest/filters/angular.html
+            omega_m = np.quaternion(0, 0, np.deg2rad(el_dot)/self.el_gain, np.deg2rad(az_dot)/self.az_gain)
+            q_m_dot = 0.5 * omega_m * q_m
+            q_r_dot = self.platform_q * q_m_dot * self.payload_q
+            omaga_r = 2 * q_r_dot * q_r.conj()
+            az_dot_m = np.rad2deg(omaga_r.z)
+            el_dot_m = np.rad2deg(omaga_r.y)
+            return (az_m, el_m), (az_dot_m, el_dot_m)
+
+        return az_r, el_r
 
     def to_motor(self, az, el, az_dot=None, el_dot=None, wrap=False):
-        # Assumes x-axis points to the north, y-axis to the east and z-axis down (az=0 is north, el=0 is horizon),
-        # and x-axis ends up pointing to the given az & el.
-        oaz = az
+        # Assumes x-axis points to the north, y-axis to the east and z-axis down (az=0 is north, el=0 is horizon)
+        q_r = eul_to_q((np.deg2rad(az), np.deg2rad(el)), 'zy')
 
-        # real x-axis after lateral tilt compensation
-        q1 = eul_to_q((np.deg2rad(az), np.deg2rad(el), np.deg2rad(-self.lateral_tilt)), 'zyz')
-        x_axis = q_times_v(q1, np.array([1, 0, 0]))
-
-        # adjusted for tilt
-        tilt_axis = q_times_v(eul_to_q((np.deg2rad(self.tilt_az - 90),), 'z'), np.array([1, 0, 0]))
-        q2 = quaternion.from_rotation_vector(tilt_axis * np.deg2rad(-self.tilt_angle))
-        x_axis = q_times_v(q2, x_axis)
-        neg_el, az, _ = to_spherical(*x_axis)
+        q_m = self.platform_q.conj() * q_r * self.payload_q.conj()
+        az_m, el_m = to_azel(q_m)
 
         # add the effect of offsets and gains
-        az1 = wrapdeg((np.rad2deg(az) - self.az_off) / self.az_gain)
-        el1 = (np.rad2deg(-neg_el) - self.el_off) / self.el_gain
+        az_m = wrapdeg(az_m * self.az_gain + self.az_off)
+        el_m = el_m * self.el_gain + self.el_off
 
         if not wrap:
-            az1 = (az1 + 360) if abs(az1 - oaz) > 180 else az1
+            az_m = (az_m + 360) if abs(az_m - np.rad2deg(az)) > 180 else az_m
 
-        # transform also angular velocities if given
         if az_dot is not None:
-            # TODO: verify that rotation matrix is correct by using same also for to_real and comparing
-            #       real=>motor=>real results with errors from the current approach
-            q1 = eul_to_q((np.deg2rad(-self.lateral_tilt),), 'z')
-            az_dot1, el_dot1, _ = quaternion.as_rotation_matrix(q2 * q1).dot(
-                [np.deg2rad(az_dot), np.deg2rad(el_dot), 0])
-            return az1, el1, np.rad2deg(az_dot1/self.az_gain), np.rad2deg(el_dot1/self.el_gain)
+            # as in https://ahrs.readthedocs.io/en/latest/filters/angular.html
+            omega_r = np.quaternion(0, 0, np.deg2rad(el_dot), np.deg2rad(az_dot))
+            q_r_dot = 0.5 * omega_r * q_r
+            q_m_dot = self.platform_q.conj() * q_r_dot * self.payload_q.conj()
+            omaga_m = 2 * q_m_dot * q_m.conj()
+            az_dot_m = self.az_gain * np.rad2deg(omaga_m.z)
+            el_dot_m = self.el_gain * np.rad2deg(omaga_m.y)
+            return (az_m, el_m), (az_dot_m, el_dot_m)
 
-        return az1, el1
+        return az_m, el_m
 
     def __str__(self):
         return f'AzElRotator(el_off={self.el_off:.3f}, az_off={self.az_off:.3f}, el_gain={self.el_gain:.4f}, ' \

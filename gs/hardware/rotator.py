@@ -101,7 +101,8 @@ class Rotator(BaseModule):
         if self.debug:
             os.makedirs("logs", exist_ok=True)
             self.perf_log = open(f"logs/{self.prefix}_perf_{time.time():.0f}.csv", "w")
-            self.perf_log.write("ts_cur, az_cur, el_cur, ts_trg, az_trg, el_trg, d_ts, d_az, d_el, d_dist\n")
+            self.perf_log.write("ts_cur, az_cur, el_cur, ts_trg, az_trg, el_trg, "
+                                "az_vel_trg, el_vel_trg, d_ts, d_az, d_el, d_dist\n")
             self.perf_log.flush()
 
         self.loop_sleep_task = None
@@ -155,7 +156,8 @@ class Rotator(BaseModule):
                 d_el = self.target_position[1] - self.current_position[1]
                 d_ts = self.target_timestamp - self.position_timestamp
 
-                # header: ts_cur, az_cur, el_cur, ts_trg, al_trg, el_trg, d_ts, d_az, d_el, d_dist
+                # header: ts_cur, az_cur, el_cur, ts_trg, al_trg, el_trg,
+                #         az_vel_trg, el_vel_trg, d_ts, d_az, d_el, d_dist
                 self.perf_log.write("%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.6f, %.6f, %.3f, %.3f, %.3f, %.3f\n" % (
                                     self.position_timestamp, self.current_position[0], self.current_position[1],
                                     self.target_timestamp, self.target_position[0], self.target_position[1],
@@ -214,13 +216,11 @@ class Rotator(BaseModule):
 
     async def check_state(self):
         """
-        Check rotator's current state
+        Check rotator's current state, possibly after first setting a new target position.
 
         Calls the actual rotate -commands through hardware interface.
         This method is called at a rotator specific safe update rate that is set using the refresh_rate parameter.
         """
-
-        self.refresh_rotator_position()
 
         # Check what we are doing atm and has anything changed
         if self.target_valid:
@@ -245,9 +245,6 @@ class Rotator(BaseModule):
                     # Antenna is not at target and not yet moving to most
                     # recent target, command it to go there
                     try:
-                        # move to the closest valid position instead of actual target position
-                        self.target_position = self.rotator.closest_valid_position(*self.target_position)
-
                         ########### Actual call of rotator command ###########
                         r = self.rotator.set_position(*self.target_position, shortest_path=self.shortest_path,
                                                       vel=self.target_velocity)
@@ -257,9 +254,12 @@ class Rotator(BaseModule):
                         self.moving_to_target = True
 
                     except RotatorError as e:
-                        self.rotator.get_position()
+                        try:
+                            self.rotator.get_position()
+                        except RotatorError:
+                            pass
                         self.log.error("Rotator could not set position: %s",
-                                       str(e), exc_info=True)
+                                        str(e), exc_info=True)
 
             else:
                 # toggle off as we are at target
@@ -271,6 +271,8 @@ class Rotator(BaseModule):
         else:
             # still waiting for new target coordinates, do nothing
             pass
+
+        self.refresh_rotator_position()
 
         await self.publish(self.get_status_msg(),
             exchange="rotator",
@@ -538,6 +540,7 @@ class Rotator(BaseModule):
                 # Speed up the azimuth rotation speed
                 self.log.debug("Raise AZ duty cycle up to 100")
                 self.rotator.set_dutycycle_range(az_duty_max=100)
+                self.rotator.preaos()
 
                 # Needs to go to position defined by full [-90, +450] angle
                 self.set_target_position(initial_target, shortest_path=False)
@@ -553,6 +556,7 @@ class Rotator(BaseModule):
             self.pass_ongoing = True
             self.log.debug(f"Set AZ duty cycle back to {self.default_dutycycle_range[1]}")
             self.rotator.set_dutycycle_range(az_duty_max=self.default_dutycycle_range[1])
+            self.rotator.aos()
 
         elif routing_key == "los":
             """
@@ -563,6 +567,7 @@ class Rotator(BaseModule):
             try:
                 ########### Actual call of rotator command ###########
                 self.rotator.stop()
+                self.rotator.los()
 
             except RotatorError as e:
                 self.log.error("Failed to reset target position! %s", e.args[0], exc_info=True)
