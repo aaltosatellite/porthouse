@@ -247,7 +247,7 @@ class Rotator(BaseModule):
                     try:
                         ########### Actual call of rotator command ###########
                         r = self.rotator.set_position(*self.target_position, shortest_path=self.shortest_path,
-                                                      vel=self.target_velocity)
+                                                      ts=self.target_timestamp, vel=self.target_velocity)
 
                         # toggle this on to avoid calling set_position
                         # multiple times in a row

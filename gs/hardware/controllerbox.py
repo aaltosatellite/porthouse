@@ -124,7 +124,7 @@ class ControllerBox(RotatorController):
         self.target_position = (az, el)
         self.target_velocity = vel or (0.0, 0.0)
         self.target_pos_ts = ts or time.time()
-        (maz, mel), (mazv, melv) = self.rotator_model.to_motor(az, el, *self.target_velocity)
+        maz, mel = self.rotator_model.to_motor(az, el)
 
         if self.control_sw_version > 2:
             t0 = (time.time_ns() - self.epoch) / 1e9
@@ -135,22 +135,18 @@ class ControllerBox(RotatorController):
             dt, gain = self._parse_position_output(resp)
             self.log.debug(f"Time-sync, rtt: {t1-t0:.6f} s, diff: {dt:.6f} s, gain: {gain:.6f} s/tick")
 
-        if shortest_path:
-            self._write_command(f"MS -a {maz:.2f}".encode("ascii"))
-            self._write_command(f"MS -e {mel:.2f}".encode("ascii"))
+        if self.control_sw_version > 2 and shortest_path:
+            ts = self.target_pos_ts - self.epoch/1e9
+            self._write_command(f"WA {ts:.3f} {maz:.2f} {mel:.2f}".encode("ascii"))
         else:
-            self._write_command(f"M -a {maz:.2f}".encode("ascii"))
-            self._write_command(f"M -e {mel:.2f}".encode("ascii"))
+            if shortest_path:
+                self._write_command(f"MS -a {maz:.2f}".encode("ascii"))
+                self._write_command(f"MS -e {mel:.2f}".encode("ascii"))
+            else:
+                self._write_command(f"M -a {maz:.2f}".encode("ascii"))
+                self._write_command(f"M -e {mel:.2f}".encode("ascii"))
 
         self._read_response()
-
-        # set target velocities
-        if self.control_sw_version > 1:
-            # TODO: deploy new code to all controllers (UHF & S-band also)
-            self._write_command(f"MV -a {mazv:.6f}".encode("ascii"))
-            self._write_command(f"MV -e {melv:.6f}".encode("ascii"))
-            self._read_response()
-
         return self.get_position_target()
 
     def get_position_target(self, get_vel=False) -> PositionType | Tuple[PositionType, PositionType]:
@@ -273,7 +269,7 @@ class ControllerBox(RotatorController):
 
         ts = struct.pack('<Q', time.time_ns())
         self._write_command(b"L")
-        sep = struct.pack('<Iffff', 0, math.nan, math.nan, math.nan, math.nan)
+        sep = struct.pack('<fffff', math.nan, math.nan, math.nan, math.nan, math.nan)
         bytes = self._read_bin_resp(sep)
         if not bytes.endswith(sep):
             raise ControllerBoxError(f"Failed to read motion log, total bytes read: "

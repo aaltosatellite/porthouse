@@ -281,7 +281,7 @@ class TargetTracker:
 
     def __init__(self, module: OrbitTracker, task_name: str, target: Union[Satellite, CelestialObject],
                  rotators: List[str], preaos_time=OrbitTracker.DEFAULT_PREAOS_TIME,
-                 tracking_interval=2.0, tracking_delay=0.2,
+                 tracking_interval=2.0, tracking_delay=3.0,
                  status=TrackerStatus.WAITING, high_accuracy=None):
         self.module = module
         self.task_name = task_name
