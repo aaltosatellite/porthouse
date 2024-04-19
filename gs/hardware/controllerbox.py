@@ -59,7 +59,7 @@ class ControllerBox(RotatorController):
 
         self.err_cnt = 0
         self.prefix = prefix
-        self.sync_offset = 0.0
+        self.sync_offset = 0.003     # initial guess for time-sync offset
         self.epoch = time.time_ns()
         self.dlog = None
         self.mlog = None
@@ -133,7 +133,7 @@ class ControllerBox(RotatorController):
             t1 = (time.time_ns() - self.epoch) / 1e9
             self.sync_offset = (t1 - t0) / 2
             dt, gain = self._parse_position_output(resp)
-            self.log.debug(f"Time-sync, rtt: {t1-t0:.6f} s, diff: {dt:.6f} s, gain: {gain:.6f} s/tick")
+            self.log.debug(f"Time-sync, rtt: {t1-t0:.6f} s, diff: {dt:.6f} s, gain: {gain:.3e} s/tick")
 
         if self.control_sw_version > 2 and shortest_path:
             ts = self.target_pos_ts - self.epoch/1e9
