@@ -145,7 +145,7 @@ class Rotator(BaseModule):
             if self.position_timestamp is None or time.time() - self.position_timestamp > 0.8 / self.refresh_rate:
                 self.current_position, self.position_timestamp = self.rotator.get_position(with_timestamp=True)
 
-                if self.moving_to_target and self.motion_logging:
+                if self.motion_logging and self.target_valid and self.moving_to_target:
                     try:
                         self.rotator.pop_motion_log()
                     except ControllerBoxError as e:
@@ -407,6 +407,7 @@ class Rotator(BaseModule):
             self.tracking_enabled = False
 
             # Send stop command
+            self.target_valid = False
             self.rotator.stop()
 
         elif request_name == "rpc.reset_position":
@@ -566,6 +567,7 @@ class Rotator(BaseModule):
 
             try:
                 ########### Actual call of rotator command ###########
+                self.target_valid = False
                 self.rotator.stop()
                 self.rotator.los()
 
