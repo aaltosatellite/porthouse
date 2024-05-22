@@ -1,7 +1,0 @@
-pyzmq
-requests
-requests-async
-pyserial
-aioserial
-websockets
-
