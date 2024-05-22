@@ -16,24 +16,29 @@ Main Dependencies:
 
 
 
-Installation of main dependencies
----------------------------------
+Installation of RabbitMQ
+---------------------------------------
 
-
-1) Installing RabbitMQ message broker:
-
-.. code-block:: console
-
-    $ sudo apt-get install rabbitmq-server
-
-optional:
+1) Installing RabbitMQ message broker using apt or the package manger of your choice:
 
 .. code-block:: console
 
-    $ sudo rabbitmq-plugins enable rabbitmq_management
+    $ sudo apt install rabbitmq-server
 
 
-2) Pull the repository
+
+Installation of porthouse Python library
+----------------------------------------
+
+2) Setupping a dedicated virtualenv is recommended.
+
+   .. code-block:: console
+
+    $ virtualenv porthouse --system-site-packages
+    $ cd porthouse
+    $ source bin/activate
+
+3) Pull the repository
 
 .. code-block:: console
 
@@ -41,26 +46,20 @@ optional:
     $ cd porthouse
 
 
-3) Install the porthouse in development mode
+4) Install the porthouse Python package
 
 .. code-block:: console
 
-    $ python3 setup.py develop --user
+    $ pip3 install .
 
-
-Alternatively, pip can be also used to install the package in so called "editable" mode.
-
-.. code-block:: console
-
-    $ pip3 install -e .
-
-
-
-4) Install Python dependencies
+5) Create template configuration
 
 .. code-block:: console
 
-    $ pip3 install -r requirements.txt
+    $ python3 -m porthouse.core.config
+
+
+By default, porthouse will create a `.porthouse` directory to user's home folder to store configurations and other data. If you wish to set up this folder elsewhere, set up `PORTHOUSE_CFG` environmental variable to point to location.
 
 
 Installing PostgreSQL

@@ -109,3 +109,8 @@ def create_template_config() -> None:
             "  identifier: ISS (ZARYA)\n"
             "  websrc: http://www.celestrak.com/NORAD/elements/stations.txt\n"
         )
+
+
+if __name__ == "__main__":
+    create_template_config()
+
