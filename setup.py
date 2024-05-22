@@ -1,14 +1,27 @@
 import sys
 import setuptools
+from setuptools.command.install import install
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
+
+class PostInstallCommand(install):
+    """Post-installation for installation mode."""
+    def run(self):
+        install.run(self)
+        #
+        # Auto-create the configuration files
+        #
+        from porthouse.core.config import create_template_config
+        create_template_config()
+
+
 setuptools.setup(
     name="porthouse",
-    version="0.0.1",
+    version="0.1.1",
     author="Aalto Satellites",
-    author_email="petri.niemela@aalto.fi",
+    author_email="petri.niemela@aalto.fi, olli.knuuttila@gmail.com",
     description="Groundstation and mission control software",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -18,11 +31,19 @@ setuptools.setup(
     python_requires='>=3.8',
     install_requires=[ # Minimal requirements
         "aiormq",
-        "amqp",  
-        "skyfield",
+        "amqp",
+        "httpx",
+        "numpy",
+        "quaternion",
+        "pandas",
+        "prompt_toolkit",
         "ptpython",
-        "PyYAML",
-        "filelock",
+        "pyserial",
+        "pyYAML",
+        "pyzmq",
+        "requests",
+        "skyfield",
+        "sortedcontainers",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -31,8 +52,10 @@ setuptools.setup(
     ],
     scripts=[
         "bin/porthouse"
-    ]
-
+    ],
+    cmdclass={
+        'install': PostInstallCommand,
+    }
 )
 
 if "develop" in sys.argv and "--user" in sys.argv:
@@ -60,9 +83,3 @@ if "develop" in sys.argv and "--user" in sys.argv:
         pass
     print(f"Making symbolic link: {src!r} -> {dst!r}")
     os.symlink(dst, src)
-
-#
-# Auto-create the configuration files
-#
-from porthouse.core.config import create_template_config
-create_template_config()

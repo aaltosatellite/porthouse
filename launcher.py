@@ -7,6 +7,7 @@
     If no filter arguments is provided all the modules defined in the file will be launched.
     More about the launcher file can be read from `BLAA`<>.
 """
+from porthouse.gs.hardware.controllerbox import ControllerBox
 
 if __package__ is None:
     __package__ = "porthouse" # Force the launcher to be loaded as a module
@@ -284,7 +285,7 @@ class Launcher:
 
             # Check that all the required arguments have been define and output understandable error if not
             argspec = inspect.getfullargspec(class_object.__init__)
-            for j, arg in enumerate(argspec.args[1:]):
+            for j, arg in enumerate(reversed(argspec.args[1:])):
                 if j >= len(argspec.defaults or []) and arg not in params:
                     raise RuntimeError(f"Module {module_name} (class {class_name}) missing argument {arg!r}")
 
