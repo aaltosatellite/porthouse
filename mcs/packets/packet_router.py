@@ -5,7 +5,7 @@
 import json
 import asyncio
 from importlib import import_module
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import zmq
 import zmq.asyncio
@@ -14,11 +14,24 @@ from porthouse.core.basemodule_async import BaseModule, rpc, RPCError, bind
 from .router_endpoints import *
 
 
+class Endpoint:
+    name: str
+    source: Optional[str]
+    satellite: Optional[str]
+    link: Optional['Endpoint']
+    formatter: Optional[Callable]
+    metadata: Dict
+    persistent: bool
+
+
+
 class PacketRouter(BaseModule):
     """
         A module to listen different packets from multiple sources and
         archive them to database. Responds also packet RPCs.
     """
+
+    endpoints: Dict[str, Endpoint]
 
     def __init__(self, endpoints: List[Dict[str, Any]], routes: List[str], **kwargs):
         """
@@ -132,6 +145,8 @@ class PacketRouter(BaseModule):
                 persistent = endpoint_params.pop("persistent", "True").lower() == "true"
                 formatter = endpoint_params.pop("formatter", None)
                 metadata = endpoint_params.pop("metadata", { })
+                source = endpoint_params.pop("source", None)
+                satellite = endpoint_params.pop("satellite", None)
 
                 # Create new instance
                 inst = self.endpoints[endpoint_name] = endpoint_class(self, **endpoint_params)
@@ -140,6 +155,8 @@ class PacketRouter(BaseModule):
                 inst.persistent = persistent
                 inst.formatter = None
                 inst.metadata = metadata
+                inst.source = source
+                inst.satellite = satellite
 
                 # Parse formatter function
                 if formatter:
@@ -216,7 +233,7 @@ class PacketRouter(BaseModule):
             self.log.info(f"Created new route: {endpoint_a} -> {endpoint_b}")
 
 
-    def route_frame(self, source: str, frame: bytes) -> None:
+    def route_frame(self, source: Endpoint, raw_frame: bytes) -> None:
         """
         Route received frame to corresponding outgoing endpoint
         """
@@ -230,9 +247,9 @@ class PacketRouter(BaseModule):
 
             # Apply the input formatter
             if source.formatter:
-                frame = source.formatter(frame)
+                frame: dict = source.formatter(raw_frame)
             else:
-                frame = json.loads(frame)
+                frame: dict = json.loads(raw_frame)
 
             # Possible inparseable frame or a control frame so skip it
             if frame is None:
@@ -243,6 +260,9 @@ class PacketRouter(BaseModule):
             metadata.update(destination.metadata)
             metadata.update(frame.get("metadata", {}))
             frame["metadata"] = metadata
+
+            frame["source"] = frame.get("source", source.source)
+            frame["satellite"] = frame.get("satellite", source.satellite)
 
             # Apply the output formatter
             if destination.formatter:
