@@ -74,7 +74,7 @@ To install Postgres database engine and to create a new user+database for follow
     $ sudo -u postgres createuser mcs -P
     $ sudo -u postgres createdb "foresail" -O mcs
 
-The createuser command requires you input a password (and PASSWORD is recommended for Foresail ground segment).
+The createuser command requires you input a password (and "PASSWORD" is recommended for Foresail ground segment).
 
 For running Foresail GS, timescale-DB and tables need to be created. Detailed setup guides for creating the database tables can be found from module specific installation guides such as from:
 

@@ -57,7 +57,6 @@ class Frame:
                  timestamp = timestamp[:-1] + "+00:00"      #zulu-format is not supported in versions < Python 3.11
             timestamp = datetime.fromisoformat(timestamp)
 
-        #print(f"Frame.from_dict(): frm[timestmp]= {frm['timestamp']}")
         return cls(
             satellite=frm.get("satellite", None),
             source=frm.get("source", None),
