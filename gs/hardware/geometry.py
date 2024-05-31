@@ -1,5 +1,5 @@
 import argparse
-import json
+import yaml
 import math
 from functools import lru_cache
 
@@ -8,6 +8,8 @@ import quaternion   # adds np.quaternion
 
 
 def main():
+    methods = ('leastsq', 'bfgs', 'nelder-mead')
+
     parser = argparse.ArgumentParser(description='Calibrate rotator based on measurements and ground truth values.')
     parser.add_argument('--input', type=str, help='input file with measures and corresponding ground truth values')
     parser.add_argument('--output', type=str, help='output file with fitted rotator parameters')
@@ -15,13 +17,14 @@ def main():
     parser.add_argument('--plot', action='store_true', help='plot initial state and the resulting state')
     parser.add_argument('--fit', action='store_true', help='fit model to the data')
     parser.add_argument('--debug-model', action='store_true', help='debug model-to-real and real-to-model functions')
-    parser.add_argument('--leastsq', action='store_true', help='use least squares instead of BFGS optimization method')
+    parser.add_argument('--method', default=methods[0], choices=methods,
+                        help=f'Optimization method, one of: {methods}, default: {methods[0]}')
     args = parser.parse_args()
 
     args.fit = args.fit or args.output
 
-    rotator = AzElRotator.load(args.init) if args.init else AzElRotator()
-    param_dict0 = rotator.to_dict()
+    rotator0 = AzElRotator.load(args.init) if args.init else AzElRotator()
+    param_dict0 = rotator0.to_dict()
     params0 = [param_dict0[key] for key in ('el_off', 'az_off', 'el_gain', 'az_gain',
                                             'tilt_az', 'tilt_angle', 'lateral_tilt')]
 
@@ -32,6 +35,7 @@ def main():
                 continue
             line, *_ = line.split('#')
             az, el, gt_az, gt_el = map(lambda x: float(x.strip()), line.split(','))
+            az, el = rotator0.to_motor(az, el)
             data.append([wrapdeg(az), el, wrapdeg(gt_az), gt_el])
     data = np.array(data)
 
@@ -41,17 +45,17 @@ def main():
         err = data[:, 2:] - np.array([rotator.to_real(az, el, wrap=True) for az, el in data[:, :2]])
         err[:, 0] = wrapdeg(err[:, 0])
         err = err.flatten()
-        return err if args.leastsq else np.mean(err ** 2)
+        return err if args.method == 'leastsq' else np.mean(err ** 2)
 
     loss = lossfn(params0)
-    if args.leastsq:
+    if args.method == 'leastsq':
         loss = np.mean(loss ** 2)
 
     print('Initial state (loss=%.6f): %s' % (loss, param_dict0))
 
     # calibrate
     if args.fit:
-        if args.leastsq:
+        if args.method == 'leastsq':
             from scipy.optimize import least_squares
             res = least_squares(lossfn, params0)
             param_dict = dict(zip(('el_off', 'az_off', 'el_gain', 'az_gain',
@@ -59,7 +63,7 @@ def main():
             loss = np.mean(res.fun ** 2)
         else:
             from scipy.optimize import minimize
-            res = minimize(lossfn, np.array(params0), method='BFGS')
+            res = minimize(lossfn, np.array(params0), method='BFGS' if args.method == 'bfgs' else 'Nelder-Mead')
             param_dict = dict(zip(('el_off', 'az_off', 'el_gain', 'az_gain',
                                    'tilt_az', 'tilt_angle', 'lateral_tilt'), res.x))
             loss = res.fun
@@ -79,7 +83,11 @@ def main():
     # plot
     if args.plot:
         import matplotlib.pyplot as plt
-        plt.plot(data[:, 0], data[:, 1], '+', label='measured')
+        if args.init:
+            az, el = np.array([rotator0.to_real(az, el) for az, el in data[:, :2]]).T
+            plt.plot(az, el, '+', label='initial')
+        else:
+            plt.plot(data[:, 0], data[:, 1], '+', label='measured')
         plt.plot(data[:, 2], data[:, 3], 'o', label='ground truth', markerfacecolor='none')
         plt.plot(*zip(*[rotator.to_real(az, el, wrap=True) for az, el in data[:, :2]]), 'x', label='fitted')
         plt.xlabel('azimuth')
@@ -103,18 +111,18 @@ class AzElRotator:
         return AzElRotator(**data)
 
     def to_dict(self):
-        return {key: getattr(self, key) for key in ('el_off', 'az_off', 'el_gain', 'az_gain',
-                                                    'tilt_az', 'tilt_angle', 'lateral_tilt')}
+        return {key: float(getattr(self, key)) for key in ('el_off', 'az_off', 'el_gain', 'az_gain',
+                                                           'tilt_az', 'tilt_angle', 'lateral_tilt')}
 
     @classmethod
     def load(cls, filename):
         with open(filename, 'r') as fh:
-            obj = cls.from_dict(json.load(fh))
+            obj = cls.from_dict(yaml.safe_load(fh))
         return obj
 
     def save(self, filename):
         with open(filename, 'w') as fh:
-            json.dump(self.to_dict(), fh)
+            yaml.dump(self.to_dict(), fh)
 
     @property
     def payload_q(self) -> np.quaternion:

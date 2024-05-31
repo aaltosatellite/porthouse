@@ -307,11 +307,12 @@ class RotatorController(abc.ABC):
                                    (f" given current azimuth {az} ({maz})." if self.horizon_map is not None else "."))
 
         if self.min_sun_angle is not None:
-            sun_angle, _, _ = self.get_sun_angle(az, el)
-            if sun_angle < self.min_sun_angle:
+            sun_angle, _, sun_el = self.get_sun_angle(az, el)
+            if sun_el > -5.0 and sun_angle < self.min_sun_angle:
                 valid = False
                 if raise_error:
-                    raise RotatorError(f"Sun angle {sun_angle} is below the allowed limit {self.min_sun_angle}.")
+                    raise RotatorError(f"Sun is above horizon ({sun_el} > -5) and sun angle {sun_angle} is "
+                                       f"below the allowed limit {self.min_sun_angle}.")
 
         return valid
 
@@ -380,7 +381,7 @@ class RotatorController(abc.ABC):
 
         if self.min_sun_angle is not None:
             sun_angle, sun_az, sun_el = self.get_sun_angle(az, el)
-            if sun_angle < self.min_sun_angle:
+            if sun_el > -5 and sun_angle < self.min_sun_angle:
                 # print(f"{oaz:.2f}, {oel:.2f} -> {az:.2f}, {el:.2f} -> sun_angle={sun_angle:.2f}")
                 az, el = self.closest_valid_position(az + (2 if az > sun_az else -2),
                                                      el + (2 if el > sun_el else -2))

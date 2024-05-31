@@ -14,7 +14,7 @@ from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, queue, bi
 from porthouse.gs.hardware.base import RotatorController, RotatorError
 from porthouse.gs.hardware.hamlib_async import HamlibAsyncController
 
-from .controllerbox import ControllerBox, ControllerBoxError
+from .controllerbox import ControllerBox
 from .hamlib import HamlibController
 from .dummyrotctl import DummyRotatorController
 
@@ -97,6 +97,9 @@ class Rotator(BaseModule):
                                   log=self.log, debug=self.debug)
         self.default_dutycycle_range = self.rotator.get_dutycycle_range()
         self.log.debug("Duty-cycle range: %s" % (self.default_dutycycle_range,))
+        self.log.debug("Minimum Sun Angle: %s" % (self.rotator.min_sun_angle,))
+        self.log.debug("Horizon map file: %s" % (self.rotator.horizon_map_file,))
+        self.log.debug("Control SW Version: %s" % (self.rotator.control_sw_version,))
 
         if self.debug:
             os.makedirs("logs", exist_ok=True)
@@ -148,7 +151,7 @@ class Rotator(BaseModule):
                 if self.motion_logging and self.target_valid and self.moving_to_target:
                     try:
                         self.rotator.pop_motion_log()
-                    except ControllerBoxError as e:
+                    except RotatorError as e:
                         self.log.warning("Failed to read properly the motion log: %s", e)
 
             if self.target_valid and self.pass_ongoing and self.debug:
