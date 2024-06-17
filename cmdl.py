@@ -1,11 +1,6 @@
-#!/usr/bin/env python3
 """
-    porthouse command line tool
+porthouse command line tool
 """
-
-if __package__ is None:
-    __package__ = "porthouse" # Force the launcher to be loaded as a module
-
 
 import asyncio
 import json
@@ -213,8 +208,3 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
         except KeyboardInterrupt:
             repl_task.cancel()
 
-
-if __name__ == '__main__' and False:
-    parser = argparse.ArgumentParser(description='Commandline')
-    setup_parser(parser)
-    main(parser, parser.parse_args())

@@ -35,10 +35,7 @@ dependencies = [
 "Homepage" = "https://github.com/aaltosatellite/porthouse"
 
 [project.scripts]
-porthouse="porthouse.cmdl:main"
-#"fs1p-egse-cmdl = foresail1p.egse.cmdl:main",
-#"fs1p-cmdl = foresail1p.commanding.cmdl:main",
-#"fs1p-compressor = foresail1p.utils.compressor:main"
+porthouse="porthouse.entry:main"
 
 [tool.setuptools]
 packages = ["porthouse", "porthouse.core", "porthouse.mcs", "porthouse.gs"]
