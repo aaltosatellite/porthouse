@@ -78,7 +78,7 @@ The createuser command requires you input a password (and "PASSWORD" is recommen
 
 For running Foresail GS, timescale-DB and tables need to be created. Detailed setup guides for creating the database tables can be found from module specific installation guides such as from:
 
-- [housekeeping](mcs/housekeeping/README.md) 
+- [housekeeping](mcs/housekeeping/README.md)
 
 - [packets](mcs/packets/README.md) modules.
 
@@ -107,7 +107,7 @@ Launch the back-end with the demo configuration.
 
 .. code-block:: console
 
-    $ porthouse launch --cfg demo_cfg.xml --declare_exchanges
+    $ porthouse launch demo_cfg.xml --declare_exchanges
 
 
 If no catastrophic errors were printed out, the back-end is now running in the demo configuration.
@@ -162,10 +162,10 @@ Run launcher script to start all the modules...
 
 .. code-block:: console
 
-    $ porthouse launch --cfg [--declare_exchanges] [--create_schema]
+    $ porthouse launch [launch config file] [--declare_exchanges] [--create_schema]
 
 
-More about `launcher.py` can be read from (here)[core/launcher.md].
+More about `launcher` can be read from (here)[core/launcher.md].
 
 
 # Installing more modules

@@ -28,6 +28,7 @@ dependencies = [
     "amqp",
     "skyfield",
     "ptpython",
+    "argcomplete",
     "PyYAML"
 ]
 

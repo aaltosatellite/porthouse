@@ -13,6 +13,7 @@ import yaml
 import time
 import argparse
 import inspect
+import re
 from multiprocessing import Process, RLock
 from importlib import import_module
 import logging, logging.handlers
@@ -33,7 +34,8 @@ class Launcher:
     """
     Module for launching multiple porthouse modules.
     """
-    log = None
+    log: logging.Logger
+
     def __init__(self,
             cfg_file: str,
             includes: Optional[List[str]]=None,
@@ -53,17 +55,29 @@ class Launcher:
         self.debug = debug
         self.prefix = None
         self.rlock = RLock()
-        #self.log = None
 
-        # Read basic configuration
+        self.globals = load_globals()
+
+        # Read launch configuration and replace
+        has_variables = re.compile(r'.*\$\{([^}^{]+)\}.*')
+        match_single_variable = re.compile(r'\$\{([^}^{]+)\}')
+
+        def variable_constructor(loader, node):
+            """ Replace a ${variable} with corresponding value """
+            def _get_value(match):
+                return self.globals.get(match.group(1), match.group())
+            return match_single_variable.sub(_get_value, node.value)
+
+        yaml.add_implicit_resolver('!var', has_variables, None, yaml.SafeLoader)
+        yaml.add_constructor('!var', variable_constructor, yaml.SafeLoader)
+
         with open(cfg_file, "r") as cfg_fd:
-            cfg = yaml.load(cfg_fd, Loader=yaml.Loader)
+            cfg = yaml.safe_load(cfg_fd)
         self.validate_launch_specification(cfg)
 
         self.exchanges = cfg.get("exchanges", {})
         self.modules = cfg["modules"]
 
-        self.globals = load_globals()
 
         # Connect to message broker
         amqp_url = urlparse(self.globals["amqp_url"])
@@ -351,11 +365,11 @@ class Launcher:
                 raise ModuleValidationError(f"Module specification is not a list but a {type(modules)}")
 
 
-
 def setup_parser(parser: argparse.ArgumentParser) -> None:
+    from argcomplete import FilesCompleter
 
-    parser.add_argument('--cfg', required=True,
-        help='Configuration file')
+    parser.add_argument('cfg',
+        help='Configuration file').completer = FilesCompleter("*.yaml")
     parser.add_argument('--declare_exchanges', action='store_true',
         help='Declare exchanges')
     parser.add_argument('-d', '--debug', action='store_true',

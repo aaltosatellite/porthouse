@@ -12,19 +12,24 @@ The format of the launcher configuration is described in following sections.
 .. code-block:: console
 
     $ porthouse launch --help
-    usage: launcher.py [-h] --cfg CFG [--declare_exchanges] [-d] [--include [INCLUDE [INCLUDE ...]]] [--exclude [EXCLUDE [EXCLUDE ...]]]
+                      _   _
+    _ __   ___  _ __| |_| |__   ___  _   _ ___  ___
+    | '_ \ / _ \| '__| __| '_ \ / _ \| | | / __|/ _ \
+    | |_) | (_) | |  | |_| | | | (_) | |_| \__ \  __/
+    | .__/ \___/|_|   \__|_| |_|\___/ \__,_|___/\___|
+    |_|
 
-    Mission Control Software
+    usage: porthouse [-h] [--amqp AMQP_URL] [--db DB_URL] {cmdl,launch,scheduler,packets,housekeeping}
 
-    optional arguments:
+    Porthouse command line utility
+
+    positional arguments:
+      {cmdl,launch,scheduler,packets,housekeeping}
+
+    options:
       -h, --help            show this help message and exit
-      --cfg CFG             Configuration file
-      --declare_exchanges   Declare exchanges
-      -d, --debug           Enable debug features
-      --include [INCLUDE [INCLUDE ...]]
-                            Modules to be included from the configuration
-      --exclude [EXCLUDE [EXCLUDE ...]]
-                            Modules to be excluded from the configuration
+      --amqp AMQP_URL       AMQP connection URL.
+      --db DB_URL           PostgreSQL database URL.
 
 
 Launcher configuration file
