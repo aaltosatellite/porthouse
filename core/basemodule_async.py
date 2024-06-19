@@ -65,14 +65,19 @@ class BaseModule:
         The BaseModule
     """
 
+    debug: bool
+    prefix: Optional[str]
+    module_name: str
+
+    log: logging.Logger
+
     def __init__(self,
-                 amqp_url: str,
-                 prefix: str = None,
-                 log_path: str = "/tmp/",
-                 module_name: str = None,
-                 autocreate: bool = True,
-                 debug: bool = False,
-                 **kwarg):
+            amqp_url: str,
+            prefix: Optional[str] = None,
+            log_path: str = "/tmp/",
+            module_name: Optional[str] = None,
+            debug: bool = False,
+            **kwarg):
         """
         Initialize the Module.
         Create logs, connect to AMQP, autocreate queues etc.
@@ -83,21 +88,37 @@ class BaseModule:
             log_path: Directory for log files
             module_name: Name of the module used.
                 If not defined the used name is same as the name of the class.
-            autocreate: If true
             debug: If true additional debug features, such as log debug prints, are turned on.
             kwargs: Extra configurations
         """
 
         self.debug = debug
         self.prefix = prefix
-        self.autocreate = autocreate
-        self.log = None
-        self.log_path = log_path
-        self.module_name = module_name
+        self.module_name = module_name or str(self.__class__.__name__)
 
         # State variables for RPC calls
         self.rpc_futures = {}
         self.rpc_response_queue = None
+
+        # Setup basic logging
+        self.log = logging.getLogger(self.module_name)
+        self.log.setLevel(logging.INFO)
+        if self.debug:
+            self.log.setLevel(logging.DEBUG)
+
+        # Create file log handler
+        if log_path is not None:
+            log_file = path_join(log_path, self.module_name + ".log")
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=int(2e6), backupCount=5)
+            file_handler.setFormatter(formatter)
+            self.log.addHandler(file_handler)
+
+        # Create stdout log handler
+        if True or self.debug:
+            stdout_handler = logging.StreamHandler()
+            stdout_handler.setFormatter(formatter)
+            self.log.addHandler(stdout_handler)
 
         # Run async connection before returning
         if amqp_url is None:
@@ -127,13 +148,12 @@ class BaseModule:
         self.connection = await aiormq.connect(amqp_url)
         self.channel = await self.connection.channel()
 
-        # Init logging
-        if self.module_name is None:
-            self.module_name = str(self.__class__.__name__)
-        self.create_log_handlers(self.log_path, self.module_name)
+        # Add AMQP log handler
+        amqp_handler = AMQPLogHandler(self.module_name, self.channel)
+        amqp_handler.setLevel(logging.INFO)
+        self.log.addHandler(amqp_handler)
 
-        if self.autocreate:
-            await self.__autocreate_queues()
+        await self.__autocreate_queues()
 
         # Init done
         self.log.info("Module  %r started!", self.module_name)
@@ -201,40 +221,6 @@ class BaseModule:
             msg = json.dumps(msg, default=json_formatter).encode("ascii")
 
         await self.channel.basic_publish(msg, **kwargs)
-
-
-    def create_log_handlers(self, log_path: str, module_name: str):
-        """
-        Create AMQP and file (+ stdout) log handlers for logging
-
-        Args:
-            log_path:    Directory for log file
-            module_name: Name used to identify module
-        """
-
-        self.log = logging.getLogger(module_name)
-        self.log.setLevel(logging.INFO)
-
-        # AMQP log handler
-        amqp_handler = AMQPLogHandler(module_name, self.channel)
-        amqp_handler.setLevel(logging.INFO)
-        self.log.addHandler(amqp_handler)
-
-        # File log handler
-        log_file = path_join(log_path, module_name + ".log")
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=int(2e6), backupCount=5)
-        file_handler.setFormatter(formatter)
-        self.log.addHandler(file_handler)
-
-        if True or self.debug:
-            # Create stdout log handler
-            stdout_handler = logging.StreamHandler()
-            stdout_handler.setFormatter(formatter)
-            self.log.addHandler(stdout_handler)
-
-        if self.debug:
-            self.log.setLevel(logging.DEBUG)
 
 
     async def send_rpc_response(self, request: aiormq.abc.DeliveredMessage, data: dict):
