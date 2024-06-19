@@ -1,16 +1,11 @@
-#!/usr/bin/env python3
 """
-    The porthouse launcher script can be used to launch a larger set of porthouse and monitor their state.
-    The launcher script takes an YARML configuration file as an input   is described in YAML-file. Modules and params...
+The porthouse launcher script can be used to launch a larger set of porthouse and monitor their state.
+The launcher script takes an YARML configuration file as an input   is described in YAML-file. Modules and params...
 
     The modules can be selectively launched from the launcher file using ``--include`` and ``--exclude`` command line arguments.
     If no filter arguments is provided all the modules defined in the file will be launched.
     More about the launcher file can be read from `BLAA`<>.
 """
-
-if __package__ is None:
-    __package__ = "porthouse" # Force the launcher to be loaded as a module
-
 
 import os
 import amqp
@@ -379,9 +374,3 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
         declare_exchanges=args.declare_exchanges,
         debug=args.debug
     )
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='porthouse launcher script')
-    setup_parser(parser)
-    main(parser, parser.parse_args())

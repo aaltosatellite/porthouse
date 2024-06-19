@@ -1,9 +1,7 @@
-#!/usr/bin/env python3
 """
-    Command line tool for accessing the packet database
+Command line tool for accessing the packet database
 """
 
-import os
 import amqp
 import json
 import argparse
@@ -67,10 +65,10 @@ def create_constrain_string(args: argparse.Namespace) -> str:
 
 
 def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """
+    Connect SQL database and AMQP broker
+    """
 
-    """
-        Connect SQL database and AMQP broker
-    """
     db = PacketsDatabase(args.db_url or load_globals().get("db_url", None), args.create_tables)
     connection, channel = amqp_connect(args.amqp_url)
 
@@ -135,7 +133,7 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
         """
 
         smt = "SELECT source, satellite, type, COUNT(*), SUM(length(data)) FROM packets "
-        smt += create_constrain_string()
+        smt += create_constrain_string(args)
         smt += "GROUP BY source, satellite, type"
         r = db.cursor.execute(smt)
 
@@ -160,7 +158,7 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
         """
 
         smt = "SELECT id, satellite, type, data FROM packets "
-        smt += create_constrain_string()
+        smt += create_constrain_string(args)
         smt += "GROUP BY source, satellite, type"
         r = db.cursor.execute(smt)
 
@@ -225,20 +223,3 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     else:
         parser.print_help()
 
-
-
-if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(description='Packets database')
-    subparser = parser.add_subparsers(dest='utility')
-
-    # General configs
-    #parser.add_argument('--amqp', dest="amqp_url",
-    #    help="AMQP connection URL.")
-    parser.add_argument('--db', dest="db_url",
-        help="PostgreSQL database URL.")
-
-    packets_parser = subparser.add_parser('packets')
-    setup_parser(parser) # packets_parser)
-
-    main(parser, parser.parse_args())

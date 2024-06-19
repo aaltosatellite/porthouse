@@ -1,6 +1,5 @@
-#!/usr/bin/env python3
 """
-    Command line tool for controlling the scheduler
+Command line tool for controlling the scheduler
 """
 
 import sys
@@ -75,8 +74,3 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     else:
         parser.print_help()
 
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Scheduler tool')
-    setup_parser(parser)
-    main(parser, parser.parse_args())
