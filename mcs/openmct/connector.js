@@ -48,18 +48,17 @@ class Connector {
             try { message = JSON.parse(event.data) }
             catch (error) { return }
 
-            //console.log(message);
+            //console.debug(message);
 
             /*
              * New real-time data data
              */
             if ("subscription" in message) {
-                console.log("New subscribed data:", message);
-                let key = message.subscription.exchange+"."+message.subscription.subsystem;
-                console.log(this.subscriptions, key);
-
-                var callback = this.subscriptions[message.subscription.service][message.subscription.subsystem];
-                callback(message);
+                let subscription = message.subscription;
+                //console.log("New subscribed data:", subscription.service, subscription);
+                var callback = this.subscriptions[subscription.service][subscription.subsystem];
+                if (callback !== undefined)
+                    callback(subscription);
                 return;
             }
 
@@ -67,13 +66,9 @@ class Connector {
              * RPC error response
              */
             if ("error" in message) {
-                alert(message.error.message);
-                console.log("WebSocket error: " + message.error.message);
                 // example: {"error": {"code": -500, "message": "<text>"}, "id": 4}
-
                 if ("id" in message && message.id in this.rpc_calls)
-                    this.rpc_calls[message.id].reject();
-
+                    this.rpc_calls[message.id].reject("WebSocket error: " + message.error.message);
                 return;
             }
 
@@ -95,10 +90,11 @@ class Connector {
         * Try reconnecting
         */
         this.socket.addEventListener('open', function(event) {
+            console.log("Websocket connected")
             // Resubscribe everything on the list
             Object.keys(this.subscriptions).forEach(service => {
                 var fields = Object.keys(this.subscriptions[service]);
-                console.log("Resubscribing:", service, field);
+                console.log("Resubscribing:", service, fields);
                 this.remoteCall(service, "subscribe", fields);
             });
         }.bind(this));
@@ -136,14 +132,14 @@ class Connector {
     }
 
     /*
-    * if just reconnecting, dont clear subscriptions
-    * just ask new subscription from the server.
-    * Subscribe to subsystem+telemetry.
-    * promise can be used to make more robust.
-    */
+     * if just reconnecting, dont clear subscriptions
+     * just ask new subscription from the server.
+     * Subscribe to subsystem+telemetry.
+     * promise can be used to make more robust.
+     */
     subscribe(service, fields, callback) {
-        //console.log("Subscribing", fields);
-        this.remoteCall(service, "subscribe", fields);
+        console.log("Subscribing", fields);
+        this.remoteCall(service, "subscribe", { "fields": fields });
 
         if (!(service in this.subscriptions))
             this.subscriptions[service] = { };
@@ -163,7 +159,7 @@ class Connector {
      */
     unsubscribe(service, fields) {
         //console.log("Unsubscribing", fields);
-        this.remoteCall(service, "unsubscribe", fields);
+        this.remoteCall(service, "unsubscribe", { "fields": fields });
 
         if (Array.isArray(fields)) {
             fields.forEach(field => {

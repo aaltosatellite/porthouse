@@ -41,9 +41,9 @@ class SystemService:
         if "domain" in options and options["domain"] != "utc":
             raise WebRPCError("Invalid domain!")
         if "start" in options:
-            request_data["start_date"] = options["start"] / 1000
+            request_data["start_date"] = options["start"]
         if "end" in options:
-            request_data["end_date"] = options["end"] / 1000
+            request_data["end_date"] = options["end"]
 
         fields = await self.server.send_rpc_request("log", "rpc.get_history")
 
@@ -52,7 +52,7 @@ class SystemService:
             "exchange": "logs",
             "entries": [
                 {
-                    "created": float(param["created"]) * 1000,
+                    "created": param["created"],
                     "module": param["module"],
                     "level": param["level"],
                     "message": param["message"],
@@ -72,7 +72,7 @@ class SystemService:
                 "log": {
                     "module": message["module"],
                     "level": message["level"],
-                    "created": message["created"] * 1000,
+                    "created": message["created"],
                     "message": message["message"]
                 }
             }

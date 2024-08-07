@@ -2,41 +2,20 @@
 # Local test installation
 
 ```
-$ sudo apt install npm
-$ npm install
-$ npm run build
+$ sudo ./docker-build.sh
 ```
-
 This bakes out `node_modules` folder.
-```
-$ npm start
-```
 
-
-# Installing CouchDB
-
-Installing CouchDB on Ubuntu
 ```
-sudo apt update && sudo apt install -y curl apt-transport-https gnupg
-curl https://couchdb.apache.org/repo/keys.asc | gpg --dearmor | sudo tee /usr/share/keyrings/couchdb-archive-keyring.gpg >/dev/null 2>&1
-source /etc/os-release
-echo "deb [signed-by=/usr/share/keyrings/couchdb-archive-keyring.gpg] https://apache.jfrog.io/artifactory/couchdb-deb/ ${VERSION_CODENAME} main" \
-    | sudo tee /etc/apt/sources.list.d/couchdb.list >/dev/null
-
-sudo apt update
-sudo apt install couchdb
-```
-
-Create database
-```
-curl -X PUT http://admin:password@127.0.0.1:5984/openmct
+$ sudo docker compose up --detach
+$ bash node_modules/openmct/src/plugins/persistence/couch/setup-couchdb.sh
 ```
 
 
 
 # Client plugins:
 
-- `housekeeping.js`: provides realtime and historical housekeeping data. System is subscribable and it is updated by the backend.  
+- `housekeeping.js`: provides realtime and historical housekeeping data. System is subscribable and it is updated by the backend.
 
 - `groundstation.js`: provides realtime info from the mcc system. Historical data is not currently supported due to the implementation of mcc system (stores data to rotating files). system is subscribable and it is by the backend.
 

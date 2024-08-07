@@ -6,9 +6,10 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Dict, List, Optional, Union
+from datetime import datetime, timezone
 
 from porthouse.mcs.housekeeping.database import HousekeepingDatabase, DatabaseError
-from ..utils import WebRPCError, iso_timestamp_to_millis, datetime_to_millis, millis_to_datetime
+from ..utils import WebRPCError
 
 class HousekeepingService:
 
@@ -34,10 +35,10 @@ class HousekeepingService:
             WebRPCError
         """
         if method == "subscribe":
-            self.subscribe(client, **params)
+            self.subscribe(client, **params) # type: ignore
 
         elif method == "unsubscribe":
-            self.unsubscribe(client, **params)
+            self.unsubscribe(client, **params) # type: ignore
 
         elif method == "get_schema":
             # Maybe not the most beautiful way to access the hk_schema :/
@@ -51,7 +52,7 @@ class HousekeepingService:
             raise WebRPCError(f"Unknown method {method!r}")
 
 
-    def subscribe(self, client: OpenMCTProtocol, fields: Union[str, List]):
+    def subscribe(self, client: OpenMCTProtocol, fields: Union[str, List]) -> None:
         """
         Register a new housekeeping subscription for the client.
         Args:
@@ -63,19 +64,14 @@ class HousekeepingService:
             fields = [ fields ]
 
         if "housekeeping" not in client.subscriptions:
-            client.subscriptions["housekeeping"] = {}
+            client.subscriptions["housekeeping"] = set()
         client_subs = client.subscriptions["housekeeping"]
 
-        for sat, subsystem, field in [ f.split(".") for f in fields]:
-
-            if subsystem not in client_subs:
-                client_subs[subsystem] = set()
-
-            client_subs[subsystem].add(field)
+        for subsystem in fields:
+            client_subs.add(subsystem)
 
 
-
-    def unsubscribe(self, client: OpenMCTProtocol, fields: Union[str, List[str]]):
+    def unsubscribe(self, client: OpenMCTProtocol, fields: Union[str, List[str]]) -> None:
         """
         Unregister housekeeping subscription.
 
@@ -88,20 +84,14 @@ class HousekeepingService:
             fields = [ fields ]
 
         if "housekeeping" not in client.subscriptions:
-            client.subscriptions["housekeeping"] = {}
+            return
+
+        # Remove subscriptionss
         client_subs = client.subscriptions["housekeeping"]
+        for subsystem in fields:
+            if subsystem in client_subs:
+                client_subs.remove(subsystem)
 
-        for sat, subsystem, field in [ f.split(".") for f in fields]:
-            if subsystem not in client_subs:
-                continue
-
-            # Delete field from the list
-            if field in client_subs[subsystem]:
-                client_subs[subsystem].remove(field)
-
-            # Delete the subsystem if the subscription is empty
-            if len(client_subs[subsystem]) == 0:
-                del client_subs[subsystem]
 
 
     async def handle_subscription(self, message: Dict):
@@ -112,9 +102,7 @@ class HousekeepingService:
             message:
         """
 
-        subsystem = message["subsystem"]
-        timestamp = iso_timestamp_to_millis(message["timestamp"])
-        awaits = []
+        subsystem = self.satellite + "." + message["subsystem"]
 
         # Check which clients wants the data
         for client in self.server.clients:
@@ -126,26 +114,15 @@ class HousekeepingService:
             # Check is the subsystem in the subscription list
             if subsystem not in client_subs:
                 return None
-
-            # Format the housekeeping data to OpenMCT friendly format
-            telemetries = []
-            for param, value in message["housekeeping"].items():
-                if param in client_subs[subsystem]:
-                    telemetries.append({
-                        "id":  f"{self.satellite}.{subsystem}.{param}",
-                        "timestamp": timestamp,
-                        "value": value
-                     })
-
-            if len(telemetries) > 0:
-                awaits.append( client.send_json(
-                    subscription={
-                        "service" : "housekeeping",
-                        "data": telemetries
-                    } ))
-
-        if len(awaits) > 0:
-            await asyncio.wait(awaits)
+            print(message["timestamp"])
+            await client.send_json(
+                subscription={
+                    "service": "housekeeping",
+                    "subsystem": subsystem,
+                    "timestamp": message["timestamp"],
+                    "data": message["housekeeping"]
+                }
+            )
 
 
     async def request_housekeeping(self, client: OpenMCTProtocol, params: Dict) -> Dict:
@@ -158,10 +135,11 @@ class HousekeepingService:
 
         """
         params = {
-            'key': 'fs1.obc.side',
+            'subsystem': 'fs1.obc'
+            'fields': ['side'],
             'options': {
                 'size': 1219,
-                'strategy': 'minMax',
+                'strategy': 'minmax',
                 'domain': 'utc',
                 'start': 1579878327026,
                 'end': 1579879227026
@@ -169,41 +147,33 @@ class HousekeepingService:
         }
         """
 
-        # Parse telemetry field key list
-        if "," in params["key"]:
-            params["key"] = params["key"].split(",")
-        if isinstance(params["key"], str):
-            params["key"] = [ params["key"] ]
-
-        # OpenMCT uses the "fs1.subsystem.param" format.
-        # Parse satellite name and subsystem from the first key
-        satellite, subsystem = params["key"][0].split(".")[:2]
+        # Parse satellite name and subsystem
+        satellite, subsystem = params["subsystem"].split(".")
         if satellite != self.satellite:
             raise WebRPCError("Wrong satellite")
 
-        fields = list([ key.split(".")[-1] for key in params["key"] ])
-
+        fields = params["fields"]
         options = params["options"]
 
-        """
-            Parse options for the SQL query
-        """
+        #
+        # Parse options for the SQL query
+        #
         request_data = { }
         if "domain" in options and options["domain"] != "utc":
             raise WebRPCError("Invalid domain!")
         if "start" in options:
-            request_data["start_date"] = millis_to_datetime(options["start"])
+            request_data["start_date"] = datetime.fromisoformat(options["start"])
         if "end" in options:
-            request_data["end_date"] = millis_to_datetime(options["end"])
+            request_data["end_date"] = datetime.fromisoformat(options["end"])
 
-        #print("options:", params["options"])
-        #print("request_data:", request_data)
+        print("options:", params["options"])
+        print("request_data:", request_data)
 
         strategy = options.get("strategy", None)
         if strategy == "latest":
-            """
-                Latest strategy returns only the "latest" housekeeping values inside the time window
-            """
+            #
+            # Latest strategy returns only the "latest" housekeeping values inside the time window
+            #
 
             # Execute the database query
             try:
@@ -223,30 +193,30 @@ class HousekeepingService:
                     "housekeeping": [ ]
                 }
 
+            housekeeping = dict((param, data[param]) for param in fields )
+            housekeeping["timestamp"] = data["timestamp"].isoformat()
+
             return {
-                "subsystem": subsystem,
-                "housekeeping": [
-                    {
-                        "id": f"{self.satellite}.{subsystem}.{param}", # TODO: Hack!
-                        "timestamp": datetime_to_millis(data["timestamp"]),
-                        "value": data[param],
-                    } for param in fields
-                ]
+                "subsystem": params["subsystem"],
+                "housekeeping": [ housekeeping ],
             }
 
         elif strategy == "minmax":
-            """
-                Min/max query which returns all housekeeping values and their minimum and maximum values
-                inside a time window.
-                Given size-parameter specifies the number of bins inside the time window.
-            """
+            #
+            # Min/max query which returns all housekeeping values and their minimum and maximum values
+            # inside a time window.
+            # Given size-parameter specifies the number of bins inside the time window.
+            #
 
             if "size" in options:
                 request_data["size"] = options["size"]
 
+            #if fields:
+            #    raise WebRPCError("Cannot bucketize enumes")
+
             # Execute the database query
             try:
-                data = self.db.query_binned(subsystem, fields, request_data["start_date"],request_data["end_date"],request_data["size"],)
+                data = self.db.query_binned(subsystem, fields, request_data["start_date"],request_data["end_date"],request_data["size"], generator=True)
             except DatabaseError as e:
                 raise WebRPCError("Database error '%s'" % e)
             except TypeError as e:
@@ -256,35 +226,34 @@ class HousekeepingService:
                     raise WebRPCError("Unknown argument '%s'" % str(e).split("'")[1])
                 raise
 
-            # Format the query result for the OpenMCT friendly format
+            # Format the query result to a dict
             housekeeping = []
             for row in data:
-                for param in fields:
-                    # MinMax wants [value, minValue, maxValue] and openmct does some magic with those
-                    housekeeping.append({
-                        "id": f"{self.satellite}.{subsystem}.{param}",
-                        "timestamp": datetime_to_millis(row["timestamp"]),
-                        "value": row[f"{param}_avg"],
-                        "minValue": row[f"{param}_min"],
-                        "maxValue": row[f"{param}_max"]
-                    })
+                print(row)
+                entry = dict(
+                    (field, {
+                        "value": float(row[field + "_avg"]), # psycopg2 might return decimal.Decimal
+                        "minValue": row[field + "_min"],
+                        "maxValue": row[field + "_max"]
+                    }) for field in fields
+                )
+                entry["timestamp"] = row["timestamp"].isoformat()
+                print(entry["timestamp"])
+                housekeeping.append(entry)
 
             return {
-                "subsystem": subsystem,
+                "subsystem": params["subsystem"],
                 "housekeeping": housekeeping
             }
 
         elif strategy is None:
-            """
-               No special strategy given so return all values which matches to constraints
-            """
-
-            if "size" in options:
-                request_data["size"] = options["size"]
+            #
+            # No special strategy given so return all values which matches to constraints
+            #
 
             # Execute the database query
             try:
-                data = self.db.query(subsystem, fields, **request_data)
+                data = self.db.query(subsystem, fields, generator=True, **request_data)
             except DatabaseError as e:
                 raise WebRPCError("Database error '%s'" % e)
             except TypeError as e:
@@ -296,16 +265,14 @@ class HousekeepingService:
 
             # Format the query result for the OpenMCT friendly format
             housekeeping = []
+
             for row in data:
-                for param in fields:
-                    housekeeping.append({
-                        "id": f"fs1.{subsystem}.{param}",
-                        "timestamp": datetime_to_millis(row["timestamp"]),
-                        "value": row[f"{param}"] if (param in row) else row[f"{param}_avg"]
-                    })
+                entry = dict((field, row[field]) for field in fields)
+                entry["timestamp"] = row["timestamp"].isoformat()
+                housekeeping.append(entry)
 
             return {
-                "subsystem": subsystem,
+                "subsystem": params["subsystem"],
                 "housekeeping": housekeeping
             }
 

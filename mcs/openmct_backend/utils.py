@@ -1,7 +1,8 @@
 """
     Utility functions for OpenMCT backend
 """
-from datetime import datetime
+import json, decimal
+from datetime import datetime, timezone
 from pytz import UTC
 
 class WebRPCError(Exception):
@@ -26,4 +27,12 @@ def millis_to_datetime(millis: int) -> datetime:
     """
     Convert millisecond timestamp to datetime object
     """
-    return datetime.utcfromtimestamp(millis / 1000.)
+    return datetime.fromtimestamp(millis / 1000., tz=timezone.utc)
+
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, decimal.Decimal):
+            return (str(o) for o in [o])
+        return super(DecimalEncoder, self).default(o)
+

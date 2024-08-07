@@ -3,32 +3,42 @@
  */
 
 
- /*
- *   Default arguments and styling.
- */
- function HousekeepingDefaultArgs() {
-     return {
-         rootKey:   "satellite",
-         namespace: "porthouse",
+function PorthouseHousekeepingPlugin(connector, args)
+{
 
-         styling : {
-             rootFolderName: "porthouse Raw Housekeeping",
-             dataPointText: "porthouse Raw Housekeeping",
-             frameName:  'porthouse Housekeeping Frame',
-             frameCssClass: 'icon-info',
-             frameDesc: 'porthouse housekeeping frame',
-             dataPointName: 'porthouse Housekeeping Data Point',
-             dataPointDesc: 'porthouse housekeeping data point',
-             dataPointCssClass: 'icon-telemetry',
-             limits : LIMITS
-         }
-     }
- }
+    // Merge args with defaults
+    args = Object.assign( {},
+        {
+            rootKey: "satellite",
+            styling: {
+                rootFolderName: "porthouse Raw Housekeeping",
+                dataPointText: "porthouse Raw Housekeeping",
+                frameName: 'porthouse Housekeeping Frame',
+                frameCssClass: 'icon-info', // node_modules/openmct/src/styles/_glyphs.scss
+                frameDesc: 'porthouse housekeeping frame',
+                dataPointName: 'porthouse Housekeeping Data Point',
+                dataPointDesc: 'porthouse housekeeping data point',
+                dataPointCssClass: 'icon-telemetry',
+                limits: LIMITS
+            }
+        },
+        args || {}
+    );
+    console.info("args", args);
 
-function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) {
+    if (connector == undefined)
+        throw "No Porthouse connector defined!";
+
     const rootKey = args.rootKey;             // rootkey of the satellite (fs1)
-    const namespace = args.namespace;         // namespace for openmct
+    const namespace = "porthouse.housekeeping";         // namespace for openmct
     const styling = args.styling;             // styling choices (see below)
+
+    if (rootKey == undefined)
+        throw "No root key defined!";
+    if ("porthouse.housekeeping" == undefined)
+        throw "No root key defined!";
+    if (styling == undefined)
+        throw "No root key defined!";
 
     // Cached schema from the server
     let schema = null;
@@ -62,88 +72,75 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
 
 
     /*
-    * OpenMCT installation part starts here
-    */
+     * OpenMCT installation part starts here
+     */
     return function install(openmct) {
 
-        //Check whether there is subscription for subsystem+telemetry
-        function isSubscribed(subskey, telemetry) {
-            if(subskey in subscriptions) {
-                return (telemetry in subscriptions[subskey]);
-            }
-            return false;
-        }
-
-         /*
-         * Foresail telemetry provider defines the interface for telemetry transfer
+        /*
+         * Porthouse telemetry provider defines the interface for telemetry transfer
          */
         openmct.telemetry.addProvider({
 
             /*
-             * Support subscribing only for Foresail
+             * Support subscribing only for Porthouse
              */
             supportsSubscribe: function (domainObject, callback, options) {
-                return domainObject.type === telemetryType;
+                return domainObject.type === "porthouse.housekeeping";
             },
 
             /*
              * Callback to subscribe a Foreasail data point
              */
             subscribe: function (domainObject, callback) {
-                //console.log("subscribe " + domainObject.identifier.key);
+                console.debug("HK: subscribe housekeeping", domainObject.identifier.key);
 
-                /*
-                * if just reconnecting, dont clear subscriptions
-                * just ask new subscription from the server.
-                * Subscribe to subsystem+telemetry
-                */
-                function subscribe(subsKey, telemetry){
-                    //Check if there is subscription for subsystem
-                    if(!(subsKey in subscriptions)){
-                        subscriptions[subsKey] = {};
-                    }
-
-                    //check if there is subscription for telemetry in subsystem
-                    if(!(telemetry in subscriptions[subsKey])){
-                        subscriptions[subsKey][telemetry] = {};
-                    }
-                }
-
-                function subscriptionReturnCallback(message){
-                    let key = message.subscription.subsystem;
-                    //console.log("subs",subscriptions[key]);
-                    for (let val of message.subscription.data){
-                        //console.log(subscriptions, key, val.id);
-                        if (val.id in subscriptions[key]){
-                            subscriptions[key][val.id](val);
-                        }
-                    }
-                }
-
-                let key = domainObject.identifier.key;
-                let keys = key.split(".");
-                let satellite = keys[0];
-                let subsystem = keys[1];
-                let field = keys[2];
+                let key = domainObject.identifier.key.split(".");
+                let satellite = key[0];
+                let subsystem = key[1];
+                let field = key[2];
                 let subsKey = satellite+"."+subsystem;
+                //let subsKey = key.splice(-1).join(".");
 
-                if (!isSubscribed(subsKey, key)) {
-                    // Frame has not been subscribed
-                    subscribe(subsKey, key);
-                    connector.subscribe("housekeeping", { "subsystem": subsystem, "fields": field }, subscriptionReturnCallback);
+
+                function subscriptionReceived(subscription)
+                {
+                    // New subscribed housekeeping data was received
+                    console.debug("HK: Subscription received", subscription.subsystem);
+
+                    // Call per-field callback functions with new data
+                    let subsystem = subscription.subsystem; // fs1.eps
+                    let timestamp = subscription.timestamp; // unixtimestamp in milliseconds
+                    let data = subscription.data; // dict of housekeeping fields
+
+                    console.debug(subscriptions[subsystem])
+                    for (const [field, callback] of Object.entries(subscriptions[subsystem])) {
+                        console.debug(field, callback);
+                        let c = {
+                            id: subsystem + "." + field,
+                            timestamp: timestamp,
+                            value: data[field]
+                        };
+                        callback(c);
+                    }
                 }
+
+                if (!(subsKey in subscriptions)) {
+                    // New subsystem subscription
+                    subscriptions[subsKey] = {};
+                    connector.subscribe("housekeeping", subsKey, subscriptionReceived);
+                }
+
                 // Add callback to list
-                subscriptions[subsKey][key] = callback;
+                subscriptions[subsKey][field] = callback;
 
                 // Return the unsubscribing callback
                 return function unsubscribe() {
-                    //console.log("unsubscribe", subsKey, key);
-                    delete subscriptions[subsKey][key];
+                    console.debug("unsubscribe", subsKey, field);
+                    delete subscriptions[subsKey][field];
                     if (Object.keys(subscriptions[subsKey]).length === 0) {
                         delete subscriptions[subsKey];
+                        connector.unsubscribe("housekeeping", subsKey);
                     }
-                    //console.log(JSON.stringify(params));
-                    connector.unsubscribe("housekeeping", { "subsystem": subsystem, "fields": field });
                 }.bind(this);
 
             },
@@ -153,11 +150,11 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
              * Support history requests for housekeeping
              */
             supportsRequest: function (domainObject, options) {
-                return domainObject.type === telemetryType;
+                return domainObject.type === "porthouse.housekeeping";
             },
 
             /*
-             * History request for a Foresail data point
+             * History request for a Porthouse data point
              * Promise data (create buffer)
              * Wait (timeout) during which new requests can be asked (buffer filled)
              * Handle all buffered requests and ask data from backend
@@ -165,77 +162,116 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
              */
             request: function(domainObject, options) {
 
-                console.log("Request", domainObject.identifier.key, "(", options.strategy, ")");
+                console.debug("HK: RequestHistory", domainObject.identifier.key, "(", options.strategy, ")");
 
-                let key = domainObject.identifier.key; // example : fs1.eps.uptime
+                let key = domainObject.identifier.key; // example: fs1.eps.uptime
                 let keys = key.split(".");
                 let satellite = keys[0];
                 let subsystem = keys[1];
-                let telemetry = keys[2];
+                let field = keys[2];
 
-
-                function promiseToBeFulfilled(req_ident, key, options) {
-                    return new Promise((resolve, reject) => {
-                        if(buffered_promises[req_ident] == null)
-                            buffered_promises[req_ident] = [];
-                        buffered_promises[req_ident].push({
-                                            id: key,
-                                            options: options,
-                                            promise: resolve,
-                                            reject: reject });
-                    });
-                };
-
-                function params(promises, options) {
-                    return {
-                       "key": promises.map(o => o.id),
-                       "options": options
-                    };
-                 };
-
-                 function handleMessage(msg, promises) {
-                     let hk = msg.result.housekeeping; // Housekeeping data from the backend
-                     for (let promise of promises) {
-                         // Fullfill all buffered promises with the received data
-                         //console.log(promise.id, hk.filter( data => (n data.id == promise.id) ));
-                         promise.promise(hk.filter( data => (data.id == promise.id) ));
-                     }
-                };
+                var subsKey = satellite + "." + subsystem;
 
                 // Request identifier for grouping
-                var req_ident = satellite + "." + subsystem + "_" + options.strategy;
+                var req_ident = subsKey + "_" + options.strategy; // "${satellite}.${subsystem}_${options.strategy}";
 
                 // Has very similar request call made recently
-                if (req_ident in buffered_promises) {
-                    // If you return a promise
-                    return promiseToBeFulfilled(req_ident, key, options);
-                }
-                else {
-                    // If no
+                if (!(req_ident in buffered_promises))
+                {
+                    // New request
                     buffered_promises[req_ident] = [ ];
 
-                    // Initiate the actual RPC call when 100ms has passed from the first call
+                    // Initiate the actual RPC call when 50 ms has passed from the first call
                     setTimeout(function() {
                         // Returns currently pending RPCcall and list of promises
                         let promises = buffered_promises[req_ident];
                         delete buffered_promises[req_ident];
 
-                        console.log("Requesting", promises.map(promise => promise.id));
+                        console.debug("HK: Requesting", subsKey, promises.map(promise => promise.field), options);
 
-                        connector.remoteCall("housekeeping", "request", params(promises, options)).then(response => {
-                            handleMessage(response, promises);
+                        // Send RPC to backend
+                        connector.remoteCall(
+                            "housekeeping",
+                            "request",
+                            {
+                                "subsystem": subsKey,
+                                "fields": promises.map(promise => promise.field),
+                                "options": {
+                                    start: new Date(options.start).toISOString(),
+                                    end: new Date(options.end).toISOString(),
+                                    strategy: options.strategy,
+                                    domain: options.domain,
+                                    size: options.size,
+                                }
+                            }
+                        ).then(response => {
+                            // Received grouped result from backend
+                            console.debug("HK: Received history", subsKey, response.result);
+
+                            // Fullfill all buffered promises with the received data
+                            let hk = response.result.housekeeping;
+                            for (let promise of promises) {
+
+                                let field_key = subsKey + "." + promise.field;
+                                if (options.strategy == "minmax") {
+                                    // Unroll housekeeping min/max values for OpenMCT
+                                    unrolled_housekeeping = hk.map(
+                                        data => {
+                                            return { // Object.assign({}, {
+                                                id: field_key,
+                                                timestamp: new Date(data.timestamp).getTime(),
+                                                value: data[promise.field].value
+                                            }; //, data[promise.field])
+                                        }
+                                    );
+                                }
+                                else {
+                                    // Unroll housekeeping values for OpenMCT
+                                    unrolled_housekeeping = hk.map(
+                                        data => {
+                                            return {
+                                                id: field_key,
+                                                timestamp: new Date(data.timestamp).getTime(),
+                                                value: data[promise.field]
+                                            };
+                                        }
+                                    );
+                                }
+
+                                // Pass the values to OpenMCT
+                                //console.debug(promise.field, unrolled_housekeeping);
+                                promise.promise(unrolled_housekeeping);
+                            }
+                        }, result => { // rejected
+                            console.debug("HK: rejected", result);
+                            error = { name: "AbortError" };
+                            for (let promise of promises)
+                                promise.reject(result);
                         });
-                    }, 100);
 
-                    return promiseToBeFulfilled(req_ident, key, options);
+                    }, 50);
+
                 }
+
+                // Return a promise about future data
+                return new Promise((resolve, reject) => {
+                    if (buffered_promises[req_ident] == null)
+                        buffered_promises[req_ident] = [];
+                    buffered_promises[req_ident].push({
+                        field: field,
+                        options: options,
+                        promise: resolve,
+                        reject: reject
+                    });
+                });
+
             },
 
             /*
              * For dynamic metadata
              */
             supportsMetadata: function (domainObject, options) {
-                return false; // domainObject.type === 'foresail.telemetry';
+                return false; // domainObject.type === 'porthouse.telemetry';
             },
             getMetadata: function (domainObject) {
                 return;
@@ -246,7 +282,7 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
              * Limit provider that uses the styling given during initialization
              */
             supportsLimits: function(domainObject) {
-                return domainObject.type === telemetryType;
+                return domainObject.type === "porthouse.housekeeping";
             },
 
             getLimitEvaluator: function(domainObject) {
@@ -267,7 +303,7 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
                         //use styling if true
                         if (datum.value < lower_limit) {
                             return styling.limits.rl;
-                        }else if (datum.value > upper_limit) {
+                        } else if (datum.value > upper_limit) {
                             return styling.limits.rh;
                         }
 
@@ -280,12 +316,12 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
 
 
         /*
-         * Foresail object provider tells the detailed information to OpenMCT about the object
+         * Porthouse object provider
          */
-        openmct.objects.addProvider(namespace, {
+        openmct.objects.addProvider("porthouse.housekeeping", {
             get: function (identifier) {
+                console.debug("HK: Object provider", identifier.namespace, identifier.key);
                 return getSchema().then(function (schema) {
-                    //console.log("get " + identifier.key,identifier);
                     let keys = identifier.key.split(".");
 
                     if (identifier.key === rootKey) {
@@ -306,8 +342,8 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
                         return {
                             identifier: identifier,
                             name: subsystem.name,
-                            type: namespace+'.frame',
-                            location: namespace+':'+rootKey
+                            type: "porthouse.housekeeping.frame",
+                            location: "porthouse.housekeeping:" + rootKey
                         };
 
                     } else {
@@ -318,11 +354,15 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
                             return;
                         }
 
+                        let formatt = param.format_type;
+                        if (formatt == "integer") formatt = "number";
+                        if (formatt == "enumeration") formatt = "string";
+
                         let dict = {
                             identifier: identifier,
                             name: param.name,  // TODO: TypeError: param is undefined
-                            type: telemetryType,
-                            location: namespace+':'+rootKey+"." + keys[1],
+                            type: "porthouse.housekeeping",
+                            location: "porthouse.housekeeping:"+rootKey+"." + keys[1],
                             telemetry: {
                                 values: [
                                     {
@@ -336,23 +376,31 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
                                         key: "value",
                                         name: "Value",
                                         units: param.units,
-                                        format: param.format
+                                        format: formatt
                                     }
                                 ]
                             }
                         };
 
-                        //Only values that have calibration can be minmaxed
-                        if(param.calibration !== undefined || param.enumeration){
+                        // Only values that have calibration can be minmaxed
+                        if(param.calibration !== undefined){
                             dict.telemetry.values[1].hints = {range : 1};
-                            //console.log(dict.telemetry.values[1]);
+
                         }
+
+                        if (param.enumeration !== undefined) {
+                            //dict.telemetry.values[1].format = "enum";
+                            dict.telemetry.values[1].enumerations = param.enumeration;
+                            //dict.telemetry.values[1].hints = { range: 1 };
+                        }
+                        else
+                            dict.telemetry.values[1].hints = { range: 1 };
 
                         if(param.limits !== undefined){
                             dict.telemetry.values[1].limits = param.limits;
-                            //console.log(dict.telemetry.values[1]);
                         }
 
+                        console.debug(dict);
                         return dict;
                     }
                 });
@@ -366,21 +414,23 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
          */
         openmct.composition.addProvider( {
             appliesTo: function (domainObject) {
-                // Serve only folders (Foresail root) and Foresail Frame structures
-                return domainObject.identifier.namespace === namespace &&
-                       (domainObject.type === 'folder' || domainObject.type === namespace+'.frame');
+                // Serve only folders (Porthouse Houseeeping root) and Porthouse Frame structures
+                console.debug("HK: Provides objects? namespace:", domainObject.identifier.namespace, "key:", domainObject.identifier.key, "type: ", domainObject.type);
+                return domainObject.identifier.namespace === "porthouse.housekeeping"  &&
+                       (domainObject.type === 'folder' || domainObject.type === "porthouse.housekeeping.frame");
             },
             load: function (domainObject) {
 
-                //console.log("load " + domainObject.identifier.key, domainObject);
+                console.debug("HK: Composition provider ", domainObject.identifier.key);
 
                 let keys = domainObject.identifier.key.split(".");
-                if (domainObject.identifier.key === rootKey) // FS root
+                if (domainObject.identifier.key === rootKey)
                 {
+                    // namespace=porthouse.housekeeping, key=fs1, type=folder
                     return getSchema().then(function (schema){
                         return Promise.resolve(schema.subsystems.map(function (m) {
                             return {
-                                namespace: namespace,
+                                namespace: "porthouse.housekeeping",
                                 key: domainObject.identifier.key + "." + m.key
                             };
                         }));
@@ -388,20 +438,21 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
 
                 }
                 else {
+                    // namespace=porthouse.housekeeping, key=fs1.obc.arbiter_temperature, type=porthouse.housekeeping
 
                     // Return simple list of all telemetry data points under the subsystem
                     return getSchema().then(function (schema) {
                         let subsystem = schema.subsystems.filter(function (m) {
                             return rootKey+"." + m.key ===  domainObject.identifier.key;
                         })[0];
-                        //console.log("add providers",subsystem);
+                        //console.debug("add providers",subsystem);
 
                         if (subsystem == undefined)
                             return [];
 
                         return subsystem.fields.map(function (m) {
                             return {
-                                namespace: namespace,
+                                namespace: "porthouse.housekeeping",
                                 key: domainObject.identifier.key + "." + m.key
                             };
                         });
@@ -409,14 +460,6 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
 
                 }
 
-                return getSchema().then(function (schema) {
-                        return schema.measurements.map(function (m) {
-                            return {
-                                namespace: namespace,
-                                key: m.key
-                            };
-                        });
-                    });
             }
         });
 
@@ -425,14 +468,14 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
          * Create root object for all the housekeeping stuff
          */
         openmct.objects.addRoot({
-            namespace: namespace,
+            namespace: "porthouse.housekeeping",
             key: rootKey
-        });
+        }, openmct.priority.HIGH);
 
         /*
          * Custom type identificator for housekeeping frames/subsystems
          */
-        openmct.types.addType(namespace+'.frame', {
+        openmct.types.addType("porthouse.housekeeping.frame", {
             name: styling.frameName,
             description: styling.frameDesc,
             cssClass: styling.frameCssClass
@@ -441,8 +484,7 @@ function PorthouseHousekeepingPlugin(connector, args=HousekeepingDefaultArgs()) 
         /*
          * Custom type identificator for telemetry points
          */
-        const telemetryType = namespace+'.telemetry';
-        openmct.types.addType(telemetryType, {
+        openmct.types.addType("porthouse.housekeeping.field", {
             name: styling.dataPointName,
             description: styling.dataPointDesc,
             cssClass: styling.dataPointCssClass

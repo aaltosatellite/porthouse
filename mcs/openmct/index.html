@@ -13,9 +13,9 @@
     <script src="housekeeping.js"></script>
     <script src="events.js"></script>
 
-</head>
-<body>
-    <script type="module">
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
 
         const FIVE_MINUTES = 5 * 60 * 1000;
         const THIRTY_MINUTES = 30 * 60 * 1000;
@@ -55,27 +55,55 @@
                     }
                 }
             ]
-        }));
+            }));
 
 
-        openmct.time.clock('local', {start: -15 * 60 * 1000, end: 0});
-        openmct.time.timeSystem('utc');
+            openmct.time.setClock('local', {start: -15 * 60 * 1000, end: 0});
+            openmct.time.setTimeSystem('utc');
 
-        // Connect to backend using WebSockets
-        let ws_url = "ws://" + document.location.host + "/openmct/ws";
-        let connector = new Connector(ws_url);
+            // Connect to backend using WebSockets
+            let ws_url = "ws://"+document.location.host+"/openmct/ws";
+            let connector = new Connector(ws_url);
 
-        openmct.install(PorthouseGroundStationPlugin(connector));
-        openmct.install(PorthouseHousekeepingPlugin(connector));
-        openmct.install(PorthouseEventsPlugin(connector));
+            openmct.install(PorthouseGroundStationPlugin(connector));
+            openmct.install(PorthouseHousekeepingPlugin(connector, {
+                rootKey: "fs1p",
 
-        // Use either CouchDB (If installed and set up) or LocalStorageup
-        var couch_url = 'http://' + document.location.host + '/couch/openmct';
-        //openmct.install(openmct.plugins.CouchDB(couch_url))
-        openmct.install(openmct.plugins.LocalStorage());
+                styling: {
+                    rootFolderName: "Foresail-1p Housekeeping",
+                    dataPointText: "Foresail-1p Housekeeping",
+                    frameName: 'Porthouse Housekeeping Frame',
+                    frameCssClass: 'icon-info',
+                    frameDesc: 'porthouse housekeeping frame',
+                    dataPointName: 'porthouse Housekeeping Data Point',
+                    dataPointDesc: 'porthouse housekeeping data point',
+                    dataPointCssClass: 'icon-telemetry',
+                    limits: LIMITS
+                }
+            }));
 
-        openmct.start();
+            openmct.install(PorthouseEventsPlugin(connector,  {
+                rootKey: "fs1p",
 
+                styling: {
+                    rootFolderName: "Foresail-1p Events",
+                    EventText: "Porthouse Raw events",
+                    EventName: 'Porthouse Housekeeping Events',
+                    EventDesc: 'Porthouse housekeeping events',
+                    EventCssClass: 'icon-box-with-dashed-lines',
+                }
+            }));
+
+
+            // Use either CouchDB (If installed and set up) or LocalStorageup
+            var couch_url = 'http://' + document.location.host + '/couch/openmct';
+            openmct.install(openmct.plugins.CouchDB(couch_url))
+            //openmct.install(openmct.plugins.LocalStorage());
+
+            openmct.start();
+        });
     </script>
+</head>
+<body>
 </body>
 </html>

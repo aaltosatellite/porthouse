@@ -6,7 +6,6 @@
 function EventsDefaultArgs() {
     return {
         rootKey:  "events",
-        namespace: "events",
 
         styling : {
             rootFolderName: "Porthouse Raw events",
@@ -21,7 +20,6 @@ function EventsDefaultArgs() {
 
 function PorthouseEventsPlugin(connector, args=EventsDefaultArgs()) {
     const rootKey = args.rootKey;
-    const namespace = args.namespace;
     const styling = args.styling;
 
     let subscribed = false;
@@ -34,7 +32,7 @@ function PorthouseEventsPlugin(connector, args=EventsDefaultArgs()) {
         openmct.telemetry.addProvider({
 
             supportsSubscribe: function (domainObject, callback, options) {
-                return domainObject.type === telemetryType;
+                return domainObject.type === "porthouse.event";
             },
             subscribe: function (domainObject, callback) {
                 console.log("subscribe " + domainObject.identifier.key);
@@ -59,7 +57,7 @@ function PorthouseEventsPlugin(connector, args=EventsDefaultArgs()) {
             },
 
             supportsRequest: function (domainObject, options) {
-                return domainObject.type === telemetryType;
+                return domainObject.type === "porthouse.event";
             },
 
             request: function(domainObject, options) {
@@ -83,7 +81,7 @@ function PorthouseEventsPlugin(connector, args=EventsDefaultArgs()) {
              * Limit provider that uses the styling given during initialization
              */
             supportsLimits: function(domainObject) {
-                return domainObject.type === telemetryType;
+                return domainObject.type === "porthouse.event";
             },
 
             getLimitEvaluator: function(domainObject) {
@@ -117,13 +115,13 @@ function PorthouseEventsPlugin(connector, args=EventsDefaultArgs()) {
         });
 
 
-         openmct.objects.addProvider(namespace, {
+         openmct.objects.addProvider("porthouse.events", {
             get: function (identifier) {
                 console.log(identifier);
                 return Promise.resolve({
                     identifier: identifier,
-                    name: 'FS events',
-                    type: telemetryType,
+                    name: 'FS events', // args.event_type_name
+                    type: "porthouse.event",
                     telemetry: {
                         values: [
                             {
@@ -168,7 +166,7 @@ function PorthouseEventsPlugin(connector, args=EventsDefaultArgs()) {
          * Create root object
          */
         openmct.objects.addRoot({
-            namespace: namespace,
+            namespace: "porthouse.events",
             key: rootKey
         });
 
@@ -176,8 +174,7 @@ function PorthouseEventsPlugin(connector, args=EventsDefaultArgs()) {
         /*
          * Custom type identificator for event log
          */
-        const telemetryType = namespace+'.event';
-        openmct.types.addType(telemetryType, {
+        openmct.types.addType("porthouse.event", {
             name: styling.EventName,
             description: styling.EventDesc,
             cssClass: styling.EventCssClass

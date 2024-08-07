@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Set, Dict, List
+from typing import Any, Set, Dict, List
 
 import aiormq
 import websockets
@@ -20,10 +20,11 @@ class OpenMCTProtocol(websockets.WebSocketServerProtocol):
     Inherited protocol handler class which contains per connection informatation
     such as subscribed telemetry channels etc.
     """
+    subscriptions: Dict[str, Any]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.subscriptions: Dict[str, List[str]] = { }
+        self.subscriptions = { }
 
     @property
     def name(self) -> str:
@@ -37,7 +38,6 @@ class OpenMCTProtocol(websockets.WebSocketServerProtocol):
         Send JSON formatted packet to web browser.
         """
         await self.send(json.dumps(kwargs))
-
 
 
 class OpenMCTBackend(BaseModule):
@@ -57,7 +57,7 @@ class OpenMCTBackend(BaseModule):
         BaseModule.__init__(self, **kwargs)
         self.clients: Set[OpenMCTProtocol] = set()
 
-        self.services = {
+        self.services = { # TODO: Should be configurable outside of python code
             "housekeeping": HousekeepingService(self, db_url, "fs1p", hk_schema),
             "system": SystemService(self),
             "events": EventsService(self),
@@ -150,9 +150,9 @@ class OpenMCTBackend(BaseModule):
 
 
     @queue()
-    @bind(exchange="events", routing_key="fs1.update")
+    @bind(exchange="events", routing_key="*.update")
     @bind(exchange="log", routing_key="*")
-    @bind(exchange="housekeeping", routing_key="fs1.update")
+    @bind(exchange="housekeeping", routing_key="*.update")
     async def handle_message(self, msg: aiormq.abc.DeliveredMessage) -> None:
         """
         Handle message from the AMQP
@@ -167,8 +167,7 @@ class OpenMCTBackend(BaseModule):
             self.log.debug("Invalid JSON", exc_info=True)
             return
 
-        self.log.debug("event: %s, %s", msg.delivery.exchange, msg.delivery.routing_key)
-
+        self.log.debug("update: %s, %s", msg.delivery.exchange, msg.delivery.routing_key)
         ret = None
         exchange = msg.delivery.exchange
 
@@ -182,13 +181,3 @@ class OpenMCTBackend(BaseModule):
         if asyncio.iscoroutine(ret):
             await ret
 
-
-if __name__ == "__main__":
-    OpenMCTBackend( \
-        ws_host="127.0.0.1",
-        ws_port=8888,
-        hk_schema="../foresail/housekeeping.json",
-        db_url="postgres://mcs:PASSWORD@localhost/foresail",
-        amqp_url="amqp://guest:guest@localhost:5672/",
-        debug=True
-    ).run()

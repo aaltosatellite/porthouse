@@ -1,20 +1,28 @@
 /*
-* Plugin that displays info from the mcc
-*/
-function PorthouseGroundStationPlugin(connector, args) {
-
+ * Plugin that displays satellite orbital position and ground tracks
+ */
+function PorthouseGroundStationPlugin(connector, args)
+{
     // Combine given arguments and defaults
-    args = Object.assign({}, args, FSLogsDefaultArgs());
+    args = Object.assign({}, {
+        rootKey: "logentry",
+        styling: {
+            rootFolderName: "MCC Raw Log events",
+            LogEventText: "MCC Raw Log events",
+            LogEventName: 'MCC Housekeeping Log Events',
+            LogEventDesc: 'MCC housekeeping logs',
+            LogEventCssClass: 'icon-datatable',
+        }
+    }, args || {});
 
     const rootKey = args.rootKey;
-    const namespace = args.namespace;
     const styling = args.styling;
 
     let subscribed = false;
 
     /*
-    * OpenMCT installation part starts here
-    */
+     * OpenMCT installation part starts here
+     */
     return function install (openmct) {
 
         openmct.telemetry.addProvider({
@@ -24,21 +32,21 @@ function PorthouseGroundStationPlugin(connector, args) {
             },
 
             subscribe: function (domainObject, callback) {
-                console.log("subscribe " + domainObject.identifier.key);
+                console.debug("SYS: subscribe " + domainObject.identifier.key);
 
                 if (!subscribed) {
                     function subscriptionReturnCallback(callback, message){
                         callback(message.subscription.log);
                     };
 
-                    connector.subscribe("system", { "fields": "logs" }, subscriptionReturnCallback.bind(null, callback));
+                    connector.subscribe("system", "logs", subscriptionReturnCallback.bind(null, callback));
                     subscribed = true;
                 }
 
                 // Return the unsubscribing callback
                 return function unsubscribe() {
                     subscribed = false;
-                    connector.unsubscribe("system", { "fields": "logs" });
+                    connector.unsubscribe("system", "logs");
                 };
 
             },
@@ -49,14 +57,24 @@ function PorthouseGroundStationPlugin(connector, args) {
 
             request: function(domainObject, options) {
 
-                console.log("Request " + options.strategy + ": " + domainObject.identifier.key);
+                console.debug("SYS: Request history", options.strategy, ": ", domainObject.identifier.key);
 
                 var key = domainObject.identifier.key;
 
                 return connector.remoteCall(
-                    "system", "request", { "options": options }
+                    "system",
+                    "request",
+                    {
+                        "options": {
+                            start: new Date(options.start).toISOString(),
+                            end: new Date(options.end).toISOString(),
+                            strategy: options.strategy,
+                            domain: options.domain,
+                            size: options.size,
+                        }
+                    }
                 ).then(msg => {
-                    //console.log("message", msg.result.entries);
+                    //console.debug("SYS: message", msg.result.entries);
                     return msg.result.entries;
                 }).catch(
                     e => {openmct.notifications.error("Logs: " + e);
@@ -74,7 +92,7 @@ function PorthouseGroundStationPlugin(connector, args) {
             getLimitEvaluator: function(domainObject) {
                 return {
                     evaluate: function (datum, valueMetadata) {
-                        //console.log(datum);
+                        //console.debug(datum);
                         //use styling if true
                         if (datum.level == "error") {
                             return {
@@ -97,9 +115,9 @@ function PorthouseGroundStationPlugin(connector, args) {
         });
 
 
-         openmct.objects.addProvider(namespace, {
+         openmct.objects.addProvider("porthouse.gs", {
             get: function (identifier) {
-                console.log(identifier);
+                //console.debug(identifier);
                 return Promise.resolve({
                     identifier: identifier,
                     name: 'Server log',
@@ -142,7 +160,7 @@ function PorthouseGroundStationPlugin(connector, args) {
          * Create root object
          */
         openmct.objects.addRoot({
-            namespace: namespace,
+            "porthouse.gs": "porthouse.gs",
             key: rootKey
         });
 
@@ -150,7 +168,7 @@ function PorthouseGroundStationPlugin(connector, args) {
         /*
          * Custom type identificator for event log
          */
-        const telemetryType = namespace+'.logentry';
+        const telemetryType = "porthouse.gs"+'.logentry';
         openmct.types.addType(telemetryType, {
             name: styling.LogEventName,
             description: styling.LogEventDesc,
@@ -160,22 +178,3 @@ function PorthouseGroundStationPlugin(connector, args) {
     }
 }
 
-
-/*
-*   Default arguments
-*/
-function FSLogsDefaultArgs() {
-    return {
-        rootKey   : "logentry",
-        namespace  : "logs",
-
-        styling : {
-            rootFolderName: "MCC Raw Log events",
-            LogEventText: "MCC Raw Log events",
-            LogEventName: 'MCC Housekeeping Log Events',
-            LogEventDesc: 'MCC housekeeping logs',
-            LogEventCssClass: 'icon-datatable',
-
-        }
-    }
-}
