@@ -1,46 +1,37 @@
-var cachedConnections = {};
-
 /*
- * Create communication system that can be used to access
- * the openmct_backend. Can be used reused with other foresail OpenMCT
- * plugins. Can be bad, solve later if needed.
+ * Connector class to handle WebSocket connection to the porthouse backend
  */
-function getConnector(url, createNew=false){
-
-    if (createNew) {
-        return new Connector(url);
-    }
-
-    if (cachedConnections[url] == null){
-        cachedConnections[url] = new Connector(url);
-    }
-    return cachedConnections[url];
-}
-
-/*
- * requires reconnecting web sockets
- */
-class Connector {
+export default class Connector {
 
     constructor(url) {
-        cachedConnections = this;
 
+        // Reconnect args
+        this.reconnectAttempts = 0;
+        this.reconnectInterval = 500;
+        this.maxReconnectInterval = 10000;
+        this.reconnectDecay = 1.5;
+
+        // RPC state
         this.rpc_id = 0;
         this.rpc_calls = { };
         this.subscriptions = {};
         this.url = url;
 
-        console.log("Connecting to", url);
-        this.socket = new ReconnectingWebSocket(url);
-        this.connect();
+        this.pending = [];
 
+        // Socket
+        this.connect();
     }
 
-    /*
-     * WebSocket receive callback
-     */
-    connect() {
+    connect()
+    {
+        // Create socket
+        console.info("CON: Connecting to", this.url);
+        this.socket = new WebSocket(this.url);
 
+        /*
+         * WebSocket receive callback
+         */
         this.socket.addEventListener('message', function(event) {
             let message;
 
@@ -55,7 +46,7 @@ class Connector {
              */
             if ("subscription" in message) {
                 let subscription = message.subscription;
-                //console.log("New subscribed data:", subscription.service, subscription);
+                //console.info("CON: New subscribed data:", subscription.service, subscription);
                 var callback = this.subscriptions[subscription.service][subscription.subsystem];
                 if (callback !== undefined)
                     callback(subscription);
@@ -67,8 +58,11 @@ class Connector {
              */
             if ("error" in message) {
                 // example: {"error": {"code": -500, "message": "<text>"}, "id": 4}
-                if ("id" in message && message.id in this.rpc_calls)
-                    this.rpc_calls[message.id].reject("WebSocket error: " + message.error.message);
+                if ("id" in message && message.id in this.rpc_calls) {
+                    let request = this.rpc_calls[message.id];
+                    clearTimeout(request.timeout);
+                    request.reject("WebSocket error: " + message.error.message);
+                }
                 return;
             }
 
@@ -79,30 +73,49 @@ class Connector {
                 let id = message.id;
 
                 // Full fill the promise
-                if (id in this.rpc_calls)
-                    this.rpc_calls[id].promise(message);
+                if (id in this.rpc_calls) {
+                    let request = this.rpc_calls[message.id];
+                    clearTimeout(request.timeout);
+                    request.resolve(message);
+                }
             }
 
         }.bind(this));
 
 
         /*
-        * Try reconnecting
-        */
+         * Try reconnecting
+         */
         this.socket.addEventListener('open', function(event) {
-            console.log("Websocket connected")
+            console.info("CON: Connected to backed")
+
+
+            for (const rpc_call of this.pending)
+                this.socket.send(rpc_call);
+            this.pending = [];
+
             // Resubscribe everything on the list
             Object.keys(this.subscriptions).forEach(service => {
                 var fields = Object.keys(this.subscriptions[service]);
-                console.log("Resubscribing:", service, fields);
+                console.info("CON: Resubscribing:", service, fields);
                 this.remoteCall(service, "subscribe", fields);
             });
         }.bind(this));
 
 
         this.socket.addEventListener('close', function(event) {
-            console.log("Socket close");
-            this.subscriptions = { };
+            console.info("CON: Connection closed");
+            this.socket = null;
+
+            // Reconnect
+            /*var timeout = this.reconnectInterval * Math.pow(this.reconnectDecay, this.reconnectAttempts);
+            setTimeout(function () {
+
+                console.info("CON: Socket reconnecting");
+                this.connect();
+
+            }, timeout > this.maxReconnectInterval ? this.maxReconnectInterval : timeout);*/
+
         }.bind(this));
 
     }
@@ -120,11 +133,23 @@ class Connector {
             params: params,
             id: id,
         };
+        rpc_call = JSON.stringify(rpc_call);
 
         return new Promise((resolve, reject) =>
         {
-            this.socket.send(JSON.stringify(rpc_call));
-            this.rpc_calls[id] = { promise: resolve, reject: reject };
+            if (this.socket.readyState == WebSocket.OPEN) {
+                this.socket.send(rpc_call);
+            }
+            else {
+                this.pending.push(rpc_call);
+            }
+
+            this.rpc_calls[id] = {
+                resolve: resolve, reject: reject,
+                timeout: setTimeout(reject, 500)
+            };
+            // resolve/reject called later on socket.onmessage
+
         }).finally(function() {
             delete this.rpc_calls[id];
         }.bind(this));
@@ -138,7 +163,7 @@ class Connector {
      * promise can be used to make more robust.
      */
     subscribe(service, fields, callback) {
-        console.log("Subscribing", fields);
+        //console.info("CON: Subscribing", fields);
         this.remoteCall(service, "subscribe", { "fields": fields });
 
         if (!(service in this.subscriptions))
@@ -158,7 +183,7 @@ class Connector {
      * Unsubscribe
      */
     unsubscribe(service, fields) {
-        //console.log("Unsubscribing", fields);
+        //console.info("CON: Unsubscribing", fields);
         this.remoteCall(service, "unsubscribe", { "fields": fields });
 
         if (Array.isArray(fields)) {

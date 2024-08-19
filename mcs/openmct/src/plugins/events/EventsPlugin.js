@@ -3,7 +3,7 @@
  */
 
 // Default arguments
-function EventsDefaultArgs() {
+export function EventsDefaultArgs() {
     return {
         rootKey:  "events",
 
@@ -17,8 +17,9 @@ function EventsDefaultArgs() {
     }
 }
 
+export default function (connector, args=EventsDefaultArgs())
+{
 
-function PorthouseEventsPlugin(connector, args=EventsDefaultArgs()) {
     const rootKey = args.rootKey;
     const styling = args.styling;
 
@@ -120,7 +121,7 @@ function PorthouseEventsPlugin(connector, args=EventsDefaultArgs()) {
                 console.log(identifier);
                 return Promise.resolve({
                     identifier: identifier,
-                    name: 'FS events', // args.event_type_name
+                    name: 'Foresail-1p Events', // args.event_type_name
                     type: "porthouse.event",
                     telemetry: {
                         values: [
@@ -180,5 +181,5 @@ function PorthouseEventsPlugin(connector, args=EventsDefaultArgs()) {
             cssClass: styling.EventCssClass
         });
 
-    }
-}
+    } // end of install()
+};

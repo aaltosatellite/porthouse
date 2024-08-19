@@ -1,11 +1,12 @@
 /*
- * Plugin that displays satellite orbital position and ground tracks
+ *
  */
-function PorthouseGroundStationPlugin(connector, args)
+
+export default function(connector, args)
 {
     // Combine given arguments and defaults
     args = Object.assign({}, {
-        rootKey: "logentry",
+        rootKey: "gs",
         styling: {
             rootFolderName: "MCC Raw Log events",
             LogEventText: "MCC Raw Log events",
@@ -23,7 +24,7 @@ function PorthouseGroundStationPlugin(connector, args)
     /*
      * OpenMCT installation part starts here
      */
-    return function install (openmct) {
+    return function install(openmct) {
 
         openmct.telemetry.addProvider({
 
@@ -115,7 +116,7 @@ function PorthouseGroundStationPlugin(connector, args)
         });
 
 
-         openmct.objects.addProvider("porthouse.gs", {
+        openmct.objects.addProvider("porthouse.gs", {
             get: function (identifier) {
                 //console.debug(identifier);
                 return Promise.resolve({
@@ -175,6 +176,5 @@ function PorthouseGroundStationPlugin(connector, args)
             cssClass: styling.LogEventCssClass
         });
 
-    }
-}
-
+    } // end of install()
+};

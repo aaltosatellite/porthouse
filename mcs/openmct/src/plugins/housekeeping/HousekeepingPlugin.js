@@ -2,43 +2,60 @@
  * OpenMCT Plugin for connecting to porthouse housekeeping backend
  */
 
-
-function PorthouseHousekeepingPlugin(connector, args)
+export default function (connector, args)
 {
 
-    // Merge args with defaults
-    args = Object.assign( {},
-        {
-            rootKey: "satellite",
-            styling: {
-                rootFolderName: "porthouse Raw Housekeeping",
-                dataPointText: "porthouse Raw Housekeeping",
-                frameName: 'porthouse Housekeeping Frame',
-                frameCssClass: 'icon-info', // node_modules/openmct/src/styles/_glyphs.scss
-                frameDesc: 'porthouse housekeeping frame',
-                dataPointName: 'porthouse Housekeeping Data Point',
-                dataPointDesc: 'porthouse housekeeping data point',
-                dataPointCssClass: 'icon-telemetry',
-                limits: LIMITS
-            }
+
+    const LIMITS = {
+
+        rh: {
+            cssClass: "is-limit--upr is-limit--red",
+            name: "Red High"
         },
-        args || {}
-    );
-    console.info("args", args);
+        rl: {
+            cssClass: "is-limit--lwr is-limit--red",
+            name: "Red Low"
+        },
+        yh: {
+            cssClass: "is-limit--upr is-limit--yellow",
+            name: "Yellow High"
+        },
+        yl: {
+            cssClass: "is-limit--lwr is-limit--yellow",
+            name: "Yellow Low"
+        }
+    };
+
+
+    let defaults = {
+        rootKey: "satellite",
+        styling: {
+            rootFolderName: "porthouse Raw Housekeeping",
+            dataPointText: "porthouse Raw Housekeeping",
+            frameName: 'porthouse Housekeeping Frame',
+            frameCssClass: 'icon-info', // node_modules/openmct/src/styles/_glyphs.scss
+            frameDesc: 'porthouse housekeeping frame',
+            dataPointName: 'porthouse Housekeeping Data Point',
+            dataPointDesc: 'porthouse housekeeping data point',
+            dataPointCssClass: 'icon-telemetry',
+            //limits: LIMITS
+        }
+    }
+
+    // Merge args with defaults
+    args = Object.assign({}, defaults, args || {});
+    console.info("HK: args", args);
 
     if (connector == undefined)
-        throw "No Porthouse connector defined!";
+        throw "No porthouse connector defined!";
 
-    const rootKey = args.rootKey;             // rootkey of the satellite (fs1)
-    const namespace = "porthouse.housekeeping";         // namespace for openmct
-    const styling = args.styling;             // styling choices (see below)
+    const rootKey = args.rootKey;
+    const styling = args.styling;
 
     if (rootKey == undefined)
         throw "No root key defined!";
-    if ("porthouse.housekeeping" == undefined)
-        throw "No root key defined!";
     if (styling == undefined)
-        throw "No root key defined!";
+        throw "No styling defined!";
 
     // Cached schema from the server
     let schema = null;
@@ -48,33 +65,69 @@ function PorthouseHousekeepingPlugin(connector, args)
     // Start to download the schema straight away (can be omitted)
     var schemaPromise = null;
 
-    getSchema();
-
-    /*
-     * Get housekeeping schema
-     */
-    function getSchema() {
-
-        if (schema !== null) {
-            return Promise.resolve(schema);
-        }
-        if (schemaPromise !== null){
-            return schemaPromise;
-        }
-
-        schemaPromise = connector.remoteCall("housekeeping", "get_schema")
-        .then(data => {
-            schema = data.result.schema;
-            console.log(schema);
-            return schema;
-        })
-    }
-
-
     /*
      * OpenMCT installation part starts here
      */
     return function install(openmct) {
+
+        /*
+        * Get housekeeping schema
+        */
+        function getSchema() {
+            if (schema !== null) {
+                return Promise.resolve(schema);
+            }
+            if (schemaPromise !== null) {
+                return schemaPromise;
+            }
+
+            schemaPromise = connector.remoteCall("housekeeping", "get_schema")
+                .then(data => {
+                    schema = data.result.schema;
+                    console.log(schema);
+                    return schema;
+                })
+        }
+
+        getSchema(); // FIXME: Timing hack!
+
+        /*
+         * Return dictionary object based on the key
+         */
+        function getHousekeepingObject(key, rootKey) {
+
+            let keys = key.split(".");
+            if (keys[0] !== rootKey)
+                return;
+
+
+            if (keys.length == 1) {
+                // Root
+                return schema;
+            }
+            else if (keys.length == 2) {
+                // Get subsystem object
+                let subsystem = schema.subsystems.filter(m => (m.key === keys[1]))[0];
+                if (subsystem === undefined)
+                    throw "No such subsystem" + identifier.key;
+                return subsystem;
+            }
+            else if (keys.length == 3) {
+                // Get subsystem object
+                let subsystem = schema.subsystems.filter(m => (m.key === keys[1]))[0];
+                if (subsystem === undefined)
+                    throw "No such subsystem" + identifier.key;
+
+                // Get housekeeping object
+                let field = subsystem.fields.filter(m => (m.key === keys[2]))[0];
+                if (subsystem === undefined)
+                    throw "No such field" + identifier.key;
+
+                return field;
+            }
+
+        }
+
 
         /*
          * Porthouse telemetry provider defines the interface for telemetry transfer
@@ -114,13 +167,11 @@ function PorthouseHousekeepingPlugin(connector, args)
 
                     console.debug(subscriptions[subsystem])
                     for (const [field, callback] of Object.entries(subscriptions[subsystem])) {
-                        console.debug(field, callback);
-                        let c = {
+                        callback({
                             id: subsystem + "." + field,
                             timestamp: timestamp,
                             value: data[field]
-                        };
-                        callback(c);
+                        });
                     }
                 }
 
@@ -187,7 +238,7 @@ function PorthouseHousekeepingPlugin(connector, args)
                         let promises = buffered_promises[req_ident];
                         delete buffered_promises[req_ident];
 
-                        console.debug("HK: Requesting", subsKey, promises.map(promise => promise.field), options);
+                        console.debug("HK: Requesting history", subsKey, promises.map(promise => promise.field), options);
 
                         // Send RPC to backend
                         connector.remoteCall(
@@ -212,6 +263,7 @@ function PorthouseHousekeepingPlugin(connector, args)
                             let hk = response.result.housekeeping;
                             for (let promise of promises) {
 
+                                let unrolled_housekeeping;
                                 let field_key = subsKey + "." + promise.field;
                                 if (options.strategy == "minmax") {
                                     // Unroll housekeeping min/max values for OpenMCT
@@ -244,7 +296,7 @@ function PorthouseHousekeepingPlugin(connector, args)
                             }
                         }, result => { // rejected
                             console.debug("HK: rejected", result);
-                            error = { name: "AbortError" };
+                            let error = { name: "AbortError" };
                             for (let promise of promises)
                                 promise.reject(result);
                         });
@@ -287,8 +339,11 @@ function PorthouseHousekeepingPlugin(connector, args)
 
             getLimitEvaluator: function(domainObject) {
                 return {
-                    evaluate: function (datum, valueMetadata) {
-                        if(valueMetadata == null || datum == null){
+                    evaluate: function (datum, valueMetadata) { // "LimitEvaluator"
+
+                        // datum = { "timestamp": 1491267051538, "id": "prop.fuel",  "value": 77 }
+                        // valueMetadata = ??
+                        if (valueMetadata == null || datum == null){
                             return;
                         }
 
@@ -306,8 +361,6 @@ function PorthouseHousekeepingPlugin(connector, args)
                         } else if (datum.value > upper_limit) {
                             return styling.limits.rh;
                         }
-
-                        return;
                     }
 
                 };
@@ -316,51 +369,58 @@ function PorthouseHousekeepingPlugin(connector, args)
 
 
         /*
-         * Porthouse object provider
+         * Provide object defintions
          */
         openmct.objects.addProvider("porthouse.housekeeping", {
             get: function (identifier) {
-                console.debug("HK: Object provider", identifier.namespace, identifier.key);
-                return getSchema().then(function (schema) {
-                    let keys = identifier.key.split(".");
+                //console.debug("HK: Provider object definition", identifier.namespace, identifier.key);
+                let keys = identifier.key.split(".");
 
-                    if (identifier.key === rootKey) {
-                        //var satellite = getHousekeepingObject(schema, identifier.key);
-                        return {
-                            identifier: identifier,
-                            name: styling.rootFolderName,
-                            type: 'folder',
-                            location: 'ROOT'
-                        };
-                    }
-                    else if (keys.length == 2) {
+                if (identifier.key === rootKey) {
+                    // Return the root object description
+                    // Can be loaded without the schema
+                    return Promise.resolve({
+                        identifier: identifier,
+                        name: styling.rootFolderName,
+                        type: 'folder',
+                        location: 'ROOT'
+                    });
+                }
+                else if (keys.length == 2) {
 
-                        let subsystem = getHousekeepingObject(schema, identifier.key, rootKey);
+
+                    return getSchema().then(function () {
+                        let subsystem = getHousekeepingObject(identifier.key, rootKey);
                         if (subsystem === undefined)
-                            throw "No such subsystem" + identifier.key;
+                            throw "No such subsystem" + identifier.key; // TODO: should call reject
 
-                        return {
+                        return { //} Promise.resolve({
                             identifier: identifier,
                             name: subsystem.name,
                             type: "porthouse.housekeeping.frame",
                             location: "porthouse.housekeeping:" + rootKey
                         };
+                    });
 
-                    } else {
+                } else {
+                    return getSchema().then(function () {// Ensure the schema has been loaded
 
-                        let param = getHousekeepingObject(schema, identifier.key, rootKey);
+                        // Get parameter object from the schema
+                        let param = getHousekeepingObject(identifier.key, rootKey);
                         if (param === undefined) {
                             console.error("No such field", identifier.key);
                             return;
                         }
 
-                        let formatt = param.format_type;
-                        if (formatt == "integer") formatt = "number";
-                        if (formatt == "enumeration") formatt = "string";
+                        // Resolve OpenMCT's display format type
+                        let display_format = param.format_type;
+                        if (display_format == "integer") display_format = "number";
+                        if (display_format == "enumeration") display_format = "enum";
 
-                        let dict = {
+                        // Construct object defition in OpenMCT's format
+                        let def = {
                             identifier: identifier,
-                            name: param.name,  // TODO: TypeError: param is undefined
+                            name: param.name,
                             type: "porthouse.housekeeping",
                             location: "porthouse.housekeeping:"+rootKey+"." + keys[1],
                             telemetry: {
@@ -375,58 +435,62 @@ function PorthouseHousekeepingPlugin(connector, args)
                                     {
                                         key: "value",
                                         name: "Value",
-                                        units: param.units,
-                                        format: formatt
+                                        unit: param.units,
+                                        format: display_format
+                                        //min:
+                                        //max:
                                     }
                                 ]
                             }
                         };
 
                         // Only values that have calibration can be minmaxed
-                        if(param.calibration !== undefined){
-                            dict.telemetry.values[1].hints = {range : 1};
-
-                        }
+                        //if(param.calibration !== undefined){
+                        //    def.telemetry.values[1].hints = {range : 1};
+                        //}
 
                         if (param.enumeration !== undefined) {
-                            //dict.telemetry.values[1].format = "enum";
-                            dict.telemetry.values[1].enumerations = param.enumeration;
-                            //dict.telemetry.values[1].hints = { range: 1 };
+                            //def.telemetry.values[1].format = "enum";
+                            def.telemetry.values[1].enumerations = param.enumeration;
+                            //def.telemetry.values[1].hints = { range: 1 };
                         }
                         else
-                            dict.telemetry.values[1].hints = { range: 1 };
+                            def.telemetry.values[1].hints = { range: 1 };
 
-                        if(param.limits !== undefined){
-                            dict.telemetry.values[1].limits = param.limits;
+                        if (param.limits !== undefined) {
+                            def.telemetry.values[1].limits = param.limits;
                         }
 
-                        console.debug(dict);
-                        return dict;
-                    }
-                });
+                        return def;
 
+                    });
+                }
             }
         });
 
 
         /*
-         * Composition provider tells the hierarchy of the objects. Aka what is inside of what.
+         * Provide structure composition aka description of the object hierarchy.
          */
         openmct.composition.addProvider( {
             appliesTo: function (domainObject) {
-                // Serve only folders (Porthouse Houseeeping root) and Porthouse Frame structures
-                console.debug("HK: Provides objects? namespace:", domainObject.identifier.namespace, "key:", domainObject.identifier.key, "type: ", domainObject.type);
+                // Provider serves only folders (Porthouse Houseeeping root) and Porthouse Frame structures
+                //console.debug("HK: Provides objects? namespace:", domainObject.identifier.namespace, "key:", domainObject.identifier.key, "type:", domainObject.type);
                 return domainObject.identifier.namespace === "porthouse.housekeeping"  &&
                        (domainObject.type === 'folder' || domainObject.type === "porthouse.housekeeping.frame");
             },
             load: function (domainObject) {
-
-                console.debug("HK: Composition provider ", domainObject.identifier.key);
+                // Return the composition
+                //console.debug("HK: Composition provider: key:", domainObject.identifier.key);
 
                 let keys = domainObject.identifier.key.split(".");
                 if (domainObject.identifier.key === rootKey)
                 {
-                    // namespace=porthouse.housekeeping, key=fs1, type=folder
+                    /*
+                     * For the root, return list of subsystem
+                     * Note: Makes sure the schema has been loaded before returning the root so that
+                     * it doesn't need to be check later.
+                     */
                     return getSchema().then(function (schema){
                         return Promise.resolve(schema.subsystems.map(function (m) {
                             return {
@@ -438,25 +502,24 @@ function PorthouseHousekeepingPlugin(connector, args)
 
                 }
                 else {
-                    // namespace=porthouse.housekeeping, key=fs1.obc.arbiter_temperature, type=porthouse.housekeeping
+                    /*
+                     * For the subsystems, return a list of all telemetry fields
+                     */
 
-                    // Return simple list of all telemetry data points under the subsystem
-                    return getSchema().then(function (schema) {
-                        let subsystem = schema.subsystems.filter(function (m) {
-                            return rootKey+"." + m.key ===  domainObject.identifier.key;
-                        })[0];
-                        //console.debug("add providers",subsystem);
+                    // Find the subsystem object from the schema
+                    let subsystem = schema.subsystems.filter(function (sub) {
+                        return sub.key == keys[1];
+                    })[0];
 
-                        if (subsystem == undefined)
-                            return [];
+                    if (subsystem == undefined)
+                        throw "No such subsystem" + identifier.key;
 
-                        return subsystem.fields.map(function (m) {
-                            return {
-                                namespace: "porthouse.housekeeping",
-                                key: domainObject.identifier.key + "." + m.key
-                            };
-                        });
-                    });
+                    return Promise.resolve(subsystem.fields.map(function (m) {
+                        return {
+                            namespace: "porthouse.housekeeping",
+                            key: domainObject.identifier.key + "." + m.key
+                        };
+                    }));
 
                 }
 
@@ -490,66 +553,7 @@ function PorthouseHousekeepingPlugin(connector, args)
             cssClass: styling.dataPointCssClass
         });
 
-    }
-}
-
-
-
-
-
-
-/*
- * Return dictionary object based on the key
- */
-function getHousekeepingObject(dictionary, key, rootKey) {
-
-    let keys = key.split(".");
-    if (keys[0] !== rootKey)
-        return;
-
-    if (keys.length == 1) {
-        // Root
-        return dictionary;
-    }
-    else if (keys.length == 2) {
-        // Get housekeeping obejct
-        subsystem = dictionary.subsystems.filter( m => (m.key === keys[1]) )[0];
-        if (subsystem === undefined)
-            throw "No such subsystem" + identifier.key;
-        return subsystem;
-    }
-    else if (keys.length == 3) {
-        let subsystem = dictionary.subsystems.filter(m => (m.key === keys[1]))[0];
-        if (subsystem === undefined)
-            throw "No such subsystem" + identifier.key;
-
-        field = subsystem.fields.filter(m => (m.key === keys[2]))[0];
-        if (subsystem === undefined)
-            throw "No such field" + identifier.key;
-
-        return field;
-    }
+    } // end of install()
 
 }
 
-
-
-const LIMITS = {
-
-    rh: {
-        cssClass: "is-limit--upr is-limit--red",
-        name: "Red High"
-    },
-    rl: {
-        cssClass: "is-limit--lwr is-limit--red",
-        name: "Red Low"
-    },
-    yh: {
-        cssClass: "is-limit--upr is-limit--yellow",
-        name: "Yellow High"
-    },
-    yl: {
-        cssClass: "is-limit--lwr is-limit--yellow",
-        name: "Yellow Low"
-    }
-};
