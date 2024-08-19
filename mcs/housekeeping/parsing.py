@@ -1,53 +1,19 @@
 from __future__ import annotations
 
-import os
 import json
 import struct
-from typing import Any, Dict, List, NamedTuple, Union, Optional
+from typing import Any, Dict, List, NamedTuple, Union, Optional, Iterable, Tuple
+
+__all__ = [
+    'Subsystem',
+    'Field',
+    'load_subsystems'
+]
 
 
-_lengths = {"float":4, "uint8":1, "uint16":2, "uint32":4, "uint64":8, "int8":1, "int16":2, "int32":4, }
+_lengths = {"float":4, "double": 8, "uint8":1, "uint16":2, "uint32":4, "uint64":8, "int8":1, "int16":2, "int32":4, }
 _struct_map = {"float":"f", "uint8":"B", "uint16":"H", "uint32":"I", "uint64":"L", "int8":"b", "int16":"h", "int32":"i", }
-_format_types = {"float":float, "integer":int, "string":str}
-
-
-
-
-# A hefty set of assertions to catch malignant housekeeping spec early.
-def check_data_field_correctness(key,name,formatt,raw,enumeration,calibration):
-    try:
-
-        assert isinstance(key, str)
-        assert isinstance(name, str)
-        assert isinstance(formatt, str)
-        assert isinstance(raw, str)
-        assert  raw in _struct_map.keys()
-
-        kk = struct.unpack(_struct_map[raw], os.urandom(_lengths[raw]))[0]
-        assert type(kk) in (int, float)
-
-        assert formatt in _format_types
-
-
-        if enumeration is not None:
-
-            assert isinstance(enumeration, list)
-            # Must have 'string' field
-            assert all([ ("string" in e and isinstance(e["string"], str)) for e in enumeration ])
-            # Must have 'value' field
-            assert all([ ("value" in e and isinstance(e["value"], int)) for e in enumeration ])
-
-            #b4 = [("mask" in e) for e in enum]
-            #assert b4 in ([True]*len(enum), [False]*len(enum) )
-
-        elif calibration is not None:
-            pass # assert isinstance(calibration, list)
-            #assert all([ c in (int, float) for c in calibration ])
-
-    except:
-        raise ValueError("Housekeeping specification in housekeeping.json is off-standard and will not work.")
-
-
+_format_types = {"float":float, "integer":int, "enumeration": str, "string":str}
 
 
 class Subsystem:
@@ -55,25 +21,42 @@ class Subsystem:
     Class to hold housekeeping subsystem structure.
     """
 
-    key: str # Subsystem identifier string
-    name: str # Readable name
-    fields: List[Field] # List of housekeeping fields
+    # Subsystem identifier string
+    key: str
 
-    def __init__(self, key, name, fields):
+    # Readable name
+    name: str
+
+    # List of housekeeping fields
+    fields: List[Field]
+
+
+    def __init__(self,
+            key: str,
+            name: str,
+            fields: List[Field]
+        ):
+        """
+        Initialize
+        """
         self.key = key
         self.name = name
         self.fields = fields
+        self.total_length = sum([ k.length for k in self.fields ])
+
 
     def get_total_length(self):
-        return sum( [k.length for k in self.fields] )
+        """
+        """
+        return self.total_length
+
 
     def parse_blob_for_printing(self, data: bytes) -> Dict[str, Any]:
         """
-        OBSOLETE: eps.get_housekeeping() handles this now if verbose=True
         Not used currently, but there was a plan to use this for printing the units as well.
         """
         if not isinstance(data, bytes):
-            raise ValueError("'data' is not bytes")
+            raise ValueError(f"'data' is not bytes but {type(data)}")
         if self.get_total_length() > len(data):
             raise ValueError(f"Insufficient bytes to parse fields determined by the schema file.\n" \
                              f"Expected for {self.key}: {self.get_total_length()}\nGot: {len(data)}")
@@ -89,20 +72,22 @@ class Subsystem:
         return parse_output
 
 
-    def parse_blob_for_database(self, data: bytes):
+    def parse_blob_for_database(self, data: bytes, raw: bool=False):
         """
         """
         if not isinstance(data, bytes):
-            raise ValueError("'data' is not bytes")
+            raise ValueError(f"'data' is not bytes but {type(data)}")
         if self.get_total_length() > len(data):
             raise ValueError(f"Insufficient bytes to parse fields determined by the schema file.\n" \
                              f"Expected for {self.key}: {self.get_total_length()}\nGot: {len(data)}")
         parse_output = dict()
         cursor = 0
         for field in self.fields:
-            fmtd, raw = field.parse(data, cursor)   # returns the calibrated and raw values
-            cursor += field.length
+            fmtd, vraw = field.parse(data, cursor)   # returns the calibrated and raw values
             parse_output[field.key] = fmtd      # better name would be calibrated, not formatted
+            if raw:
+                parse_output[field.key + "_raw"] = vraw
+            cursor += field.length
         return parse_output
 
 
@@ -110,8 +95,8 @@ class Subsystem:
         """
         Check
         """
-        for field in self.subsystems.field:
-            if field.name == field_name:
+        for field in self.fields:
+            if field.key == field_name:
                 return True
         return False
 
@@ -124,31 +109,108 @@ class Subsystem:
             if not self.has_field(field_name):
                 raise RuntimeError(f"No such housekeeping field {field_name}")
 
-
+CalibratedType = Union[int, float, str]
 
 class Field:
     """
     Class to hold housekeeping field information.
     """
 
+    # Field identifier
     key: str
+
+    # Field name
     name: str
-    format: str
-    raw: str
+
+    # Type format
+    format_type: str
+
+    # Raw type
+    raw_type: str
+
+    # Physical units
     units: Optional[str]
-    enumeration: Optional[int]
-    calibration: Optional[int]
-    length: int
 
-    def __init__(self, **kwargs):
-        self.__dict__.update( kwargs )
-        #check_data_field_correctness(key,name,format,raw,enumeration,calibration)
+    # Type enumeration definition
+    enumeration: Optional[List[Dict[str,int]]]
+
+    # Calibration
+    calibration: Optional[List[float]]
+
+    # Limits
+    limits: Optional[List[int]] # TODO:
+
+
+    def __init__(self,
+            key: str,
+            name: str,
+            format_type: str,
+            raw_type: str,
+            units: Optional[str]=None,
+            enumeration: Optional[int]=None,
+            calibration: Optional[int]=None,
+            limits: Optional[List[int]]=None,
+            **kwargs
+        ):
+        """
+        Initialize housekeeping field
+        """
+
+        if not isinstance(key, str) or len(key) == 0:
+            raise ValueError(f"The key is not a string but {type(key)}.")
+        if not isinstance(name, str):
+            raise ValueError(f"The name is not a string but {type(name)}.")
+        if format_type not in _format_types:
+            raise ValueError(f"Format type {format_type!r} is not supported.")
+        if raw_type not in _struct_map.keys():
+            raise ValueError(f"Raw type {raw_type!r} is not supported.")
+
+        if calibration is not None:
+            if not isinstance(calibration, list):
+                raise ValueError(f"The calibration is not a list but {type(calibration)}.")
+            #if any([ c not in (int, float) for c in calibration ]):
+            #    raise ValueError(f"The calibration coeff is not a number. {calibration!r}.")
+
+        if enumeration is not None:
+            if not isinstance(enumeration, list):
+                raise ValueError(f"The enumeration is not a list but {type(enumeration)}")
+
+            for e in enumeration:
+                if "string" not in e or not isinstance(e["string"], str):
+                    raise ValueError(f"A enumeration is missing a string field. {e!r}")
+                if "value" not in e or not isinstance(e["value"], int):
+                    raise ValueError(f"A enumeration is missing a value field. {e!r}")
+
+        if calibration is not None and enumeration is not None:
+            raise ValueError("Both calibration and enumeration provided")
+
+        if limits is not None:
+            pass # TODO
+
+        self.key = key
+        self.name = name
+        self.format_type = format_type
+        self.raw_type = raw_type
+        self.units = units
+        self.enumeration = enumeration
+        self.calibration = calibration
+
+
     @property
-    def length(self):
-        return _lengths[self.raw]
+    def length(self) -> int:
+        """ Length of the raw """
+        return _lengths[self.raw_type]
 
 
-    def parse(self, data: bytes, cursor: int):
+    def format(self, calibrated_val: CalibratedType) -> str:
+        """ """
+        if units := hasattr(self, "units", None):
+            return f"{calibrated_val} {units}"
+        else:
+            return f"{calibrated_val}"
+
+
+    def parse(self, data: bytes, cursor: int): # -> Tuple[, str]:
         """
         Parses a (name,value) format expression individual field of housekeeping report.
         Return types are:
@@ -158,49 +220,36 @@ class Field:
         (str, [str, ...])                 //enum_name:  [name]   state name list
         """
 
-        if self.length > (len(data) - cursor):
+        if self.length > len(data) - cursor:
             raise ValueError(f"Unexpected end of bytes string. {self.key:=} {cursor:=}")
 
-        d = data[cursor:cursor+self.length]
-        parsed = struct.unpack(_struct_map[self.raw], d)[0]
-        parsed_raw = parsed
+        # Parse raw value from bytes
+        raw_value = struct.unpack(_struct_map[self.raw_type], data[cursor:cursor + _lengths[self.raw_type]])[0]
 
-        if hasattr(self, "calibration"):
-            parsed = self.calibrate(parsed)
+        if self.calibration:
+            # Evaluate calibration function
 
-        if hasattr(self, "enumeration"):
-            enum_return = self.parse_enum(parsed)
-            return enum_return, parsed_raw
+            # TODO: More generic calibration algorithms
+            # cal_type = self.calibration["type"]
+            # if cal_type == "polynomial":
+            calibrated_val = sum([ coeff * (raw_value**power) for power, coeff in enumerate(self.calibration) ])
 
-        formatted_value = _format_types[self.format](parsed)
-             # calibrated_val,  raw_val
-        return formatted_value, parsed_raw
+        elif self.enumeration:
+            # Evaluate enumerations
 
+            calibrated_val = " | ".join([
+                str(elem["string"])
+                for elem in self.enumeration
+                if raw_value & elem.get("mask", 0xFFFFFFFF) == elem["value"]
+            ])
 
-    def calibrate(self, raw: Union[int, float]) -> float:
-        """
-        """
-        if not(hasattr(self, "calibration")):
-            return raw
+        else:
+            calibrated_val = raw_value
 
-        return raw * self.calibration[0] + self.calibration[1]
-        #return sum([ self.calibration[p] * (raw**p) for p in range(len(self.calibration)) ])
-        # TODO: More generic calibration algorithms
+        # Ensure the returned is in
+        calibrated_val = _format_types[self.format_type](calibrated_val)
 
-    def parse_enum(self, raw: int) -> str:
-        """
-        """
-        if not(hasattr(self, "enumeration")):
-            return ""
-        return " | ".join([
-            elem["string"]
-            for elem in self.enumeration
-            if raw & elem.get("mask", 0xFFFFFFFF) == elem["value"]
-        ])
-
-
-
-
+        return calibrated_val, raw_value
 
 
 def load_subsystems(schema_path: str) -> Dict[str, Subsystem]:
@@ -211,14 +260,12 @@ def load_subsystems(schema_path: str) -> Dict[str, Subsystem]:
     with open(schema_path, "r") as f:
         schema = json.load(f)
 
-    hkss = dict()
-    for x in schema["subsystems"]:
-        subsystem = x
-        subsystem_key = subsystem["key"]
-        subsystem_name = subsystem["name"]
-        fields_dict = subsystem["fields"]
-        field_list = []
-        for fld in fields_dict:
-            field_list.append(Field(**fld))
-        hkss[subsystem["key"]] = Subsystem(subsystem_key, subsystem_name, field_list)
-    return hkss
+    subsystems = dict()
+    for subsystem in schema["subsystems"]:
+        subsystems[subsystem["key"]] = Subsystem(
+            key=subsystem["key"],
+            name=subsystem["name"],
+            fields=[ Field(**field) for field in subsystem["fields"] ]
+        )
+
+    return subsystems

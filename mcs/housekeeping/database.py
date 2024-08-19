@@ -1,6 +1,6 @@
 import json
 import psycopg2
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 from typing import Any, Dict, Generator, List, Optional, Sequence, Union
 
@@ -8,7 +8,6 @@ from porthouse.core.db_tools import check_table_exists
 from .parsing import Subsystem, Field, load_subsystems
 
 
-#TODO: fix time_bucket: 176.
 
 class HousekeepingError(RuntimeError):
     """ Generic class for database API errors """
@@ -38,7 +37,7 @@ FMT2PSQL = {
     "double": "DOUBLE PRECISION",
     "binary": "INT",
     "hex": "INT",
-    "enum": "VARCHAR(256)",
+    "enumeration": "VARCHAR(256)",
     "string": "VARCHAR(256)"
 }
 
@@ -98,32 +97,35 @@ class HousekeepingDatabase:
         if self.cursor is None:
             raise HousekeepingError("No database connection!")
 
-        cmd = f"CREATE TABLE IF NOT EXISTS {subsystem.key} ("
-        cmd += "id SERIAL"
-        cmd += ", timestamp TIMESTAMP UNIQUE NOT NULL"
-        cmd += ", source VARCHAR(256) NOT NULL"
-        cmd += ", metadata JSON DEFAULT NULL"
+
+        fields = [
+            "id SERIAL",
+            "timestamp TIMESTAMP UNIQUE NOT NULL",
+            "source VARCHAR(256) NOT NULL",
+            "metadata JSON DEFAULT NULL",
+        ]
 
         for field in subsystem.fields:
 
             try:
-                raw_type = RAW2PSQL[field.raw]
                 # NOTE: enumerations do not have calibration but they need format
-                if hasattr(field, "calibration") or hasattr(self, "enumeration"):
-                    cal_type = FMT2PSQL[field.format]
-                else:
-                    cal_type = RAW2PSQL[field.raw]
+                #if hasattr(field, "calibration") or hasattr(self, "enumeration"):
+                #    cal_type = FMT2PSQL[field.format]
+                #else:
+                #    cal_type = RAW2PSQL[field.raw]
+                raw_type = RAW2PSQL[field.raw_type]
+                cal_type = FMT2PSQL[field.format_type]
 
-                tm_field = f", {field.key} {cal_type} NOT NULL"
-                tm_field += f", {field.key}_raw {raw_type} DEFAULT NULL"
-                cmd += tm_field
+                fields.append(f"{field.key} {cal_type} NOT NULL")
+                fields.append(f"{field.key}_raw {raw_type} DEFAULT NULL")
 
             except KeyError as e:
                 raise SchemaError(f"{subsystem.key}.{field.key} missing field {e}")
 
-        stmt = cmd + ");"
-
+        stmt = f"CREATE TABLE IF NOT EXISTS {subsystem.key} (\n  " + ",\n  ".join(fields) + "\n);"
+        print(stmt)
         self.cursor.execute(stmt)
+        #return
 
         # Creates timescaledb hypertable from table.
         try:
@@ -184,11 +186,16 @@ class HousekeepingDatabase:
             db_url: Database connector URL ("postgres://user:password@host/database")
         """
 
-        db_url = urlparse(db_url)
-        self.connection = psycopg2.connect("dbname='{0}' user='{1}' host='{2}' password='{3}'".format(
-            db_url.path[1:], db_url.username, db_url.hostname, db_url.password))
-        self.connection.autocommit = True
+        parsed = urlparse(db_url)
+        self.connection = psycopg2.connect(
+            dbname=parsed.path[1:], # Remove the first slash
+            user=parsed.username,
+            password=parsed.password,
+            host=parsed.hostname,
+            port=parsed.port,
+        )
 
+        self.connection.autocommit = True
         self.cursor = self.connection.cursor()
 
 
@@ -210,13 +217,13 @@ class HousekeepingDatabase:
 
         if isinstance(start_date, datetime):
             start_date = start_date.isoformat()
-        if isinstance(start_date, int) or isinstance(start_date, float):
-            start_date = datetime.utcfromtimestamp(start_date).isoformat()
+        if isinstance(start_date, (int, float)):
+            start_date = datetime.fromtimestamp(start_date, tz=timezone.utc).isoformat()
 
         if isinstance(end_date, datetime):
             end_date = end_date.isoformat()
-        if isinstance(end_date, int) or isinstance(end_date, float):
-            end_date = datetime.utcfromtimestamp(end_date).isoformat()
+        if isinstance(end_date, (int, float)):
+            end_date = datetime.fromtimestamp(end_date, tz=timezone.utc).isoformat()
 
         return f"timestamp >= '{end_date}' AND timestamp <= '{start_date}'"
 
@@ -265,37 +272,34 @@ class HousekeepingDatabase:
 
         constraint = self.create_time_constraint(start_date, end_date)
 
-        stmt = "SELECT timestamp"
+        #if not subsystem.has_field(fields):
+        #    raise HousekeepingError(f"No such housekeeping field {field_name!r}")
+
+        columns = [ "timestamp" ]
         if with_source:
-            stmt += ", source"
+            columns.append("source")
         if with_metadata:
-            stmt += ", metadata"
+            columns.append("metadata")
 
         for field_name in fields:
-            if not subsystem.has_field(field_name):
-                raise HousekeepingError(f"No such housekeeping field {field_name!r}")
-            stmt += f", {field_name}"
+            columns.append(field_name)
             if with_raw:
-                stmt += f", {field_name}_raw"
+                columns.append(field_name + "_raw")
 
-        stmt += f" FROM {subsystem.key}"
-        stmt += f" WHERE {constraint}"
-        stmt += " ORDER BY timestamp DESC"
-        if limit:
-            stmt += f"LIMIT {limit}"
+
+        stmt = f"SELECT {', '.join(columns)} FROM {subsystem.key} WHERE {constraint} ORDER BY timestamp DESC"
+        if limit: stmt += f"LIMIT {limit}"
         stmt += ";"
 
 
         try:
             self.cursor.execute(stmt)
-            colnames = [desc[0] for desc in self.cursor.description]
-
             if generator:
                 for line in self.cursor:
-                    yield dict(zip(colnames, line))
+                    yield dict(zip(columns, line))
 
             else:
-                return list([ dict(zip(colnames, line)) for line in self.cursor.fetchall() ])
+                return list([ dict(zip(columns, line)) for line in self.cursor.fetchall() ])
 
         except psycopg2.ProgrammingError as e:
             raise DatabaseError(str(e)) from e
@@ -335,10 +339,13 @@ class HousekeepingDatabase:
         if start_date < end_date:
             start_date, end_date = end_date, start_date
 
-        constraint = self.create_time_constraint(start_date, end_date)
 
         # Calculate the size of the bin/bucket
-        bucket = (start_date - end_date) / size
+        bucket = (start_date - end_date).total_seconds() // size
+        if bucket <= 1:
+            return self.query(subsystem_key=subsystem_key, fields=fields, start_date=start_date, end_date=end_date, generator=generator)
+
+        constraint = self.create_time_constraint(start_date, end_date)
 
         stmt = f"SELECT time_bucket('{bucket} seconds', timestamp) AS timestamp"
         for field_name in fields:
@@ -347,11 +354,7 @@ class HousekeepingDatabase:
             stmt += f", AVG({field_name}) AS {field_name}_avg"
             stmt += f", MIN({field_name}) AS {field_name}_min"
             stmt += f", MAX({field_name}) AS {field_name}_max"
-        stmt += f" FROM {subsystem.key}"
-        stmt += f" WHERE {constraint}"
-        stmt += " GROUP BY bucket, timestamp"
-        stmt += " ORDER BY bucket, timestamp DESC"
-        stmt += ";"
+        stmt += f" FROM {subsystem.key} WHERE {constraint} GROUP BY timestamp ORDER BY timestamp DESC;"
 
         try:
             self.cursor.execute(stmt)
@@ -359,7 +362,9 @@ class HousekeepingDatabase:
 
             if generator:
                 for line in self.cursor:
-                    yield dict(zip(colnames, line))
+                    x = dict(zip(colnames, line))
+                    x["timestamp"] = x["timestamp"].replace(tzinfo=timezone.utc)
+                    yield x
 
             else:
                 return list([ dict(zip(colnames, line)) for line in  self.cursor.fetchall() ])
@@ -378,7 +383,7 @@ class HousekeepingDatabase:
             with_raw: bool=False,
             with_source: bool=False,
             with_metadata: bool=False
-        ) -> HousekeepingEntry:
+        ) -> Optional[HousekeepingEntry]:
         """
         Retrieve latest housekeeping values for the subsystem.
 
@@ -433,7 +438,9 @@ class HousekeepingDatabase:
                 return None
             colnames = [desc[0] for desc in self.cursor.description]
 
-            return dict(zip(colnames, data))
+            x = dict(zip(colnames, data))
+            x["timestamp"] = x["timestamp"].replace(tzinfo=timezone.utc)
+            return x
 
         except psycopg2.ProgrammingError as e:
             raise DatabaseError(str(e)) from e
@@ -444,7 +451,7 @@ class HousekeepingDatabase:
             timestamp: DatetimeTypes,
             source: Optional[str],
             metadata: Optional[Union[Dict, str]],
-            fields: Union[str, Sequence[str]]
+            fields: Dict[str, Any]
         ) -> None:
         """
         Inserts a new housekeeping frame into db.
@@ -460,19 +467,21 @@ class HousekeepingDatabase:
         if self.cursor is None:
             raise HousekeepingError("No database connection!")
 
+
         subsystem = self.get_subsystem_object(subsystem_key)
 
-        stmt = f"INSERT INTO {subsystem.key}(timestamp, source, metadata, "
-        stmt += ", ".join([ field.id for field in subsystem.fields ]) + ") "
-
-        stmt += f"VALUES ('{timestamp}', '{source}', '{json.dumps(metadata)}'"
-
+        names, values = [], []
         for field in subsystem.fields:
             if field.key not in fields:
                 raise HousekeepingError(f"Missing field {field.key}")
-            stmt += f", {fields[field.key]!r}"
-        stmt += ");"
+            names.append(field.key)
+            values.append(repr(fields[field.key]))
 
+
+        stmt  = f"INSERT INTO {subsystem.key} (timestamp, source, metadata, {', '.join(names)}) "
+        stmt += f"VALUES ('{timestamp}', '{source}', '{json.dumps(metadata)}', {', '.join(values)} );"
+
+        print(stmt)
         try:
             self.cursor.execute(stmt)
         except (psycopg2.IntegrityError, ValueError) as e:
@@ -508,7 +517,7 @@ class HousekeepingDatabase:
 
             if field.calibration:
                 value = field.calibrate(raw)
-            elif field.enum:
+            elif field.enumeration:
                 value = field.parse_enum(raw)
             else:
                 value = raw
