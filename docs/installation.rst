@@ -50,7 +50,7 @@ Installation of porthouse Python library
 
 .. code-block:: console
 
-    $ pip3 install .
+    $ pip3 install -e .
 
 5) Create template configuration
 
