@@ -76,7 +76,7 @@ def create_template_config() -> None:
             f"amqp_url: amqp://guest:guest@localhost:5672/\n"
             f"db_url: postgres://mcs:PASSWORD@localhost/porthouse\n"
             f"log_path: {os.path.join(_dir, 'logs')}\n"
-            f"FS1p_GS: \n"
+            f"#hk_schema: \n"       #use 'foresail1p_hk_schema' here?
         )
 
     print("Creating 'groundstation.yaml' file")
