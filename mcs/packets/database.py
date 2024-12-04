@@ -224,9 +224,14 @@ if __name__ == "__main__":
     import sys
     from porthouse.core.config import load_globals
     cfg = load_globals()
-    PacketsDatabase(
-        db_url=cfg["db_url"],
-        create_tables=("--create_tables" in sys.argv)   
-    )
+    if "--create_tables" in sys.argv:
+        PacketsDatabase(
+            db_url=cfg["db_url"],
+            create_tables=True
+        )
+        print("Done.")
+    else:
+        print("Usage: python3 database.py [--create_tables]")
+
 
 

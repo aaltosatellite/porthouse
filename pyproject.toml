@@ -24,12 +24,15 @@ classifiers = [
 ]
 
 dependencies = [
+    "numpy",
+    "matplotlib",
     "aiormq",
     "amqp",
     "skyfield",
     "ptpython",
     "argcomplete",
-    "PyYAML"
+    "PyYAML",
+    "websockets"
 ]
 
 [project.urls]

@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from typing import Any, Dict, Generator, List, Optional, Sequence, Union
 
 from porthouse.core.db_tools import check_table_exists
-from .parsing import Subsystem, Field, load_subsystems
+from porthouse.mcs.housekeeping.parsing import Subsystem, Field, load_subsystems
 
 
 
@@ -555,3 +555,7 @@ if __name__ == "__main__":
             create_tables=True
         )
         print("Done.")
+        exit()
+    else:
+        print("Usage: python3 database.py --create_tables schema.json")
+        exit(1)
