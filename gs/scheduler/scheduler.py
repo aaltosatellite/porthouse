@@ -744,7 +744,9 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         obj = None
         try:
             if CelestialObject.is_class_of(process.target):
-                obj = await self.get_celestial_object(**kwargs)
+                # always generate tasks, even if no start or end event detected:
+                #   - start by default, end by partial_last_pass=True
+                obj = await self.get_celestial_object(partial_last_pass=True, **kwargs)
             else:
                 obj = await self.get_satellite(**kwargs)
         except Exception as e:
