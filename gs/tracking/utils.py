@@ -298,6 +298,15 @@ class Satellite:
             print("No passes found, debug info: "
                   f"{t_event} | {events} | {start_time - timedelta(seconds=60)} | {end_time + timedelta(seconds=60)} | "
                   f"{min_elevation} | {min_max_elevation} | {sun_max_elevation} | {sunlit}")
+
+        # sanity check
+        secs_per_half_orbit = 0.5 / (self.sc.model.no_kozai/np.pi/2/60)   # for inf high orbit
+        for p in self.passes:
+            if (p.t_los - p.t_aos).total_seconds() > secs_per_half_orbit:
+                print(f"Pass too long ({p.t_aos} - {p.t_los}, half orbit [s]: {secs_per_half_orbit}): {p}, debug info: "
+                      f"{t_event} | {events} | {start_time - timedelta(seconds=60)} | {end_time + timedelta(seconds=60)} | "
+                      f"{min_elevation} | {min_max_elevation} | {sun_max_elevation} | {sunlit}")
+
         return self.passes
 
 
