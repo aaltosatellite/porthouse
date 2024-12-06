@@ -636,14 +636,13 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
         if ele is None:
             ele = elevation(t)
 
-        obj_above_horizon = ele > min_elevation
+        tests = [ele > min_elevation]
 
-        sun_below_horizon = np.ones_like(obj_above_horizon)
         if max_sun_elevation is not None:
             # check that its dark (addition by me)
             sun_below_horizon = gs.at(t).observe(ephem['Sun']).apparent().altaz()[0].degrees < max_sun_elevation
+            tests.append(sun_below_horizon)
 
-        obj_sunlit = np.ones_like(obj_above_horizon)
         if sunlit is not None:
             # check whether the object is sunlit (addition by me)
             if not accurate:
@@ -655,15 +654,16 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
 
             if not sunlit:
                 obj_sunlit = np.logical_not(obj_sunlit)
+            tests.append(obj_sunlit)
 
-        return np.logical_not(np.logical_and.reduce((obj_above_horizon, sun_below_horizon, obj_sunlit)))
+        return np.logical_not(np.logical_and.reduce(tests))
 
     def masked_elevation(t):
         ele = elevation(t)
         mask = unobservable_at(t, ele)
         if mask.ndim == 0:
             return 0.0 if mask else ele
-        ele[mask] = 0.0
+        ele[mask] -= 180.0
         return ele
 
     masked_elevation.step_days = min(0.25, 0.05 / max(orbits_per_day, 1.0))  # determines initial step size
@@ -703,7 +703,7 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
     jdo = (doublets[:-1] + doublets[1:]) / 2.0
 
     # Use searchlib._find_discrete to find rising and setting events
-    trs, rs = searchlib._find_discrete(t0.ts, jdo, unobservable_at, 0.001 / day_in_secs, 12)
+    trs, rs = searchlib._find_discrete(t0.ts, jdo, unobservable_at, 0.5 / day_in_secs, 8)
 
     jd = np.concatenate((jdmax, trs.tt))
     v = np.concatenate((ones, rs * 2))
@@ -790,3 +790,21 @@ def angle_between_el_az_deg(az1, el1, az2, el2):
     v1 = spherical2cartesian_deg(az1, el1)
     v2 = spherical2cartesian_deg(az2, el2)
     return angle_between_deg(v1, v2)
+
+
+if __name__ == "__main__":
+    target = "Suomi-100"
+    gs = GroundStation()
+    tle = {
+        "Suomi-100": {
+            "name": "Suomi-100",
+            "tle1": "1 43804U 18099AY  24341.14375093  .00014948  00000-0  85933-3 0  9999\r",
+            "tle2": "2 43804  97.5033  36.1570 0015289  73.3563 286.9345 15.12480927328618\r",
+        },
+    }[target]
+
+    sat = Satellite(target, tle["tle1"], tle["tle2"], gs.pos)
+    sat.calculate_passes(start_time="2024-12-06T10:00:00", end_time="2024-12-08T10:00:00",
+                         min_elevation=0.0, min_max_elevation=0.0,
+                         sun_max_elevation=None, sunlit=None)
+    print(sat.passes)
