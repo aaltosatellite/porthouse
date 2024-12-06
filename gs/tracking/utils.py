@@ -611,9 +611,6 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
     assert sunlit is None or ephem is not None and 'Sun' in ephem and 'Earth' in ephem, \
         "Sun and Earth positions required through the ephem param for sunlit=True"
 
-    day_in_secs = 24 * 60 * 60
-    half_second = 0.5 / day_in_secs
-
     if not accurate:
         # for close objects such as low Earth orbit satellites, ignores e.g. light travel time
         def cheat(t):
@@ -675,7 +672,8 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
         eles = masked_elevation(ts.tt_jd(np.linspace(t0.tt, t1.tt, 100)))
         print(f"Elevations between {t0.tt} and {t1.tt} (step_days: {masked_elevation.step_days}): {eles}")
 
-    t_max, el_max = searchlib.find_maxima(t0, t1, masked_elevation, half_second, 12)
+    day_in_secs = 24 * 60 * 60
+    t_max, el_max = searchlib.find_maxima(t0, t1, masked_elevation, 0.5 / day_in_secs, 12)
 
     if margin_s > 0:
         t_max = ts.tt_jd([t0.tt] + list(t_max.tt) + [t1.tt])
@@ -705,7 +703,7 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
     jdo = (doublets[:-1] + doublets[1:]) / 2.0
 
     # Use searchlib._find_discrete to find rising and setting events
-    trs, rs = searchlib._find_discrete(t0.ts, jdo, unobservable_at, half_second, 8)
+    trs, rs = searchlib._find_discrete(t0.ts, jdo, unobservable_at, 0.001 / day_in_secs, 12)
 
     jd = np.concatenate((jdmax, trs.tt))
     v = np.concatenate((ones, rs * 2))
