@@ -127,10 +127,11 @@ class ControllerBox(RotatorController):
         maz, mel = self.rotator_model.to_motor(az, el)
 
         if self.control_sw_version > 2:
-            t0 = (time.time_ns() - self.epoch) / 1e9
+            adj = 1.25e9 if True else 0.0  # anticipate satellite movement by 1.25 s?
+            t0 = (time.time_ns() + adj - self.epoch) / 1e9
             self._write_command(f"ST {t0 + self.sync_offset:.6f}".encode("ascii"))
             resp = self._read_response()
-            t1 = (time.time_ns() - self.epoch) / 1e9
+            t1 = (time.time_ns() + adj - self.epoch) / 1e9
             self.sync_offset = (t1 - t0) / 2
             dt, gain = self._parse_position_output(resp)
             self.log.debug(f"Time-sync, rtt: {t1-t0:.6f} s, diff: {dt:.6f} s, gain: {gain:.3e} s/tick")
