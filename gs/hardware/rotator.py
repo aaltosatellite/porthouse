@@ -39,13 +39,13 @@ class Rotator(BaseModule):
 
         # TOGGLES between manual rotator use or tracker-controlled automatic mode.
         self.tracking_enabled = tracking_enabled
-        self.log.debug("Tracking enabled: %s" % (self.tracking_enabled,))
+        self.log.info("Tracking enabled: %s" % (self.tracking_enabled,))
 
         self.motion_logging = motion_logging
-        self.log.debug("Motion logging enabled: %s" % (self.motion_logging,))
+        self.log.info("Motion logging enabled: %s" % (self.motion_logging,))
 
         self.preaos_sequence = preaos_sequence
-        self.log.debug("Pre-AOS sequence is enabled: %s" % (self.preaos_sequence,))
+        self.log.info("Pre-AOS sequence is enabled: %s" % (self.preaos_sequence,))
 
         # min azimuth, max azimuth, min elevation, max elevation
         assert position_range[0] < position_range[1], "azimuth min must be smaller than azimuth max"
@@ -53,12 +53,12 @@ class Rotator(BaseModule):
 
         # only move while position difference is larger, given in degrees
         self.threshold = threshold
-        self.log.debug("Threshold: %s" % (self.threshold,))
+        self.log.info("Threshold: %s" % (self.threshold,))
 
         # refresh current position info this many times per second when rotating to target
         #  - affects how often hardware functions are called
         self.refresh_rate = refresh_rate
-        self.log.debug("Refresh rate [Hz]: %s" % (self.refresh_rate,))
+        self.log.info("Refresh rate [Hz]: %s" % (self.refresh_rate,))
 
         self.prev_status = None
 
@@ -96,10 +96,10 @@ class Rotator(BaseModule):
                                   horizon_map_file=horizon_map_file, min_sun_angle=min_sun_angle,
                                   log=self.log, debug=self.debug)
         self.default_dutycycle_range = self.rotator.get_dutycycle_range()
-        self.log.debug("Duty-cycle range: %s" % (self.default_dutycycle_range,))
-        self.log.debug("Minimum Sun Angle: %s" % (self.rotator.min_sun_angle,))
-        self.log.debug("Horizon map file: %s" % (self.rotator.horizon_map_file,))
-        self.log.debug("Control SW Version: %s" % (self.rotator.control_sw_version,))
+        self.log.info("Duty-cycle range: %s" % (self.default_dutycycle_range,))
+        self.log.info("Minimum Sun Angle: %s" % (self.rotator.min_sun_angle,))
+        self.log.info("Horizon map file: %s" % (self.rotator.horizon_map_file,))
+        self.log.info("Control SW Version: %s" % (self.rotator.control_sw_version,))
 
         if self.debug:
             os.makedirs("logs", exist_ok=True)

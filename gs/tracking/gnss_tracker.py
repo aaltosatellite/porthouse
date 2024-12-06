@@ -47,7 +47,7 @@ class PointTracker(BaseModule):
         self.observer = GPSPosition(observer["latitude"], observer["longitude"], observer.get("elevation", 0))
 
         if predict_movement:
-            task = asyncio.create_task(self.predict_task(), name="gnss_tracker.predict_task")
+            task = asyncio.get_event_loop().create_task(self.predict_task(), name="gnss_tracker.predict_task")
             task.add_done_callback(self.task_done_handler)
 
     def is_interesting_callsign(self, callsign: str) -> bool:

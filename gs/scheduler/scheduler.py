@@ -107,14 +107,15 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
         # check for tasks that should start
         for task in self.schedule.start_times:
-            if task.start_time <= now < task.end_time and task.status == TaskStatus.SCHEDULED:
-                await self.start_task(task)
-            elif task.start_time > now:
-                if self._debug_log_time + timedelta(seconds=10) <= now:
-                    self._debug_log_time = now
-                    self.log.debug(f"Task \"{task.task_name}\" starting in {task.start_time - now}"
-                                   f" ({task.start_time}) channel ok: {not self.channel.is_closed}")
-                break
+            if task.status == TaskStatus.SCHEDULED:
+                if task.start_time <= now < task.end_time:
+                    await self.start_task(task)
+                elif task.start_time > now:
+                    if self._debug_log_time + timedelta(seconds=10) <= now:
+                        self._debug_log_time = now
+                        self.log.debug(f"Task \"{task.task_name}\" starting in {task.start_time - now}"
+                                       f" ({task.start_time}) channel ok: {not self.channel.is_closed}")
+                    break
 
         # check for tasks that should be terminated or removed
         remove_tasks = []
@@ -155,7 +156,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 # first schedule creation after startup, generate from now to 48h into the future
                 start_time = now if start_time is None else start_time
 
-            self.schedule_updated_date = now
+            if process_name is None:
+                self.schedule_updated_date = now
 
             if start_time is None:
                 end_times = [task.end_time for task in self.schedule.end_times
