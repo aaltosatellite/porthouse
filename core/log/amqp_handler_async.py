@@ -55,7 +55,7 @@ class AMQPLogHandler(logging.Handler):
         }).encode("ascii")
 
         # TODO: The ugly part!
-        asyncio.create_task(self.channel.basic_publish(msg, exchange='log', routing_key=record.levelname.lower()))
+        asyncio.get_event_loop().create_task(self.channel.basic_publish(msg, exchange='log', routing_key=record.levelname.lower()))
 
 
 if __name__ == "__main__":
