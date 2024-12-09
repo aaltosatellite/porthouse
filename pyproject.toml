@@ -32,7 +32,7 @@ dependencies = [
     "ptpython",
     "argcomplete",
     "PyYAML",
-    "websockets"
+    "websockets>=8.0,<=13.1"
 ]
 
 [project.urls]
