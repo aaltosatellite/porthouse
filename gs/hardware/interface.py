@@ -22,7 +22,6 @@ class RotatorInterface:
         else:
             return status
 
-
     async def move(
             self,
             az: float,
@@ -39,6 +38,18 @@ class RotatorInterface:
         """
         await send_rpc_request("rotator", f"{self.prefix}.rpc.rotate", {
             "az": az, "el": el, "shortest": shortest
+        })
+
+    async def adjust(self, d_az: float, d_el: float):
+        """
+        Adjust position temporarily by given azimuth-elevation deltas.
+
+        Args:
+            d_az: Delta azimuth angle
+            d_el: Delta elevation angle
+        """
+        await send_rpc_request("rotator", f"{self.prefix}.rpc.adjust", {
+            "d_az": d_az, "d_el": d_el
         })
 
     async def reset_position(

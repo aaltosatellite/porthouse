@@ -207,6 +207,8 @@ class ControllerBox(RotatorController):
                        az: float,
                        el: float) -> None:
 
+        self.rotator_model.az_off = 0
+        self.rotator_model.el_off = 0
         maz, mel = self.rotator_model.to_motor(az, el)
 
         # Force current position to be az, el

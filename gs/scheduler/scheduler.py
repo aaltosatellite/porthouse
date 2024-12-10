@@ -239,7 +239,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         self.write_processes(skip_main=deny_main)
         return True
 
-    def update_process(self, process_dict, affect_tasks=True, deny_main=True):
+    async def update_process(self, process_dict, affect_tasks=True, deny_main=True):
         """
         Update process in the scheduler
         """
@@ -260,8 +260,11 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 if task.process_name == process.process_name:
                     if process.enabled and task.status == TaskStatus.NOT_SCHEDULED:
                         task.status = TaskStatus.SCHEDULED
-                    elif not process.enabled and task.status == TaskStatus.SCHEDULED:
-                        task.status = TaskStatus.NOT_SCHEDULED
+                    elif not process.enabled:
+                        if task.status == TaskStatus.SCHEDULED:
+                            task.status = TaskStatus.NOT_SCHEDULED
+                        elif task.status == TaskStatus.ONGOING:
+                            await self.remove_task(task.task_name, deny_main=deny_main)
             self.write_schedule()
         return True
 
@@ -606,7 +609,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             # Update an existing process. Existing process storage type must be MISC.
             # Request data must be a dict understood by the Process.from_dict constructor.
             #
-            ok = self.update_process(request_data)
+            ok = await self.update_process(request_data)
             return {"success": ok}
 
         elif request_name == "rpc.remove_process":

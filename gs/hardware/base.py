@@ -220,6 +220,23 @@ class RotatorController(abc.ABC):
 
         return self.get_position_range()
 
+    def adjust(self, d_az: float, d_el: float) -> None:
+        """
+        Adjust the current position by the given azimuth and elevation deltas.
+
+        Args:
+            d_az: Azimuth delta
+            d_el: Elevation delta
+        """
+        self.rotator_model.az_off += d_az
+        self.rotator_model.el_off += d_el
+
+    def total_adjustment(self) -> Tuple[float, float]:
+        """
+        Get the total adjustment of the rotator.
+        """
+        return self.rotator_model.az_off, self.rotator_model.el_off
+
     @abc.abstractmethod
     def reset_position(self, az: float, el: float) -> None:
         """
