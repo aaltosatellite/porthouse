@@ -203,6 +203,8 @@ class Rotator(BaseModule):
             "el_target": self.target_position[1],
             "az_vel_trg": self.target_velocity[0],
             "el_vel_trg": self.target_velocity[1],
+            "az_off": self.rotator.total_adjustment()[0],
+            "el_off": self.rotator.total_adjustment()[1],
             "ts_target": self.target_timestamp,
             "tracking": status,
             "rotating": self.moving_to_target,
@@ -412,6 +414,14 @@ class Rotator(BaseModule):
             # Send stop command
             self.target_valid = False
             self.rotator.stop()
+
+        elif request_name == "rpc.adjust":
+            d_az, d_el = float(request_data['d_az']), float(request_data['d_el'])
+            if abs(d_az) > 5 and abs(d_el) > 5:
+                raise RPCError("Too large adjustment, max adjustment is 5 degrees")
+            self.rotator.adjust(d_az, d_el)
+            az_off, el_off = self.rotator.total_adjustment()
+            return {"az_off": az_off, "el_off": el_off}
 
         elif request_name == "rpc.reset_position":
             target = float(request_data['az']), float(request_data['el'])
