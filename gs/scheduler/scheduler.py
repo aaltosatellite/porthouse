@@ -37,10 +37,10 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
         self.main_schedule_file = main_schedule_file
         self.misc_schedule_file = misc_schedule_file
-        self.schedule = Schedule()
+        self.schedule = Schedule(self)
         self.schedule_updated_date = None
         self._create_schedule_task = None
-        self._debug_log_time = datetime.utcfromtimestamp(0).replace(tzinfo=timezone.utc)
+        self._debug_log_time = datetime.fromtimestamp(0).replace(tzinfo=timezone.utc)
 
         # Schedule updating via execution, new task creation, api task addition & removal  can in general be done
         # concurrently. However, schedule updating by reloading the schedule file should be done exclusively.
@@ -262,7 +262,10 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                         task.status = TaskStatus.SCHEDULED
                     elif not process.enabled:
                         if task.status == TaskStatus.SCHEDULED:
-                            task.status = TaskStatus.NOT_SCHEDULED
+                            # before was so that task continued to reserve a place in the schedule with:
+                            #   task.status = TaskStatus.NOT_SCHEDULED
+                            # now we remove the task from the schedule
+                            await self.remove_task(task.task_name, deny_main=deny_main)
                         elif task.status == TaskStatus.ONGOING:
                             await self.remove_task(task.task_name, deny_main=deny_main)
             self.write_schedule()
@@ -297,7 +300,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             return
 
         async with self.schedule_lock:
-            self.schedule = Schedule()
+            self.schedule = Schedule(self)
 
             for file, storage in ((self.main_schedule_file, Task.STORAGE_MAIN),
                                   (self.misc_schedule_file, Task.STORAGE_MISC)):
@@ -500,14 +503,12 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
             if mode == 'strict':
                 try:
-                    self.schedule.add(task)
-                    added_count += 1
+                    added_count += self.schedule.add(task, apply_limits=True)
                 except ValueError:
                     raise SchedulerError("New task overlaps with existing task")
 
             elif mode == 'force':
-                self.make_room_in_schedule(task)
-                added_count += 1
+                added_count += self.make_room_in_schedule(task)
 
             else:
                 assert mode == 'procrustean', f"Unknown mode: {mode}"
@@ -529,18 +530,21 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
             elif sched_task.is_reaching_into(new_task):
                 sched_task.end_time = new_task.start_time - timedelta(seconds=1)
+                if not sched_task.is_valid(self.processes.get(sched_task.process_name, None)):
+                    self.schedule.remove(sched_task)
 
             elif sched_task.is_reaching_out(new_task):
                 sched_task.start_time = new_task.end_time + timedelta(seconds=1)
+                if not sched_task.is_valid(self.processes.get(sched_task.process_name, None)):
+                    self.schedule.remove(sched_task)
 
             elif sched_task.is_encompassing(new_task):
                 subtasks = sched_task.split([(new_task.start_time, new_task.end_time)])
                 self.schedule.remove(sched_task)
                 for task in subtasks:
-                    if task.is_valid(self.processes.get(task.process_name, None)):
-                        self.schedule.add(task)
+                    self.schedule.add(task, apply_limits=True)
 
-        self.schedule.add(new_task)
+        return self.schedule.add(new_task, apply_limits=True)
 
     def fit_to_schedule(self, new_task: 'Task'):
         """
@@ -572,9 +576,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
         added_count = 0
         for new_task in new_tasks:
-            if new_task.is_valid(self.processes.get(new_task.process_name, None)):
-                self.schedule.add(new_task)
-                added_count += 1
+            added_count += self.schedule.add(new_task, apply_limits=True)
 
         return added_count
 
@@ -761,10 +763,10 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             task = Task()
             task.task_name = self.schedule.new_task_name(process.process_name)
             task.start_time = (sc_pass.t_aos - timedelta(seconds=process.preaos_time)).replace(microsecond=0)
+            task.start_time = max(task.start_time, start_time)
             task.end_time = sc_pass.t_los.replace(microsecond=0)
             task.process_name = process.process_name
             task.rotators = process.rotators.copy()
-            task.apply_limits(process)
             if task.is_valid(process):
                 tasks.append(task)
 
