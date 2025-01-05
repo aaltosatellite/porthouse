@@ -1,8 +1,11 @@
+import os
+import re
 import argparse
 import yaml
 import math
 from functools import lru_cache
 
+from tqdm import tqdm
 import numpy as np
 import quaternion   # adds np.quaternion
 
@@ -11,11 +14,15 @@ def main():
     methods = ('leastsq', 'bfgs', 'nelder-mead')
 
     parser = argparse.ArgumentParser(description='Calibrate rotator based on measurements and ground truth values.')
-    parser.add_argument('--input', type=str, help='input file with measures and corresponding ground truth values')
+    parser.add_argument('--input', type=str, help='Input file with measures and corresponding ground truth values. '
+                                                  'Can be also a folder with FITS files.')
+    parser.add_argument('--input-cache', type=str, help='If input is a folder of FITS files, save input in CSV format')
     parser.add_argument('--output', type=str, help='output file with fitted rotator parameters')
     parser.add_argument('--init', type=str, help='initial rotator model parameters')
     parser.add_argument('--plot', action='store_true', help='plot initial state and the resulting state')
     parser.add_argument('--fit', action='store_true', help='fit model to the data')
+    parser.add_argument('--rm-drift', type=int,
+                        help='Use these many data points from start and end for linear encoder drift removal')
     parser.add_argument('--debug-model', action='store_true', help='debug model-to-real and real-to-model functions')
     parser.add_argument('--method', default=methods[0], choices=methods,
                         help=f'Optimization method, one of: {methods}, default: {methods[0]}')
@@ -29,25 +36,82 @@ def main():
                                             'tilt_az', 'tilt_angle', 'lateral_tilt')]
 
     data = []
-    with open(args.input, 'r') as fh:
-        for line in fh:
-            if line.startswith('#') or line.isspace():
-                continue
-            line, *_ = line.split('#')
-            az, el, gt_az, gt_el = map(lambda x: float(x.strip()), line.split(','))
-            az, el = rotator0.to_motor(az, el)
-            data.append([wrapdeg(az), el, wrapdeg(gt_az), gt_el])
-    data = np.array(data)
+    ts = []
+    if os.path.isfile(args.input) or args.input_cache and os.path.isfile(args.input_cache):
+        input = args.input_cache if args.input_cache else args.input
+        with open(input, 'r') as fh:
+            for line in fh:
+                if line.startswith('#') or line.isspace():
+                    continue
+                line, *_ = line.split('#')
+                az, el, gt_az, gt_el = map(lambda x: float(x.strip()), line.split(',')[:4])
+                extra = list(map(lambda x: x.strip(), line.split(',')[4:]))
+                az, el = rotator0.to_motor(az, el)
+                data.append([az, el, gt_az, gt_el])
+                if len(extra) > 0:
+                    ts.append(extra[0])
+    else:
+        assert os.path.isdir(args.input), 'Input must be a file or a directory with FITS files'
+        from astropy.io import fits
+        files = [f for f in os.listdir(args.input) if re.search(r"\.fits(\.(bz2|zip|gz))?$", f, re.IGNORECASE)]
+        files = sorted(files, key=lambda x: [int(v) if v.isdigit() else v for v in re.split(r'_|\.|-', x)])
+        for filename in tqdm(files, desc='Loading data'):
+            with fits.open(os.path.join(args.input, filename)) as hdul:
+                meta = dict(hdul[0].header)  # e.g. DATE-OBS, AZ-MNT, EL-MNT, AZ-SOLV, EL-SOLV
+            if 'AZ-MOUNT' in meta:  # TODO: remove this once the header is fixed
+                meta['AZ-MNT'], meta['EL-MNT'] = meta['AZ-MOUNT'], meta['EL-MOUNT']
+            if len({'AZ-SOLV', 'EL-SOLV', 'AZ-MNT', 'EL-MNT'}.intersection(meta.keys())) == 4:
+                az, el = rotator0.to_motor(meta['AZ-MNT'], meta['EL-MNT'])
+                data.append([az, el, meta['AZ-SOLV'], meta['EL-SOLV']])
+                ts.append(meta['DATE-OBS'])
+        if args.input_cache:
+            with open(args.input_cache, 'w') as fh:
+                fh.write('# az, el, gt_az, gt_el, ts\n')
+                for (az, el, gt_az, gt_el), ts in zip(data, ts):
+                    fh.write(f'{az}, {el}, {gt_az}, {gt_el}, {ts}\n')
 
-    def lossfn(params) -> float:
+    data = np.array(data)
+    if len(ts) == len(data):
+        ts = np.array(ts, dtype=np.datetime64)
+    else:
+        ts = None
+
+    if len(data) == 0:
+        print('Failed to load any data, exiting')
+        return
+
+    print(f'Loaded {len(data)} data points')
+
+    if args.rm_drift:
+        # assume drift is proportional to distance slewed, remove it linearly
+        def get_drift(rot, dat):
+            n = args.rm_drift
+            m_gt = np.array([rot.to_motor(az, el) for az, el in dat[:, 2:4]])
+            err0 = np.mean(wrapdeg(m_gt[:n, :] - dat[:n, 0:2]), axis=0)
+            err1 = np.mean(wrapdeg(m_gt[-n:, :] - dat[-n:, 0:2]), axis=0)
+            distance = np.cumsum(np.abs(wrapdeg(np.diff(dat[:, 0:2], axis=0))), axis=0)
+            err = err0 + (err1 - err0) * (distance / distance[-1, :])
+            return - np.concatenate((err0[None, :], err), axis=0)
+    else:
+        get_drift = lambda rot, dat: np.zeros((len(dat), 2))
+
+    def errorfn(params, dat) -> np.ndarray:
         rotator = AzElRotator.from_dict(dict(zip(('el_off', 'az_off', 'el_gain', 'az_gain',
                                                   'tilt_az', 'tilt_angle', 'lateral_tilt'), params)))
-        err = data[:, 2:] - np.array([rotator.to_real(az, el, wrap=True) for az, el in data[:, :2]])
+        drift = get_drift(rotator, dat)
+        err = dat[:, 2:] - np.array([rotator.to_real(az, el, wrap=True) for az, el in dat[:, :2] - drift])
         err[:, 0] = wrapdeg(err[:, 0])
+        return err
+
+    def errnorm(params, dat) -> float:
+        return np.linalg.norm(errorfn(params, dat), axis=1)
+
+    def lossfn(params, dat) -> float:
+        err = errorfn(params, dat)
         err = err.flatten()
         return err if args.method == 'leastsq' else np.mean(err ** 2)
 
-    loss = lossfn(params0)
+    loss = lossfn(params0, data)
     if args.method == 'leastsq':
         loss = np.mean(loss ** 2)
 
@@ -55,20 +119,28 @@ def main():
 
     # calibrate
     if args.fit:
-        if args.method == 'leastsq':
-            from scipy.optimize import least_squares
-            res = least_squares(lossfn, params0)
-            param_dict = dict(zip(('el_off', 'az_off', 'el_gain', 'az_gain',
-                                   'tilt_az', 'tilt_angle', 'lateral_tilt'), res.x))
-            loss = np.mean(res.fun ** 2)
-        else:
-            from scipy.optimize import minimize
-            res = minimize(lossfn, np.array(params0), method='BFGS' if args.method == 'bfgs' else 'Nelder-Mead')
-            param_dict = dict(zip(('el_off', 'az_off', 'el_gain', 'az_gain',
-                                   'tilt_az', 'tilt_angle', 'lateral_tilt'), res.x))
-            loss = res.fun
+        _data, _ts = data, ts
+        for i in range(2):
+            if args.method == 'leastsq':
+                from scipy.optimize import least_squares
+                res = least_squares(lambda x: lossfn(x, _data), params0)
+                param_dict = dict(zip(('el_off', 'az_off', 'el_gain', 'az_gain',
+                                       'tilt_az', 'tilt_angle', 'lateral_tilt'), res.x))
+                loss = np.mean(res.fun ** 2)
+            else:
+                from scipy.optimize import minimize
+                res = minimize(lambda x: lossfn(x, _data), np.array(params0), method='BFGS' if args.method == 'bfgs' else 'Nelder-Mead')
+                param_dict = dict(zip(('el_off', 'az_off', 'el_gain', 'az_gain',
+                                       'tilt_az', 'tilt_angle', 'lateral_tilt'), res.x))
+                loss = res.fun
 
-        print('Fitted state (loss=%.6f): %s' % (loss, param_dict))
+            err = errnorm(res.x, _data)
+            I = err < 3.0 * np.median(err)
+            _data = _data[I, :]
+            if _ts is not None:
+                _ts = _ts[I]
+            print('Fitted state i=%d n=%d loss=%.6f: %s' % (i, len(err), loss, param_dict))
+
         rotator = AzElRotator.from_dict(param_dict)
 
         if args.output:
@@ -84,15 +156,38 @@ def main():
     if args.plot:
         import matplotlib.pyplot as plt
         if args.init:
-            az, el = np.array([rotator0.to_real(az, el) for az, el in data[:, :2]]).T
-            plt.plot(az, el, '+', label='initial')
+            drift = get_drift(rotator0, data)
+            az, el = np.array([rotator0.to_real(az, el) for az, el in data[:, :2] - drift]).T
+            plt.plot(wrapdeg(az), el, '+', label='initial')
         else:
-            plt.plot(data[:, 0], data[:, 1], '+', label='measured')
-        plt.plot(data[:, 2], data[:, 3], 'o', label='ground truth', markerfacecolor='none')
-        plt.plot(*zip(*[rotator.to_real(az, el, wrap=True) for az, el in data[:, :2]]), 'x', label='fitted')
+            plt.plot(wrapdeg(data[:, 0]), data[:, 1], '+', label='measured')
+        plt.plot(wrapdeg(data[:, 2]), data[:, 3], 'o', label='ground truth', markerfacecolor='none')
+
+        drift = get_drift(rotator, data)
+        fitted = np.array([rotator.to_real(az, el, wrap=True) for az, el in data[:, :2] - drift])
+        plt.plot(wrapdeg(fitted[:, 0]), fitted[:, 1], 'x', label='fitted')
+
         plt.xlabel('azimuth')
         plt.ylabel('elevation')
         plt.legend()
+
+        if 1:
+            err = errorfn(res.x, _data)
+            fig, axs = plt.subplots(1, 2)
+            for i, lbl in enumerate(('az', 'el')):
+                axs[i].scatter(_data[:, 0], _data[:, 1], c=err[:, i], vmin=-0.5, vmax=0.5)
+                axs[i].set_xlabel('azimuth')
+                axs[i].set_ylabel('elevation')
+                axs[i].set_title(f'{lbl} err [deg]')
+            fig.tight_layout()
+
+        if ts is not None:
+            plt.figure()
+            plt.plot(ts, errnorm(res.x, data), '.')
+            plt.plot(_ts, errnorm(res.x, _data), '.')
+            plt.xlabel('time')
+            plt.ylabel('error [deg]')
+
         plt.show()
 
 

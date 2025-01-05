@@ -72,14 +72,14 @@ class Task:
         task_data.setdefault('process_name', self.process_name)
         return task_data
 
-    def apply_limits(self, process: 'Process'):
+    def apply_limits(self, process: 'Process', time_used_s: float = 0):
         process_data = self.get_task_data(process)
 
         if process_data['duration'] is not None and isinstance(process_data['duration'], str) and \
                 process_data['duration'].strip():
             limits = process_data['duration'].split("|")    # min|Optional[max]
             if len(limits) > 1 and limits[1].strip():
-                self.end_time = self.start_time + timedelta(seconds=float(limits[1]))
+                self.end_time = self.start_time + timedelta(seconds=float(limits[1])) - timedelta(seconds=time_used_s)
 
     def is_valid(self, process: 'Process'):
         process_data = self.get_task_data(process)
@@ -278,7 +278,8 @@ class Process:
 class Schedule:
     TASK_NAME_REGEX = re.compile(r"^(.*?)(\s#(\d+))?(\s\w+)?")
 
-    def __init__(self, iterable=None):
+    def __init__(self, scheduler, iterable=None):
+        self.scheduler = scheduler
         self.start_times = SortedList(key=lambda t: t if isinstance(t, datetime) else t.start_time)
         self.end_times = SortedList(key=lambda t: t if isinstance(t, datetime) else t.end_time)
         self.tasks = {}  # task_name -> Task
@@ -289,11 +290,11 @@ class Schedule:
             for task in iterable:
                 self.add(task)
 
-    def add(self, task: Task):
+    def add(self, task: Task, apply_limits=False) -> bool:
         if task.status in (TaskStatus.EXECUTED, TaskStatus.CANCELLED):
             self.update_task_numbering(task.task_name)
             self.deleted_tasks.add(task)
-            return
+            return False
 
         if task.task_name is None:
             process_name = task.get_process_name()
@@ -303,6 +304,19 @@ class Schedule:
 
         if task.task_name in self.tasks:
             raise ValueError(f"Task {task.task_name} already exists")
+
+        process = self.scheduler.processes.get(task.process_name, None)
+        if apply_limits:
+            tmp = task.start_time.replace(hour=12, minute=0, second=0, microsecond=0)
+            prev_noon = tmp - timedelta(days=1) if task.start_time < tmp else tmp
+            next_noon = prev_noon + timedelta(days=1)
+            time_used_s = sum((t.end_time - t.start_time).total_seconds()
+                              for t in list(self.tasks.values())
+                                       + [d for d in self.deleted_tasks if d.status == TaskStatus.EXECUTED]
+                              if t.process_name == task.process_name and prev_noon < t.start_time < next_noon)
+            task.apply_limits(process, time_used_s=time_used_s)
+            if not task.is_valid(process):
+                return False
 
         if task.start_time > task.end_time:
             raise ValueError(f"Task {task.task_name} start time {task.start_time} is after end time {task.end_time}")
@@ -317,6 +331,7 @@ class Schedule:
         self.end_times.add(task)
         self.tasks[task.task_name] = task
         self.update_task_numbering(task.task_name)
+        return True
 
     def new_task_name(self, process_name):
         self.max_task_no[process_name] = self.max_task_no.get(process_name, 0) + 1
