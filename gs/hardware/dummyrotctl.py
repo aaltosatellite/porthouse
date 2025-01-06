@@ -14,15 +14,15 @@ class DummyRotatorController(RotatorController):
         super().__init__(*args, **kwargs)
         self._az_dc_min, self._az_dc_max, self._el_dc_min, self._el_dc_max = [60] * 4
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         pass
 
-    def get_position(self, with_timestamp=False) -> PositionType:
-        self.maybe_enforce_limits()
+    async def get_position(self, with_timestamp=False) -> PositionType:
+        await self.maybe_enforce_limits()
         self.current_pos_ts = time.time()
         return self.current_position if not with_timestamp else (self.current_position, self.current_pos_ts)
 
-    def set_position(self,
+    async def set_position(self,
                      az: float,
                      el: float,
                      ts: Optional[float] = None,
@@ -34,13 +34,13 @@ class DummyRotatorController(RotatorController):
         self.current_pos_ts = time.time()
         return az, el
 
-    def get_position_target(self) -> PositionType:
+    async def get_position_target(self) -> PositionType:
         return self.target_position
 
-    def get_position_range(self) -> Tuple[float, float, float, float]:
+    async def get_position_range(self) -> Tuple[float, float, float, float]:
         return self.az_min, self.az_max, self.el_min, self.el_max
 
-    def set_position_range(self,
+    async def set_position_range(self,
                            az_min: Optional[float] = None,
                            az_max: Optional[float] = None,
                            el_min: Optional[float] = None,
@@ -57,15 +57,15 @@ class DummyRotatorController(RotatorController):
         if el_max is not None:
             self.el_max = el_max
 
-        return self.get_position_range()
+        return await self.get_position_range()
 
-    def reset_position(self, az: float, el: float):
+    async def reset_position(self, az: float, el: float):
         self.current_position = az, el
 
-    def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
+    async def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
         return self._az_dc_min, self._az_dc_max, self._el_dc_min, self._el_dc_max
 
-    def set_dutycycle_range(self,
+    async def set_dutycycle_range(self,
                             az_duty_min: Optional[float] = None,
                             az_duty_max: Optional[float] = None,
                             el_duty_min: Optional[float] = None,
@@ -82,5 +82,5 @@ class DummyRotatorController(RotatorController):
         if el_duty_max is not None:
             self._el_dc_max = el_duty_max
 
-    def pop_motion_log(self):
+    async def pop_motion_log(self):
         pass

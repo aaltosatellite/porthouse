@@ -741,6 +741,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Create tasks for a process related to a satellite or celestial object
         """
+        start_time, end_time = map(lambda x: x.replace(microsecond=0), (start_time, end_time))
         pass_start_time = start_time + timedelta(seconds=process.preaos_time)
         kwargs = dict(target=process.target, start_time=pass_start_time, end_time=end_time,
                       min_elevation=process.min_elevation, min_max_elevation=process.min_max_elevation,

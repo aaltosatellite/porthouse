@@ -3,7 +3,7 @@ import unittest
 import time
 import json
 import socket
-from basemodule import *
+from porthouse.core.basemodule_async import *
 
 
 class CelestialTester(BaseModule):
