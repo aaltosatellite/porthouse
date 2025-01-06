@@ -76,26 +76,27 @@ class ControllerBox(RotatorController):
         self._limits = (az_min, az_max, el_min, el_max)
         self._reader = None
         self._writer = None
+        self._lock = asyncio.Lock()
 
     def _open_mlog(self):
         os.makedirs("logs", exist_ok=True)
         self.mlog = open(f"logs/{self.prefix}_motion_{time.time():.0f}.bin", "wb")
 
     async def setup(self):
-        self._reader, self._writer = await open_serial_connection(port=self._address,
-                                                                  baudrate=self._baudrate,
-                                                                  timeout=0.5)
+        async with self._lock:
+            self._reader, self._writer = await open_serial_connection(url=self._address,
+                                                                      baudrate=self._baudrate,
+                                                                      timeout=0.5)
         await self.set_position_range(*self._limits)
         await self.get_position()         # get current_position, also move to valid position if currently invalid
 
     async def stop(self) -> None:
-        await self._write_command(b"S")
-        await self._read_response()
+        await self._rpc(b"S")
 
     async def get_position(self, with_timestamp=False) -> Union[PositionType, Tuple[PositionType, float]]:
-        await self._write_command(b"P -s")
+        res = await self._rpc(b"P -s")
         self.current_pos_ts = time.time()
-        motor_pos = self._parse_position_output(await self._read_response())
+        motor_pos = self._parse_position_output(res)
         self.current_position = self.rotator_model.to_real(*motor_pos)
         self.err_cnt = 0  # Reset error counter
 
@@ -119,8 +120,7 @@ class ControllerBox(RotatorController):
         if self.control_sw_version > 2:
             adj = 1.25e9 if True else 0.0  # anticipate satellite movement by 1.25 s?
             t0 = (time.time_ns() + adj - self.epoch) / 1e9
-            await self._write_command(f"ST {t0 + self.sync_offset:.6f}".encode("ascii"))
-            resp = await self._read_response()
+            resp = await self._rpc(f"ST {t0 + self.sync_offset:.6f}".encode("ascii"))
             t1 = (time.time_ns() + adj - self.epoch) / 1e9
             self.sync_offset = (t1 - t0) / 2
             dt, gain = self._parse_position_output(resp)
@@ -128,25 +128,24 @@ class ControllerBox(RotatorController):
 
         if self.control_sw_version > 2 and shortest_path:
             ts = self.target_pos_ts - self.epoch/1e9
-            await self._write_command(f"WA {ts:.3f} {maz:.2f} {mel:.2f}".encode("ascii"))
+            await self._rpc(f"WA {ts:.3f} {maz:.2f} {mel:.2f}".encode("ascii"))
         else:
             if shortest_path:
-                await self._write_command(f"MS -a {maz:.2f}".encode("ascii"))
-                await self._write_command(f"MS -e {mel:.2f}".encode("ascii"))
+                await self._rpc(f"MS -a {maz:.2f}".encode("ascii"))
+                await self._rpc(f"MS -e {mel:.2f}".encode("ascii"))
             else:
-                await self._write_command(f"M -a {maz:.2f}".encode("ascii"))
-                await self._write_command(f"M -e {mel:.2f}".encode("ascii"))
+                await self._rpc(f"M -a {maz:.2f}".encode("ascii"))
+                await self._rpc(f"M -e {mel:.2f}".encode("ascii"))
 
-        await self._read_response()
         return await self.get_position_target()
 
     async def get_position_target(self, get_vel=False) -> PositionType | Tuple[PositionType, PositionType]:
-        await self._write_command(b"M -s")
-        trg_motor_pos = self._parse_position_output(await self._read_response())
+        res = await self._rpc(b"M -s")
+        trg_motor_pos = self._parse_position_output(res)
 
         if get_vel and self.control_sw_version > 1:
-            await self._write_command(b"MV -s")   # NOTE: not yet deployed for original UHF controller
-            trg_motor_vel = self._parse_position_output(await self._read_response())
+            res = await self._rpc(b"MV -s")   # NOTE: not yet deployed for original UHF controller
+            trg_motor_vel = self._parse_position_output(res)
             self.target_position, self.target_velocity = self.rotator_model.to_real(*trg_motor_pos, *trg_motor_vel)
         else:
             self.target_position = self.rotator_model.to_real(*trg_motor_pos)
@@ -157,11 +156,11 @@ class ControllerBox(RotatorController):
         """
         Get the allowed position range in motor angles from the controller
         """
-        await self._write_command(b"R+ -s")
-        self.az_max, self.el_max = ControllerBox._parse_position_output(await self._read_response())
+        res = await self._rpc(b"R+ -s")
+        self.az_max, self.el_max = ControllerBox._parse_position_output(res)
 
-        await self._write_command(b"R- -s")
-        self.az_min, self.el_min = ControllerBox._parse_position_output(await self._read_response())
+        res = await self._rpc(b"R- -s")
+        self.az_min, self.el_min = ControllerBox._parse_position_output(res)
 
         return self.az_min, self.az_max, self.el_min, self.el_max
 
@@ -176,20 +175,16 @@ class ControllerBox(RotatorController):
         await super().set_position_range(az_min, az_max, el_min, el_max)
 
         if az_min is not None:
-            await self._write_command(f"R- -a {az_min:.2f}".encode("ascii"))
-            await self._read_response()  # Just "OK" ack
+            await self._rpc(f"R- -a {az_min:.2f}".encode("ascii"))
 
         if az_max is not None:
-            await self._write_command(f"R+ -a {az_max:.2f}".encode("ascii"))
-            await self._read_response()  # Just "OK" ack
+            await self._rpc(f"R+ -a {az_max:.2f}".encode("ascii"))
 
         if el_min is not None:
-            await self._write_command(f"R- -e {el_min:.2f}".encode("ascii"))
-            await self._read_response()  # Just "OK" ack
+            await self._rpc(f"R- -e {el_min:.2f}".encode("ascii"))
 
         if el_max is not None:
-            await self._write_command(f"R+ -e {el_max:.2f}".encode("ascii"))
-            await self._read_response()  # Just "OK" ack
+            await self._rpc(f"R+ -e {el_max:.2f}".encode("ascii"))
 
         return await self.get_position_range()
 
@@ -202,9 +197,8 @@ class ControllerBox(RotatorController):
         maz, mel = self.rotator_model.to_motor(az, el)
 
         # Force current position to be az, el
-        await self._write_command(f"P -a {maz: .2f}".encode("ascii"))
-        await self._write_command(f"P -e {mel: .2f}".encode("ascii"))
-        await self._read_response()
+        await self._rpc(f"P -a {maz: .2f}".encode("ascii"))
+        await self._rpc(f"P -e {mel: .2f}".encode("ascii"))
 
         self.target_position = (az, el)
 
@@ -212,11 +206,11 @@ class ControllerBox(RotatorController):
         await self.get_position()
 
     async def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
-        await self._write_command(b"D+ -s")
-        range_max = ControllerBox._parse_position_output(await self._read_response())
+        res = await self._rpc(b"D+ -s")
+        range_max = ControllerBox._parse_position_output(res)
 
-        await self._write_command(b"D- -s")
-        range_min = ControllerBox._parse_position_output(await self._read_response())
+        res = await self._rpc(b"D- -s")
+        range_min = ControllerBox._parse_position_output(res)
 
         return float(range_min[0]), float(range_max[0]), float(range_min[1]), float(range_max[1])
 
@@ -227,20 +221,16 @@ class ControllerBox(RotatorController):
                             el_duty_max: Optional[float]=None) -> None:
 
         if az_duty_min is not None:
-            await self._write_command(f"D- -a {az_duty_min:.2f}".encode("ascii"))
-            await self._read_response()
+            await self._rpc(f"D- -a {az_duty_min:.2f}".encode("ascii"))
 
         if az_duty_max is not None:
-            await self._write_command(f"D+ -a {az_duty_max:.2f}".encode("ascii"))
-            await self._read_response()
+            await self._rpc(f"D+ -a {az_duty_max:.2f}".encode("ascii"))
 
         if el_duty_min is not None:
-            await self._write_command(f"D- -e {el_duty_min:.2f}".encode("ascii"))
-            await self._read_response()
+            await self._rpc(f"D- -e {el_duty_min:.2f}".encode("ascii"))
 
         if el_duty_max is not None:
-            await self._write_command(f"D+ -e {el_duty_max:.2f}".encode("ascii"))
-            await self._read_response()
+            await self._rpc(f"D+ -e {el_duty_max:.2f}".encode("ascii"))
 
     async def preaos(self) -> None:
         self.epoch = time.time_ns()
@@ -261,9 +251,8 @@ class ControllerBox(RotatorController):
             self._open_mlog()
 
         ts = struct.pack('<Q', time.time_ns())
-        await self._write_command(b"L")
         sep = struct.pack('<fffff', math.nan, math.nan, math.nan, math.nan, math.nan)
-        bytes = await self._read_bin_resp(sep)
+        bytes = await self._rpc(b"L", binary_resp_end_seq=sep)
         if not bytes.endswith(sep):
             raise ControllerBoxError(f"Failed to read motion log, total bytes read: "
                                      f"{len(bytes)}, last 20 bytes: 0x{bytes[-20:].hex()}, "
@@ -272,20 +261,49 @@ class ControllerBox(RotatorController):
         self.mlog.write(bytes)
         # self.mlog.flush()
 
-    async def _read_bin_resp(self, end_seq: bytes) -> bytes:
+    async def _rpc(self, cmd: bytes, binary_resp_end_seq=None) -> bytes:
         """
-        Read until (and including) `end_seq` from the serial port.
+        Send a command to the controller box and return the response.
 
-        Returns:
-            Received `bytes` from the controller box
+        Args:
+            cmd: Command to send
         """
-        rsp = b''
-        while not rsp.endswith(end_seq):
-            tmp = await self._reader.readuntil(end_seq)
-            rsp += tmp
-            if len(tmp) == 0:
-                break
-        return rsp
+        async with self._lock:
+            await self._write_command(cmd)
+            if binary_resp_end_seq:
+                return await self._read_bin_resp(binary_resp_end_seq)
+            return await self._read_response()
+
+    async def _write_command(self, cmd: bytes) -> None:
+        """
+        Write message to controller box via serial port.
+
+        Args:
+            cmd:
+
+        Raises:
+            `ControllerBoxError` - in case the controller box encoutered an error.
+        """
+
+        if not isinstance(cmd, bytes):
+            raise ValueError("Wrong input format")
+
+        if cmd[-1] != b"\r":
+            cmd += b"\r"
+
+        try:
+            self._writer.write(cmd)
+            await self._writer.drain()
+
+            if self.debug:
+                self.dlog.write(f"{time.time()} WRITE: {cmd}\n")
+                # self.dlog.flush()
+
+        except serial.SerialTimeoutException as e:
+            raise ControllerBoxError("Serial connection to controller box timed out: ", e)
+
+        except Exception as e:
+            raise ControllerBoxError("Communication error while writing to controller box: ", e) from e
 
     async def _read_response(self) -> bytes:
         """
@@ -321,35 +339,20 @@ class ControllerBox(RotatorController):
 
         return rsp
 
-    async def _write_command(self, cmd: bytes) -> None:
+    async def _read_bin_resp(self, end_seq: bytes) -> bytes:
         """
-        Write message to controller box via serial port.
+        Read until (and including) `end_seq` from the serial port.
 
-        Args:
-            cmd:
-
-        Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
+        Returns:
+            Received `bytes` from the controller box
         """
-
-        if not isinstance(cmd, bytes):
-            raise ValueError("Wrong input format")
-
-        if cmd[-1] != b"\r":
-            cmd += b"\r"
-
-        try:
-            ret = await self._writer.write(cmd)
-
-            if self.debug:
-                self.dlog.write(f"{time.time()} WRITE (bytes {ret}): {cmd}\n")
-                # self.dlog.flush()
-
-        except serial.SerialTimeoutException as e:
-            raise ControllerBoxError("Serial connection to controller box timed out: ", e)
-
-        except Exception as e:
-            raise ControllerBoxError("Communication error while writing to controller box: ", e) from e
+        rsp = b''
+        while not rsp.endswith(end_seq):
+            tmp = await self._reader.readuntil(end_seq)
+            rsp += tmp
+            if len(tmp) == 0:
+                break
+        return rsp
 
     @staticmethod
     def _parse_position_output(output: bytes) -> PositionType:

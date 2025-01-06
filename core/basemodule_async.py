@@ -304,6 +304,7 @@ class BaseModule:
         # TODO: aiormq close the channel for some reason if an ack is sent!
         #await request.channel.basic_ack(request.delivery.delivery_tag)
 
+
     async def __rpc_response(self, message: aiormq.abc.DeliveredMessage):
 
         """
@@ -317,7 +318,8 @@ class BaseModule:
             future.set_result(message.body)
         else:
             raise RuntimeError(
-                "Unknown correlation_id on RPC response queue! Possibly a late RPC response.")
+                f"At {type(self)}, corr_id={corr_id} not found in RPC response queue!"
+                f"Possibly a late RPC response from {message.delivery['routing_key']}: {message.body}")
 
 
     async def send_rpc_request(self, exchange: str, routing_key: str, query_data: Optional[dict] = None, timeout: float = 1):
@@ -344,24 +346,24 @@ class BaseModule:
         if isinstance(query_data, (dict, list)):
             query_data = json.dumps(query_data)
 
-        try:
-            # Create future for the RPC response
-            corr_id = str(uuid.uuid4())
-            future = asyncio.get_event_loop().create_future()
-            self.rpc_futures[corr_id] = future
+        # Create future for the RPC response
+        future = asyncio.get_event_loop().create_future()
+        corr_id = str(uuid.uuid4())
+        self.rpc_futures[corr_id] = (future, exchange, routing_key)
 
-            # Send the RPC call
-            await self.__basic_publish(
-                query_data.encode(),
-                exchange=exchange,
-                routing_key=routing_key,
-                properties=aiormq.spec.Basic.Properties(
-                    content_type='text/plain',
-                    correlation_id=corr_id,
-                    reply_to=self.rpc_response_queue,
-                )
+        # Send the RPC call
+        await self.__basic_publish(
+            query_data.encode(),
+            exchange=exchange,
+            routing_key=routing_key,
+            properties=aiormq.spec.Basic.Properties(
+                content_type='text/plain',
+                correlation_id=corr_id,
+                reply_to=self.rpc_response_queue,
             )
+        )
 
+        try:
             # Wait until the future is fulfilled
             res = await asyncio.wait_for(future, timeout=timeout)
             res = json.loads(res)
