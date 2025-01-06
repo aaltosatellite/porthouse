@@ -72,14 +72,14 @@ class Task:
         task_data.setdefault('process_name', self.process_name)
         return task_data
 
-    def apply_limits(self, process: 'Process', time_used_s: float = 0):
+    def apply_limits(self, process: 'Process', time_used_s: int = 0):
         process_data = self.get_task_data(process)
 
         if process_data['duration'] is not None and isinstance(process_data['duration'], str) and \
                 process_data['duration'].strip():
             limits = process_data['duration'].split("|")    # min|Optional[max]
             if len(limits) > 1 and limits[1].strip():
-                self.end_time = self.start_time + timedelta(seconds=float(limits[1])) - timedelta(seconds=time_used_s)
+                self.end_time = self.start_time + timedelta(seconds=int(limits[1])) - timedelta(seconds=int(time_used_s))
 
     def is_valid(self, process: 'Process'):
         process_data = self.get_task_data(process)
@@ -89,9 +89,9 @@ class Task:
             min_duration = None
             if isinstance(process_data['duration'], str) and process_data['duration'].strip():
                 min_duration, *_ = process_data['duration'].split("|")    # min|Optional[max]
-                min_duration = float(min_duration)
+                min_duration = int(min_duration)
             elif isinstance(process_data['duration'], (int, float)):
-                min_duration = float(process_data['duration'])
+                min_duration = int(process_data['duration'])
             if min_duration is not None:
                 valid &= self.end_time - self.start_time >= timedelta(seconds=min_duration)
 
@@ -314,11 +314,11 @@ class Schedule:
                               for t in list(self.tasks.values())
                                        + [d for d in self.deleted_tasks if d.status == TaskStatus.EXECUTED]
                               if t.process_name == task.process_name and prev_noon < t.start_time < next_noon)
-            task.apply_limits(process, time_used_s=time_used_s)
+            task.apply_limits(process, time_used_s=int(time_used_s))
             if not task.is_valid(process):
                 return False
 
-        if task.start_time > task.end_time:
+        elif task.start_time > task.end_time:
             raise ValueError(f"Task {task.task_name} start time {task.start_time} is after end time {task.end_time}")
 
         overlapping = self.get_overlapping(task.start_time, task.end_time, task.rotators)

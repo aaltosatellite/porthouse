@@ -13,7 +13,7 @@ from typing import Tuple, Optional, Dict, Any
 import amqp
 
 from .config import load_globals
-from .static_basemodule import RPCRequestError, RPCRequestTimeout
+from .basemodule_async import RPCRequestError, RPCRequestTimeout
 
 
 

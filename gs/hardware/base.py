@@ -113,27 +113,14 @@ class RotatorController(abc.ABC):
     async def setup(self):
         """Override if driver needs async setup before use."""
 
-    def open(self):
-        """Open serial com to controller hardware."""
-
-    def close(self):
-        """Close serial com to controller hardware."""
-
-    def reset(self, wait_time: float = 1.0):
-        """Reset serial com to controller hardware."""
-        time.sleep(wait_time)
-
-    def flush_buffers(self):
-        """ Clear/flush the input and output buffer of serial com."""
-
     @abc.abstractmethod
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """
         Stop rotator movement
         """
 
     @abc.abstractmethod
-    def get_position(self, with_timestamp=False) -> Union[PositionType, Tuple[PositionType, float]]:
+    async def get_position(self, with_timestamp=False) -> Union[PositionType, Tuple[PositionType, float]]:
         """
         Read rotator's current position. If the position is invalid, move to closest allowed position.
 
@@ -141,11 +128,11 @@ class RotatorController(abc.ABC):
             A tuple containing current azimuth and elevation.
         """
         # Subclasses should have these two lines in the end of the method:
-        self.maybe_enforce_limits()
+        await self.maybe_enforce_limits()
         return self.current_position if not with_timestamp else (self.current_position, self.current_pos_ts)
 
     @abc.abstractmethod
-    def set_position(self,
+    async def set_position(self,
                      az: float,
                      el: float,
                      vel: Optional[Tuple[float, float]] = None,
@@ -174,7 +161,7 @@ class RotatorController(abc.ABC):
         self.target_velocity = vel or (0, 0)
         self.target_pos_ts = ts or time.time()
 
-    def get_position_target(self) -> PositionType:
+    async def get_position_target(self) -> PositionType:
         """
         Get position where the rotator is moving to.
 
@@ -186,7 +173,7 @@ class RotatorController(abc.ABC):
         """
         return self.target_position
 
-    def get_position_range(self) -> Tuple[float, float, float, float]:
+    async def get_position_range(self) -> Tuple[float, float, float, float]:
         """
         Read back the allowed range of azimuth (az) and elevation (el) coordinates.
 
@@ -198,7 +185,7 @@ class RotatorController(abc.ABC):
         """
         return self.az_min, self.az_max, self.el_min, self.el_max
 
-    def set_position_range(self,
+    async def set_position_range(self,
                            az_min: Optional[float] = None,
                            az_max: Optional[float] = None,
                            el_min: Optional[float] = None,
@@ -218,7 +205,7 @@ class RotatorController(abc.ABC):
         if el_max is not None:
             self.el_max = el_max
 
-        return self.get_position_range()
+        return await self.get_position_range()
 
     def adjust(self, d_az: float, d_el: float) -> None:
         """
@@ -238,13 +225,13 @@ class RotatorController(abc.ABC):
         return self.rotator_model.az_off, self.rotator_model.el_off
 
     @abc.abstractmethod
-    def reset_position(self, az: float, el: float) -> None:
+    async def reset_position(self, az: float, el: float) -> None:
         """
         Set the current position to the given values without moving the rotator.
         """
 
     @abc.abstractmethod
-    def get_dutycycle_range(self) -> Tuple[int, int, int, int]:
+    async def get_dutycycle_range(self) -> Tuple[int, int, int, int]:
         """
         Get duty cycle range for azimuth and elevation.
 
@@ -256,7 +243,7 @@ class RotatorController(abc.ABC):
         """
 
     @abc.abstractmethod
-    def set_dutycycle_range(self,
+    async def set_dutycycle_range(self,
                             az_duty_min: Optional[float] = None,
                             az_duty_max: Optional[float] = None,
                             el_duty_min: Optional[float] = None,
@@ -274,16 +261,16 @@ class RotatorController(abc.ABC):
             `RotatorError` - in case the controller encountered an error.
         """
 
-    def preaos(self) -> None:
+    async def preaos(self) -> None:
         pass
 
-    def aos(self) -> None:
+    async def aos(self) -> None:
         pass
 
-    def los(self) -> None:
+    async def los(self) -> None:
         pass
 
-    def pop_motion_log(self):
+    async def pop_motion_log(self):
         pass
 
     def position_valid(self, az: float, el: float, raise_error: bool = False) -> bool:
@@ -333,7 +320,7 @@ class RotatorController(abc.ABC):
 
         return valid
 
-    def maybe_enforce_limits(self) -> None:
+    async def maybe_enforce_limits(self) -> None:
         """
         If enforce_limits enabled, check that the current position is within allowed limits. If not, use set_position
         to move to the closest allowed position. Note that the original target position is lost and must be reset at
@@ -341,7 +328,7 @@ class RotatorController(abc.ABC):
         """
         if self.enforce_limits and not self.position_valid(*self.current_position):
             valid_position = self.closest_valid_position(*self.current_position)
-            self.set_position(*valid_position, shortest_path=True)
+            await self.set_position(*valid_position, shortest_path=True)
 
     def az_dependent_min_el(self, az: float) -> Optional[float]:
         if self.horizon_map is not None:
