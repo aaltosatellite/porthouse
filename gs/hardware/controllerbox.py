@@ -71,6 +71,7 @@ class ControllerBox(RotatorController):
             self.dlog = open(f"logs/{self.prefix}_debug_{time.time():.0f}.log", "w")
 
         # serial connection opened in during call to setup()
+        self._timeout = 1.0
         self._address = address
         self._baudrate = baudrate
         self._limits = (az_min, az_max, el_min, el_max)
@@ -85,16 +86,19 @@ class ControllerBox(RotatorController):
     async def setup(self):
         async with self._lock:
             self._reader, self._writer = await open_serial_connection(url=self._address,
-                                                                      baudrate=self._baudrate,
-                                                                      timeout=0.5)
+                                                                      baudrate=self._baudrate)
+        try:
+            await self.get_position()         # get current_position, also move to valid position if currently invalid
+        except ControllerBoxError as e:
+            # sometimes the controller box returns malformed output at first
+            await self.get_position()         # get current_position, also move to valid position if currently invalid
         await self.set_position_range(*self._limits)
-        await self.get_position()         # get current_position, also move to valid position if currently invalid
 
     async def stop(self) -> None:
         await self._rpc(b"S")
 
     async def get_position(self, with_timestamp=False) -> Union[PositionType, Tuple[PositionType, float]]:
-        res = await self._rpc(b"P -s")
+        res = await self._rpc(b"P -s", True)
         self.current_pos_ts = time.time()
         motor_pos = self._parse_position_output(res)
         self.current_position = self.rotator_model.to_real(*motor_pos)
@@ -120,7 +124,7 @@ class ControllerBox(RotatorController):
         if self.control_sw_version > 2:
             adj = 1.25e9 if True else 0.0  # anticipate satellite movement by 1.25 s?
             t0 = (time.time_ns() + adj - self.epoch) / 1e9
-            resp = await self._rpc(f"ST {t0 + self.sync_offset:.6f}".encode("ascii"))
+            resp = await self._rpc(f"ST {t0 + self.sync_offset:.6f}".encode("ascii"), True)
             t1 = (time.time_ns() + adj - self.epoch) / 1e9
             self.sync_offset = (t1 - t0) / 2
             dt, gain = self._parse_position_output(resp)
@@ -140,11 +144,11 @@ class ControllerBox(RotatorController):
         return await self.get_position_target()
 
     async def get_position_target(self, get_vel=False) -> PositionType | Tuple[PositionType, PositionType]:
-        res = await self._rpc(b"M -s")
+        res = await self._rpc(b"M -s", True)
         trg_motor_pos = self._parse_position_output(res)
 
         if get_vel and self.control_sw_version > 1:
-            res = await self._rpc(b"MV -s")   # NOTE: not yet deployed for original UHF controller
+            res = await self._rpc(b"MV -s", True)   # NOTE: not yet deployed for original UHF controller
             trg_motor_vel = self._parse_position_output(res)
             self.target_position, self.target_velocity = self.rotator_model.to_real(*trg_motor_pos, *trg_motor_vel)
         else:
@@ -156,10 +160,10 @@ class ControllerBox(RotatorController):
         """
         Get the allowed position range in motor angles from the controller
         """
-        res = await self._rpc(b"R+ -s")
+        res = await self._rpc(b"R+ -s", True)
         self.az_max, self.el_max = ControllerBox._parse_position_output(res)
 
-        res = await self._rpc(b"R- -s")
+        res = await self._rpc(b"R- -s", True)
         self.az_min, self.el_min = ControllerBox._parse_position_output(res)
 
         return self.az_min, self.az_max, self.el_min, self.el_max
@@ -206,10 +210,10 @@ class ControllerBox(RotatorController):
         await self.get_position()
 
     async def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
-        res = await self._rpc(b"D+ -s")
+        res = await self._rpc(b"D+ -s", True)
         range_max = ControllerBox._parse_position_output(res)
 
-        res = await self._rpc(b"D- -s")
+        res = await self._rpc(b"D- -s", True)
         range_min = ControllerBox._parse_position_output(res)
 
         return float(range_min[0]), float(range_max[0]), float(range_min[1]), float(range_max[1])
@@ -252,7 +256,7 @@ class ControllerBox(RotatorController):
 
         ts = struct.pack('<Q', time.time_ns())
         sep = struct.pack('<fffff', math.nan, math.nan, math.nan, math.nan, math.nan)
-        bytes = await self._rpc(b"L", binary_resp_end_seq=sep)
+        bytes = await self._rpc(b"L", True, binary_resp_end_seq=sep)
         if not bytes.endswith(sep):
             raise ControllerBoxError(f"Failed to read motion log, total bytes read: "
                                      f"{len(bytes)}, last 20 bytes: 0x{bytes[-20:].hex()}, "
@@ -261,7 +265,7 @@ class ControllerBox(RotatorController):
         self.mlog.write(bytes)
         # self.mlog.flush()
 
-    async def _rpc(self, cmd: bytes, binary_resp_end_seq=None) -> bytes:
+    async def _rpc(self, cmd: bytes, ret=False, binary_resp_end_seq=None) -> bytes:
         """
         Send a command to the controller box and return the response.
 
@@ -270,9 +274,10 @@ class ControllerBox(RotatorController):
         """
         async with self._lock:
             await self._write_command(cmd)
-            if binary_resp_end_seq:
-                return await self._read_bin_resp(binary_resp_end_seq)
-            return await self._read_response()
+            if ret:
+                if binary_resp_end_seq:
+                    return await self._read_bin_resp(binary_resp_end_seq)
+                return await self._read_response()
 
     async def _write_command(self, cmd: bytes) -> None:
         """
@@ -293,11 +298,15 @@ class ControllerBox(RotatorController):
 
         try:
             self._writer.write(cmd)
-            await self._writer.drain()
+            await asyncio.wait_for(self._writer.drain(), timeout=self._timeout)
 
             if self.debug:
                 self.dlog.write(f"{time.time()} WRITE: {cmd}\n")
                 # self.dlog.flush()
+
+        except asyncio.TimeoutError:
+            if self.log is not None:
+                self.log.warning("Timeout while reading binary response from controller box")
 
         except serial.SerialTimeoutException as e:
             raise ControllerBoxError("Serial connection to controller box timed out: ", e)
@@ -317,11 +326,15 @@ class ControllerBox(RotatorController):
         """
         while True:
             try:
-                rsp = await self._reader.readline()
+                rsp = await asyncio.wait_for(self._reader.readline(), timeout=self._timeout)
 
                 if self.debug:
                     self.dlog.write(f"{time.time()} READ: {rsp}\n")
                     # self.dlog.flush()
+
+            except asyncio.TimeoutError:
+                if self.log is not None:
+                    self.log.warning("Timeout while reading binary response from controller box")
 
             except Exception as e:
                 raise ControllerBoxError(
@@ -348,7 +361,11 @@ class ControllerBox(RotatorController):
         """
         rsp = b''
         while not rsp.endswith(end_seq):
-            tmp = await self._reader.readuntil(end_seq)
+            try:
+                tmp = await asyncio.wait_for(self._reader.readuntil(end_seq), timeout=self._timeout)
+            except asyncio.TimeoutError:
+                if self.log is not None:
+                    self.log.warning("Timeout while reading binary response from controller box")
             rsp += tmp
             if len(tmp) == 0:
                 break
