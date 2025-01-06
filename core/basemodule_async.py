@@ -113,6 +113,12 @@ class BaseModule:
         Start the async loop
         """
         loop = asyncio.get_event_loop()
+        logger, module_name = self.log, self.module_name
+
+        def exception_handler(loop, ctx):
+            logger.error(f"Task failed at {module_name}, msg={ctx['message']}, exception={ctx['exception']}")
+
+        loop.set_exception_handler(exception_handler)
         loop.run_forever()
 
 
@@ -318,7 +324,7 @@ class BaseModule:
             future.set_result(message.body)
         else:
             raise RuntimeError(
-                f"At {type(self)}, corr_id={corr_id} not found in RPC response queue!"
+                f"At {type(self)}, corr_id={corr_id} not found in RPC response queue! "
                 f"Possibly a late RPC response from {message.delivery['routing_key']}: {message.body}")
 
 
