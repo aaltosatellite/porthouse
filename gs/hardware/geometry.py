@@ -10,6 +10,11 @@ import numpy as np
 import quaternion   # adds np.quaternion
 
 
+# TODO:
+#  - balance the data points so that they are evenly distributed in azimuth and elevation
+#  ?- star detection to be based on Stetson detector so that motion blurred stars are not detected
+
+
 def main():
     methods = ('leastsq', 'bfgs', 'nelder-mead')
 
@@ -21,12 +26,16 @@ def main():
     parser.add_argument('--init', type=str, help='initial rotator model parameters')
     parser.add_argument('--plot', action='store_true', help='plot initial state and the resulting state')
     parser.add_argument('--fit', action='store_true', help='fit model to the data')
+    parser.add_argument('--iters', type=int, default=2, help='how many outlier rejection iterations to run (default=2)')
     parser.add_argument('--rm-drift', type=int,
                         help='Use these many data points from start and end for linear encoder drift removal')
     parser.add_argument('--debug-model', action='store_true', help='debug model-to-real and real-to-model functions')
     parser.add_argument('--method', default=methods[0], choices=methods,
                         help=f'Optimization method, one of: {methods}, default: {methods[0]}')
     args = parser.parse_args()
+
+    if args.plot:
+        import matplotlib.pyplot as plt
 
     args.fit = args.fit or args.output
 
@@ -58,6 +67,9 @@ def main():
         for filename in tqdm(files, desc='Loading data'):
             with fits.open(os.path.join(args.input, filename)) as hdul:
                 meta = dict(hdul[0].header)  # e.g. DATE-OBS, AZ-MNT, EL-MNT, AZ-SOLV, EL-SOLV
+            if 'AZ-MNTDC' in meta and 'EL-MNTDC' in meta and np.any(np.abs([meta['AZ-MNTDC'], meta['EL-MNTDC']]) > 50):
+                # skip data points where the rotator is moving too fast
+                continue
             if 'AZ-MOUNT' in meta:  # TODO: remove this once the header is fixed
                 meta['AZ-MNT'], meta['EL-MNT'] = meta['AZ-MOUNT'], meta['EL-MOUNT']
             if len({'AZ-SOLV', 'EL-SOLV', 'AZ-MNT', 'EL-MNT'}.intersection(meta.keys())) == 4:
@@ -81,6 +93,8 @@ def main():
         return
 
     print(f'Loaded {len(data)} data points')
+    data[:, 2] = wrapdeg(data[:, 2])
+    data[np.logical_and(data[:, 0] > 180, np.abs(data[:, 0]-data[:, 2]) > 180), 2] += 360
 
     if args.rm_drift:
         # assume drift is proportional to distance slewed, remove it linearly
@@ -120,7 +134,7 @@ def main():
     # calibrate
     if args.fit:
         _data, _ts = data, ts
-        for i in range(2):
+        for i in range(args.iters):
             if args.method == 'leastsq':
                 from scipy.optimize import least_squares
                 res = least_squares(lambda x: lossfn(x, _data), params0)
@@ -150,22 +164,23 @@ def main():
         for az, el in data[:, :2]:
             az1, el1 = rotator.to_real(az, el, wrap=True)
             az2, el2 = rotator.to_motor(az1, el1, wrap=True)
-            print(f'az={az:.2f}, el={el:.2f} -> az1={az1:.2f}, el1={el1:.2f} -> az2={az2:.2f}, el2={el2:.2f}')
+            az2 += 360 if abs(az2-az) > 180 else 0
+            print(f'az={az:.3f}, el={el:.3f} -> az1={az1:.3f}, el1={el1:.3f} -> az2={az2:.3f}, el2={el2:.3f}: '
+                  f'err=[{az-az2:.4f}, {el-el2:.4f}]')
 
     # plot
     if args.plot:
-        import matplotlib.pyplot as plt
         if args.init:
             drift = get_drift(rotator0, data)
             az, el = np.array([rotator0.to_real(az, el) for az, el in data[:, :2] - drift]).T
-            plt.plot(wrapdeg(az), el, '+', label='initial')
+            plt.plot(az, el, '-+', label='initial')
         else:
-            plt.plot(wrapdeg(data[:, 0]), data[:, 1], '+', label='measured')
-        plt.plot(wrapdeg(data[:, 2]), data[:, 3], 'o', label='ground truth', markerfacecolor='none')
+            plt.plot(data[:, 0], data[:, 1], '-+', label='measured')
+        plt.plot(data[:, 2], data[:, 3], '-o', label='ground truth', markerfacecolor='none')
 
         drift = get_drift(rotator, data)
         fitted = np.array([rotator.to_real(az, el, wrap=True) for az, el in data[:, :2] - drift])
-        plt.plot(wrapdeg(fitted[:, 0]), fitted[:, 1], 'x', label='fitted')
+        plt.plot(wrapdeg(fitted[:, 0]), fitted[:, 1], '-x', label='fitted')
 
         plt.xlabel('azimuth')
         plt.ylabel('elevation')
@@ -275,7 +290,10 @@ class AzElRotator:
         # Assumes x-axis points to the north, y-axis to the east and z-axis down (az=0 is north, el=0 is horizon)
         q_r = eul_to_q((np.deg2rad(az), np.deg2rad(el)), 'zy')
 
+        # FIXME: there's something wrong with to_motor as --debug-model returns errors
+
         q_m = self.platform_q.conj() * q_r * self.payload_q.conj()
+        # q_m = self.payload_q.conj() * q_r * self.platform_q.conj()
         az_m, el_m = to_azel(q_m)
 
         # add the effect of offsets and gains

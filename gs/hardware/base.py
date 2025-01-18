@@ -378,10 +378,16 @@ class RotatorController(abc.ABC):
         if el_min is not None:
             el = max(el_min, el)
 
-        maz, mel = self.rotator_model.to_motor(az, el)
-        maz = max(self.az_min, min(self.az_max, maz))
-        mel = max(self.el_min, min(self.el_max, mel))
-        az, el = self.rotator_model.to_real(maz, mel)
+        # FIXME: there's something wrong with to_motor as --debug-model returns errors
+        #   - for now, apply az and el limits on the real values instead of motor values
+        if 0:
+            maz, mel = self.rotator_model.to_motor(az, el)
+            maz = max(self.az_min, min(self.az_max, maz))
+            mel = max(self.el_min, min(self.el_max, mel))
+            az, el = self.rotator_model.to_real(maz, mel)
+        else:
+            az = max(self.az_min, min(self.az_max, az))
+            el = max(self.el_min, min(self.el_max, el))
 
         if self.min_sun_angle is not None:
             sun_angle, sun_az, sun_el = self.get_sun_angle(az, el)

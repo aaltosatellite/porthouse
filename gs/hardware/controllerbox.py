@@ -363,12 +363,12 @@ class ControllerBox(RotatorController):
         while not rsp.endswith(end_seq):
             try:
                 tmp = await asyncio.wait_for(self._reader.readuntil(end_seq), timeout=self._timeout)
+                rsp += tmp
+                if len(tmp) == 0:
+                    break
             except asyncio.TimeoutError:
                 if self.log is not None:
                     self.log.warning("Timeout while reading binary response from controller box")
-            rsp += tmp
-            if len(tmp) == 0:
-                break
         return rsp
 
     @staticmethod
