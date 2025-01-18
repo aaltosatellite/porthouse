@@ -116,7 +116,8 @@ class BaseModule:
         logger, module_name = self.log, self.module_name
 
         def exception_handler(loop, ctx):
-            logger.error(f"Task failed at {module_name}: {ctx['exception']}")
+            e = ctx.get('exception', None)
+            logger.error(f"Task failed at {module_name}: {repr(e) if e else ''}: {ctx['message']}")
 
         loop.set_exception_handler(exception_handler)
         loop.run_forever()
@@ -224,8 +225,9 @@ class BaseModule:
                 break
             except aiormq.exceptions.ChannelNotFoundEntity as exc:
                 raise RuntimeError("Exchange not found!") from exc
-            except (aiormq.exceptions.AMQPConnectionError, aiormq.exceptions.ChannelClosed) as exc:
-                if i == 0:
+            except (aiormq.exceptions.AMQPConnectionError, aiormq.exceptions.ChannelClosed,
+                    aiormq.exceptions.ChannelInvalidStateError, aiormq.exceptions.AMQPError) as exc:
+                if i == 0 or not self.channel.is_closed:
                     raise RuntimeError("Failed to send message!") from exc
                 await asyncio.sleep(2)
                 await self.__connect()

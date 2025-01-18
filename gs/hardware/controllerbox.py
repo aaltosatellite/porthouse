@@ -140,8 +140,7 @@ class ControllerBox(RotatorController):
             else:
                 await self._rpc(f"M -a {maz:.2f}".encode("ascii"))
                 await self._rpc(f"M -e {mel:.2f}".encode("ascii"))
-
-        return await self.get_position_target()
+            await self.get_position_target()
 
     async def get_position_target(self, get_vel=False) -> PositionType | Tuple[PositionType, PositionType]:
         res = await self._rpc(b"M -s", True)
