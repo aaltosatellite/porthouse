@@ -253,8 +253,8 @@ class Rotator(BaseModule):
                     # recent target, command it to go there
                     try:
                         ########### Actual call of rotator command ###########
-                        r = await self.rotator.set_position(*self.target_position, shortest_path=self.shortest_path,
-                                                            ts=self.target_timestamp, vel=self.target_velocity)
+                        await self.rotator.set_position(*self.target_position, shortest_path=self.shortest_path,
+                                                        ts=self.target_timestamp, vel=self.target_velocity)
 
                         # toggle this on to avoid calling set_position
                         # multiple times in a row
