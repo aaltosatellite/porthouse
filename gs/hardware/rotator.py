@@ -236,7 +236,8 @@ class Rotator(BaseModule):
                                                                   self.rotator.target_position,
                                                                   accuracy=self.threshold * 2):
                 self.log.info("Target position changed by driver (%s -> %s), trying to continue to previous target",
-                              self.target_position, self.rotator.target_position)
+                              [round(p, 2) for p in self.target_position],
+                              [round(p, 2) for p in self.rotator.target_position])
                 self.set_target_position(self.target_position, vel=self.target_velocity, ts=self.target_timestamp,
                                          shortest_path=self.shortest_path)
 
@@ -313,7 +314,8 @@ class Rotator(BaseModule):
         valid_position = self.rotator.closest_valid_position(*target)
 
         self.log.debug(f"Currently at {[round(p, 2) for p in self.current_position]} - "
-                       f"Rotating to {[round(p, 2) for p in valid_position]} (original {target})")
+                       f"Rotating to {[round(p, 2) for p in valid_position]} "
+                       f"(original {[round(p, 2) for p in target]})")
 
         # rotator function should not be called in here
         # should be done via check_state()

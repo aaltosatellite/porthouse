@@ -662,7 +662,7 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
         ele = elevation(t)
         mask = unobservable_at(t, ele)
         if mask.ndim == 0:
-            return 0.0 if mask else ele
+            return ele - (180.0 if mask else 0)
         ele[mask] -= 180.0
         return ele
 
