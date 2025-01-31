@@ -686,6 +686,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             if wait:
                 while self._create_schedule_task is not None:
                     await asyncio.sleep(0.5)
+            return {"success": True}
 
         elif request_name == "rpc.enable_schedule_file_sync":
             #
