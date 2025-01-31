@@ -554,25 +554,15 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
 
         sched_tasks = self.schedule.get_overlapping(new_task.start_time, new_task.end_time, new_task.rotators)
-        holes = []
 
+        holes = []
         for sched_task in sched_tasks:
             if new_task.is_inside(sched_task):
                 return 0
-
-            elif new_task.is_reaching_into(sched_task):
-                new_task.end_time = sched_task.start_time - timedelta(seconds=1)
-
-            elif new_task.is_reaching_out(sched_task):
-                new_task.start_time = sched_task.end_time + timedelta(seconds=1)
-
-            elif new_task.is_encompassing(sched_task):
+            if not sched_task.is_outside(new_task):
                 holes.append((sched_task.start_time, sched_task.end_time))
 
-        if holes:
-            new_tasks = new_task.split(holes)
-        else:
-            new_tasks = [new_task]
+        new_tasks = new_task.split(holes)
 
         added_count = 0
         for new_task in new_tasks:
@@ -663,10 +653,12 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             #
             # Trigger schedule updating, i.e. generation of new tasks based on currently active processes.
             # If reset=True, remove all pending tasks before generating new ones.
+            # If wait=True, wait for the schedule creation to finish before returning.
             # If start_time and end_time are given, only generate tasks for that time interval.
             # Same applies to process_name.
             #
             start_time, end_time = date_arg("start_time"), date_arg("end_time")
+            wait = request_data.get("wait", False)
 
             if request_data.get("reset", False):
                 process_name = request_data.get("process_name", None)
@@ -689,8 +681,12 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
             start_time = start_time or datetime.now(timezone.utc)
             end_time = end_time or start_time + timedelta(hours=48)
-            return self.maybe_start_schedule_creation(start_time=start_time, end_time=end_time, force=True,
-                                                      process_name=request_data.get("process_name", None))
+            self.maybe_start_schedule_creation(start_time=start_time, end_time=end_time, force=True,
+                                               process_name=request_data.get("process_name", None))
+            if wait:
+                while self._create_schedule_task is not None:
+                    await asyncio.sleep(0.5)
+            return {"success": True}
 
         elif request_name == "rpc.enable_schedule_file_sync":
             #
