@@ -143,29 +143,39 @@ class Task:
         if len(holes) == 0:
             return [self]
 
-        tasks = []
-        holes = sorted(holes, key=lambda h: h[0])
-        for i, (hole_start_time, hole_end_time) in enumerate(holes):
-            if i == 0:
-                if self.start_time < hole_start_time:
-                    task = self.copy()
-                    task.end_time = hole_start_time - timedelta(seconds=1)
-                    tasks.append(task)
+        # merge overlapping holes so that following logic is simpler to understand
+        holes = sorted(holes)       # sort first on start time, then end time
+        merged_holes = []
+        for hole in holes:
+            if not merged_holes or merged_holes[-1][1] <= hole[0]:
+                merged_holes.append(hole)
             else:
-                if holes[i - 1][1] < hole_start_time:
-                    task = self.copy()
-                    task.start_time = holes[i - 1][1] + timedelta(seconds=1)
-                    task.end_time = hole_start_time - timedelta(seconds=1)
-                    tasks.append(task)
+                merged_holes[-1] = (merged_holes[-1][0], hole[1])
 
-            if i == len(holes) - 1:
-                if hole_end_time < self.end_time:
-                    task = self.copy()
-                    task.start_time = holes[i][1] + timedelta(seconds=1)
-                    tasks.append(task)
+        tasks = []
+        for hole_start_time, hole_end_time in merged_holes:
+            if hole_start_time <= self.start_time:
+                # shift start of remaining task to the end of the hole
+                self.start_time = hole_end_time + timedelta(seconds=1)
+            else:
+                # split period between the start of remaining task and the start of the hole into a new task
+                # remaining task is shortened so that it starts at the start of the hole
+                task = self.copy()
+                task.end_time = hole_start_time - timedelta(seconds=1)
+                self.start_time = hole_end_time + timedelta(seconds=1)
+                tasks.append(task)
 
-        for lbl, task in zip(iter_all_strings(), tasks):
-            task.task_name += " " + lbl
+            if hole_end_time >= self.end_time:
+                # if a hole ends after the end of the remaining task, we have reached the end, adjust remaining task
+                # end time to the start of the hole, make a copy of it
+                self.end_time = hole_start_time - timedelta(seconds=1)
+                tasks.append(self.copy())
+                break
+
+        # update task names if ended up with multiple tasks
+        if len(tasks) > 1:
+            for lbl, task in zip(iter_all_strings(), tasks):
+                task.task_name += " " + lbl
 
         return tasks
 
