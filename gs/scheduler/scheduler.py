@@ -401,6 +401,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
         if cancel:
             await self.send_rpc_request("tracking", f"{tracker}.rpc.remove_target", {"task_name": task_name})
+            await self.end_task(task)
 
         return True
 
@@ -678,6 +679,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
                 for task in tbc:
                     await self.send_rpc_request("tracking", "orbit.rpc.remove_target", {"task_name": task.task_name})
+                    await self.end_task(task)
 
             start_time = start_time or datetime.now(timezone.utc)
             end_time = end_time or start_time + timedelta(hours=48)
