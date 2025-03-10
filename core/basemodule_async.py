@@ -118,6 +118,7 @@ class BaseModule:
         def exception_handler(loop, ctx):
             e = ctx.get('exception', None)
             logger.error(f"Task failed at {module_name}: {repr(e) if e else ''}: {ctx['message']}")
+            logger.exception(e)
 
         loop.set_exception_handler(exception_handler)
         loop.run_forever()

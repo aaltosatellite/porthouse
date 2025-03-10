@@ -30,6 +30,7 @@ class Task:
         self.rotators = None
         self.auto_scheduled = True
         self.status = TaskStatus.SCHEDULED
+        self.aos_sent = False  # set to True after AOS event is sent
         self.process_name = None
 
         # if provided, overrides corresponding process fields when sent with the task.start event
@@ -37,6 +38,7 @@ class Task:
 
         # used to determine where to save the task, parameter itself not saved
         self.storage = Task.STORAGE_MAIN
+
 
     def to_dict(self):
         return {
@@ -46,6 +48,7 @@ class Task:
             "rotators": self.rotators,
             "auto_scheduled": self.auto_scheduled,
             "status": self.status.name,
+            "aos_sent": self.aos_sent,
             "process_name": self.process_name,
             "process_overrides": self.process_overrides,
         }
@@ -59,6 +62,7 @@ class Task:
         task.rotators = data["rotators"]
         task.auto_scheduled = data.get("auto_scheduled", False)
         task.status = TaskStatus[data.get("status", "SCHEDULED")]
+        task.aos_sent = data.get("aos_sent", False)
         task.process_name = data.get("process_name", "unnamed process")
         task.process_overrides = data.get("process_overrides", {})
         task.storage = storage
@@ -133,6 +137,7 @@ class Task:
         task.rotators = self.rotators.copy()
         task.auto_scheduled = self.auto_scheduled
         task.status = self.status
+        task.aos_sent = self.aos_sent
         task.process_name = self.process_name
         task.process_overrides = self.process_overrides.copy()
         task.storage = self.storage
@@ -225,7 +230,7 @@ class Process:
     def __init__(self):
         self.process_name = None    # needs to be unique
         self.priority = None   # low value means high priority, can also be negative
-        self.enabled = None    # low value means high priority, can also be negative
+        self.enabled = None    # enabled or disabled
         self.rotators = None   # uhf, sband, uhf-b
 
         self.tracker = None    # orbit, gnss, misc, other?
