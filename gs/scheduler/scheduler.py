@@ -120,11 +120,14 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         # check for tasks that should be terminated or removed
         remove_tasks = []
         for task in self.schedule.end_times:
-            if now >= task.end_time and task.status == TaskStatus.ONGOING:
+            if task.status == TaskStatus.ONGOING and now >= task.end_time:
                 remove_tasks.append(task)
                 await self.end_task(task)
             elif now >= task.end_time:
                 remove_tasks.append(task)
+            elif task.status == TaskStatus.ONGOING \
+                    and now >= task.start_time + timedelta(seconds=task.process_overrides["preaos_time"]):
+                await self.aos_for_task(task)
             elif task.end_time > now:
                 break
 
@@ -417,6 +420,14 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         task.process_overrides = process_data
         await self.publish(task.get_task_data(), exchange="scheduler", routing_key="task.start")
 
+    async def aos_for_task(self, task):
+        if task.aos_sent:
+            return
+
+        task.aos_sent = True
+        self.log.info(f"AOS for task \"{task.task_name}\" {task.rotators}")
+        await self.publish(task.get_task_data(), exchange="scheduler", routing_key="task.aos")
+
     async def end_task(self, task):
         self.log.info(f"End task \"{task.task_name}\" {task.rotators}")
         await self.publish(task.get_task_data(), exchange="scheduler", routing_key="task.end")
@@ -433,7 +444,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 return False
             return True
 
-        schedule = [task.to_dict() for task in self.schedule if filter_task(task)][:limit]
+        schedule = [task.to_dict() for task in self.schedule.all() if filter_task(task)][:limit]
         return schedule
 
     def export_processes(self, process_name=None, target=None, rotators=None, enabled=None, storage=None, limit=None):
