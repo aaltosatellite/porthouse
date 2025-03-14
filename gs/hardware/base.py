@@ -48,6 +48,7 @@ class RotatorController(abc.ABC):
                  horizon_map_file: Optional[str] = None,
                  min_sun_angle: Optional[float] = None,
                  control_sw_version = 1,
+                 parking_position: Optional[Tuple[float, float]] = None,
                  debug: bool = False,
                  log=None,
                  prefix: str = ""):
@@ -83,6 +84,7 @@ class RotatorController(abc.ABC):
 
         self.log = log
         self.control_sw_version = control_sw_version
+        self.parking_position = parking_position
 
         self.rotator_model = AzElRotator(**(rotator_model or {}))
         self.horizon_map_file = None
