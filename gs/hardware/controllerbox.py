@@ -35,6 +35,7 @@ class ControllerBox(RotatorController):
                  horizon_map_file: Optional[str] = None,
                  min_sun_angle: Optional[float] = None,
                  control_sw_version=1,
+                 parking_position: Optional[Tuple[float, float]] = None,
                  log=None,
                  debug: bool = False,
                  prefix="") -> None:
@@ -57,7 +58,7 @@ class ControllerBox(RotatorController):
         """
 
         super().__init__(address, az_min, az_max, el_min, el_max, rotator_model, horizon_map_file,
-                         min_sun_angle, control_sw_version, debug, log)
+                         min_sun_angle, control_sw_version, parking_position, debug, log)
 
         self.err_cnt = 0
         self.prefix = prefix
@@ -242,8 +243,8 @@ class ControllerBox(RotatorController):
         pass
 
     async def los(self) -> None:
-        # TODO: implement parking position
-        pass
+        if self.parking_position:
+            await self.set_position(*self.parking_position, shortest_path=False)
 
     async def pop_motion_log(self):
         """
