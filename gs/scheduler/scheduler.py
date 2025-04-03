@@ -97,11 +97,14 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         await asyncio.sleep(0)
 
         write_schedule = False
+        # update schedule from file if schedule is not being updated by another task
         if not self.schedule_lock.locked():
-            # update schedule from file if schedule is not being updated by another task
+            await self.schedule_lock.acquire()
             self.read_processes()
             write_schedule = self.sync_schedule_files
             await self.read_schedule()
+            if not write_schedule:
+                self.schedule_lock.release()
 
         now = datetime.now(timezone.utc).replace(microsecond=0)  # + timedelta(minutes=1*60 + 3)
 
@@ -136,6 +139,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
         if write_schedule:
             self.write_schedule()
+            self.schedule_lock.release()
 
         self.maybe_start_schedule_creation()
 
@@ -259,19 +263,20 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         self.write_processes(skip_main=deny_main)
 
         if affect_tasks and state_changed:
-            for task in self.schedule:
-                if task.process_name == process.process_name:
-                    if process.enabled and task.status == TaskStatus.NOT_SCHEDULED:
-                        task.status = TaskStatus.SCHEDULED
-                    elif not process.enabled:
-                        if task.status == TaskStatus.SCHEDULED:
-                            # before was so that task continued to reserve a place in the schedule with:
-                            #   task.status = TaskStatus.NOT_SCHEDULED
-                            # now we remove the task from the schedule
-                            await self.remove_task(task.task_name, deny_main=deny_main)
-                        elif task.status == TaskStatus.ONGOING:
-                            await self.remove_task(task.task_name, deny_main=deny_main)
-            self.write_schedule()
+            async with self.schedule_lock:
+                for task in self.schedule:
+                    if task.process_name == process.process_name:
+                        if process.enabled and task.status == TaskStatus.NOT_SCHEDULED:
+                            task.status = TaskStatus.SCHEDULED
+                        elif not process.enabled:
+                            if task.status == TaskStatus.SCHEDULED:
+                                # before was so that task continued to reserve a place in the schedule with:
+                                #   task.status = TaskStatus.NOT_SCHEDULED
+                                # now we remove the task from the schedule
+                                await self.remove_task(task.task_name, deny_main=deny_main)
+                            elif task.status == TaskStatus.ONGOING:
+                                await self.remove_task(task.task_name, deny_main=deny_main)
+                self.write_schedule()
         return True
 
     def remove_process(self, process_name, remove_tasks=True, deny_main=True):
@@ -302,22 +307,21 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         if not self.sync_schedule_files:
             return
 
-        async with self.schedule_lock:
-            self.schedule = Schedule(self)
+        self.schedule = Schedule(self)
 
-            for file, storage in ((self.main_schedule_file, Task.STORAGE_MAIN),
-                                  (self.misc_schedule_file, Task.STORAGE_MISC)):
-                try:
-                    with open(cfg_path(file), "r") as fp:
-                        schedule = yaml.load(fp, Loader=yaml.Loader) or []
-                except FileNotFoundError:
-                    schedule = []
+        for file, storage in ((self.main_schedule_file, Task.STORAGE_MAIN),
+                              (self.misc_schedule_file, Task.STORAGE_MISC)):
+            try:
+                with open(cfg_path(file), "r") as fp:
+                    schedule = yaml.load(fp, Loader=yaml.Loader) or []
+            except FileNotFoundError:
+                schedule = []
 
-                try:
-                    for task in schedule:
-                        self.schedule.add(Task.from_dict(task, storage=storage))
-                except ValueError as e:
-                    self.log.error(f"Failed to read schedule file {file}: {e}", exc_info=True)
+            try:
+                for task in schedule:
+                    self.schedule.add(Task.from_dict(task, storage=storage))
+            except ValueError as e:
+                self.log.error(f"Failed to read schedule file {file}: {e}", exc_info=True)
 
     def write_schedule(self):
         """

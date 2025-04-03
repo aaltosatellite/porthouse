@@ -3,6 +3,7 @@ BaseModule is the base class for all the mission control software modules.
 """
 
 from os.path import join as path_join
+import traceback
 import asyncio
 from concurrent.futures import TimeoutError as AsyncIOTimeoutError
 import json
@@ -100,6 +101,8 @@ class BaseModule:
         self.rpc_futures = {}
         self.rpc_response_queue = None
 
+        self.amqp_log_handler = None
+
         # Setup basic logging
         self.log = logging.getLogger(self.module_name)
         self.log.setLevel(logging.INFO)
@@ -126,8 +129,7 @@ class BaseModule:
         if self.amqp_url is None:
             self.amqp_url = load_globals()["amqp_url"]
         asyncio.get_event_loop().run_until_complete(self.__connect())
-
-        #asyncio.get_event_loop().create_task(self.heartbeat_task(10))
+        asyncio.get_event_loop().create_task(self.heartbeat_task(10))
 
 
     def run(self):
@@ -140,13 +142,14 @@ class BaseModule:
         def exception_handler(loop, ctx):
             e = ctx.get('exception', None)
             logger.error(f"Task failed at {module_name}: {repr(e) if e else ''}: {ctx['message']}")
-            logger.exception(e)
+            if e.__traceback__:
+                logger.error("\n".join(traceback.format_tb(e.__traceback__)))
 
         loop.set_exception_handler(exception_handler)
         loop.run_forever()
 
 
-    async def __connect(self):
+    async def __connect(self, initial: bool = True):
         """
         AMQP connection coroutine. Called automatically by the __init__.
 
@@ -158,15 +161,20 @@ class BaseModule:
         self.connection = await aiormq.connect(self.amqp_url)
         self.channel = await self.connection.channel()
 
-        # Add AMQP log handler
-        amqp_handler = AMQPLogHandler(self.module_name, self.channel)
-        amqp_handler.setLevel(logging.INFO)
-        self.log.addHandler(amqp_handler)
+        # Init logging
+        if initial:
+            # Add AMQP log handler
+            self.amqp_log_handler = AMQPLogHandler(self.module_name, self.channel)
+            self.amqp_log_handler.setLevel(logging.INFO)
+            self.log.addHandler(self.amqp_log_handler)
 
-        await self.__autocreate_queues()
+            await self.__autocreate_queues()
 
-        # Init done
-        self.log.info("Module  %r started!", self.module_name)
+            # Init done
+            self.log.info("Module %r started!", self.module_name)
+        else:
+            self.amqp_log_handler.channel = self.channel
+            self.log.info("Module %r reconnected!", self.module_name)
 
 
     async def heartbeat_task(self, interval):
@@ -174,7 +182,8 @@ class BaseModule:
             Heartbeat task transmits
         """
         while True:
-            await self.publish("heartbeat", bool(self.module_name))
+            await self.publish({"alive": True}, bool(self.prefix),
+                               routing_key=(f"{self.prefix}." if self.prefix else "") + "heartbeat")
             await asyncio.sleep(interval)
 
     async def __autocreate_queues(self):
@@ -241,18 +250,34 @@ class BaseModule:
             msg: Message to be send in bytes.
             kwargs: should include routing_key and exchange.
         """
-        for i in range(3, -1, -1):
+        max_tries = 10
+        for i in range(max_tries):
             try:
+                if self.channel.is_closed:
+                    await self.__connect(initial=False)
                 await self.channel.basic_publish(msg, **kwargs)
                 break
             except aiormq.exceptions.ChannelNotFoundEntity as exc:
-                raise RuntimeError("Exchange not found!") from exc
-            except (aiormq.exceptions.AMQPConnectionError, aiormq.exceptions.ChannelClosed,
-                    aiormq.exceptions.ChannelInvalidStateError, aiormq.exceptions.AMQPError) as exc:
-                if i == 0 or not self.channel.is_closed:
-                    raise RuntimeError("Failed to send message!") from exc
+                raise ConnectionError("Exchange not found!") from exc
+            except (ConnectionError, ConnectionRefusedError, aiormq.exceptions.AMQPConnectionError,
+                    aiormq.exceptions.ChannelClosed, aiormq.exceptions.ChannelInvalidStateError,
+                    aiormq.exceptions.AMQPError) as exc:
+                if i == max_tries - 1 or not self.channel.is_closed:
+                    raise ConnectionError("Failed to send message, tried %d times!" % (i + 1,)) from exc
                 await asyncio.sleep(2)
-                await self.__connect()
+
+
+    def task_done_handler(self, task: asyncio.Task, cancelled_msg: Union[str, bool, None] = None):
+        """
+        Handle task done callback
+        """
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            if cancelled_msg:
+                self.log.warning(f"Task {task.get_name()} cancelled" if cancelled_msg is True else cancelled_msg)
+        except Exception:
+            self.log.error(f"Task {task.get_name()} failed:", exc_info=True)
 
 
     async def send_rpc_response(self, request: aiormq.abc.DeliveredMessage, data: dict):
