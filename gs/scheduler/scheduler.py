@@ -307,22 +307,21 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         if not self.sync_schedule_files:
             return
 
-        async with self.schedule_lock:
-            self.schedule = Schedule(self)
+        self.schedule = Schedule(self)
 
-            for file, storage in ((self.main_schedule_file, Task.STORAGE_MAIN),
-                                  (self.misc_schedule_file, Task.STORAGE_MISC)):
-                try:
-                    with open(cfg_path(file), "r") as fp:
-                        schedule = yaml.load(fp, Loader=yaml.Loader) or []
-                except FileNotFoundError:
-                    schedule = []
+        for file, storage in ((self.main_schedule_file, Task.STORAGE_MAIN),
+                              (self.misc_schedule_file, Task.STORAGE_MISC)):
+            try:
+                with open(cfg_path(file), "r") as fp:
+                    schedule = yaml.load(fp, Loader=yaml.Loader) or []
+            except FileNotFoundError:
+                schedule = []
 
-                try:
-                    for task in schedule:
-                        self.schedule.add(Task.from_dict(task, storage=storage))
-                except ValueError as e:
-                    self.log.error(f"Failed to read schedule file {file}: {e}", exc_info=True)
+            try:
+                for task in schedule:
+                    self.schedule.add(Task.from_dict(task, storage=storage))
+            except ValueError as e:
+                self.log.error(f"Failed to read schedule file {file}: {e}", exc_info=True)
 
     def write_schedule(self):
         """
