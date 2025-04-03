@@ -97,11 +97,14 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         await asyncio.sleep(0)
 
         write_schedule = False
+        # update schedule from file if schedule is not being updated by another task
         if not self.schedule_lock.locked():
-            # update schedule from file if schedule is not being updated by another task
+            await self.schedule_lock.acquire()
             self.read_processes()
             write_schedule = self.sync_schedule_files
             await self.read_schedule()
+            if not write_schedule:
+                self.schedule_lock.release()
 
         now = datetime.now(timezone.utc).replace(microsecond=0)  # + timedelta(minutes=1*60 + 3)
 
@@ -136,6 +139,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
         if write_schedule:
             self.write_schedule()
+            self.schedule_lock.release()
 
         self.maybe_start_schedule_creation()
 
@@ -259,19 +263,20 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         self.write_processes(skip_main=deny_main)
 
         if affect_tasks and state_changed:
-            for task in self.schedule:
-                if task.process_name == process.process_name:
-                    if process.enabled and task.status == TaskStatus.NOT_SCHEDULED:
-                        task.status = TaskStatus.SCHEDULED
-                    elif not process.enabled:
-                        if task.status == TaskStatus.SCHEDULED:
-                            # before was so that task continued to reserve a place in the schedule with:
-                            #   task.status = TaskStatus.NOT_SCHEDULED
-                            # now we remove the task from the schedule
-                            await self.remove_task(task.task_name, deny_main=deny_main)
-                        elif task.status == TaskStatus.ONGOING:
-                            await self.remove_task(task.task_name, deny_main=deny_main)
-            self.write_schedule()
+            async with self.schedule_lock:
+                for task in self.schedule:
+                    if task.process_name == process.process_name:
+                        if process.enabled and task.status == TaskStatus.NOT_SCHEDULED:
+                            task.status = TaskStatus.SCHEDULED
+                        elif not process.enabled:
+                            if task.status == TaskStatus.SCHEDULED:
+                                # before was so that task continued to reserve a place in the schedule with:
+                                #   task.status = TaskStatus.NOT_SCHEDULED
+                                # now we remove the task from the schedule
+                                await self.remove_task(task.task_name, deny_main=deny_main)
+                            elif task.status == TaskStatus.ONGOING:
+                                await self.remove_task(task.task_name, deny_main=deny_main)
+                self.write_schedule()
         return True
 
     def remove_process(self, process_name, remove_tasks=True, deny_main=True):
