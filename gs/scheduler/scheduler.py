@@ -273,9 +273,9 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                                 # before was so that task continued to reserve a place in the schedule with:
                                 #   task.status = TaskStatus.NOT_SCHEDULED
                                 # now we remove the task from the schedule
-                                await self.remove_task(task.task_name, deny_main=deny_main)
+                                await self.remove_task(task.task_name, deny_main=deny_main, lock=False)
                             elif task.status == TaskStatus.ONGOING:
-                                await self.remove_task(task.task_name, deny_main=deny_main)
+                                await self.remove_task(task.task_name, deny_main=deny_main, lock=False)
                 self.write_schedule()
         return True
 
@@ -388,7 +388,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             self.write_schedule()
         return True
 
-    async def remove_task(self, task_name, deny_main=True):
+    async def remove_task(self, task_name, deny_main=True, lock=True):
         """
         Remove task from the schedule
         """
@@ -398,13 +398,20 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             raise SchedulerError(f"Task {task_name} is a MAIN-storage task, deletion through API "
                                  f"currently not allowed.")
 
-        async with self.schedule_lock:
+        def _remove_task(task_name):
             task = self.schedule.tasks[task_name]
-            cancel = task.status == TaskStatus.ONGOING
+            cancel, tracker = task.status == TaskStatus.ONGOING, None
             if cancel:
                 tracker = self.processes[task.get_process_name()].tracker
             self.schedule.remove(task)
             self.write_schedule()
+            return task, cancel, tracker
+
+        if lock:
+            async with self.schedule_lock:
+                task, cancel, tracker = _remove_task(task_name)
+        else:
+            task, cancel, tracker = _remove_task(task_name)
 
         if cancel:
             await self.send_rpc_request("tracking", f"{tracker}.rpc.remove_target", {"task_name": task_name})
