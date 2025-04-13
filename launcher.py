@@ -292,8 +292,9 @@ class Launcher:
             class_object = getattr(package, class_name)
 
             # Check that all the required arguments have been define and output understandable error if not
+            #  - need "reversed" because defaults are given to the last arguments, not the first ones
             argspec = inspect.getfullargspec(class_object.__init__)
-            for j, arg in enumerate(argspec.args[1:]):
+            for j, arg in enumerate(reversed(argspec.args[1:])):
                 if j >= len(argspec.defaults or []) and arg not in params:
                     raise RuntimeError(f"Module {module_name} (class {class_name}) missing argument {arg!r}")
 
