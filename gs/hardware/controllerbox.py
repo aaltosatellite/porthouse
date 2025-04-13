@@ -287,7 +287,7 @@ class ControllerBox(RotatorController):
             cmd:
 
         Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
+            `ControllerBoxError` - in case the controller box encountered an error.
         """
 
         if not isinstance(cmd, bytes):
@@ -322,8 +322,9 @@ class ControllerBox(RotatorController):
             Received `bytes` from the controller box
 
         Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
+            `ControllerBoxError` - in case the controller box encountered an error.
         """
+        rsp = b""
         while True:
             try:
                 rsp = await asyncio.wait_for(self._reader.readline(), timeout=self._timeout)
