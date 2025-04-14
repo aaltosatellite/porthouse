@@ -1,6 +1,5 @@
 """
 porthouse command line tool
- - run using bin/porthouse
 """
 
 import asyncio
@@ -115,8 +114,9 @@ def setup_parser(cmdl_parser: argparse.ArgumentParser) -> None:
     """
     """
     cmdl_parser.add_argument('-l', '--logger', action="store_true")
-    cmdl_parser.add_argument('--amqp', dest="amqp_url",  help="AMQP connection URL.")
-    cmdl_parser.add_argument('--db', dest="db_url", help="PostgreSQL database URL.")
+
+
+
 
 
 def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -201,7 +201,7 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     print(r"|_|                                               ")
     print(r"             Command line interface               ")
 
-    loop = asyncio.new_event_loop()
+    loop = asyncio.get_event_loop()
     loop.run_until_complete(connect_broker(args.amqp_url))
     if args.logger:
         loop.create_task(logger())
