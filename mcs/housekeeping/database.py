@@ -481,7 +481,7 @@ class HousekeepingDatabase:
         stmt  = f"INSERT INTO {subsystem.key} (timestamp, source, metadata, {', '.join(names)}) "
         stmt += f"VALUES ('{timestamp}', '{source}', '{json.dumps(metadata)}', {', '.join(values)} );"
 
-        print(stmt)
+        #print(stmt)
         try:
             self.cursor.execute(stmt)
         except (psycopg2.IntegrityError, ValueError) as e:
