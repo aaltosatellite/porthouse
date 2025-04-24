@@ -3,6 +3,7 @@ BaseModule is the base class for all the mission control software modules.
 """
 
 from os.path import join as path_join
+import traceback
 import asyncio
 from concurrent.futures import TimeoutError as AsyncIOTimeoutError
 import json
@@ -10,7 +11,7 @@ import uuid
 import datetime
 import logging
 import logging.handlers
-from typing import Optional
+from typing import Optional, Union
 from .config import load_globals
 import aiormq
 import aiormq.abc
@@ -100,16 +101,19 @@ class BaseModule:
         self.rpc_futures = {}
         self.rpc_response_queue = None
 
+        self.amqp_log_handler = None
+
         # Setup basic logging
         self.log = logging.getLogger(self.module_name)
         self.log.setLevel(logging.INFO)
         if self.debug:
             self.log.setLevel(logging.DEBUG)
 
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
         # Create file log handler
         if log_path is not None:
             log_file = path_join(log_path, self.module_name + ".log")
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
             file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=int(2e6), backupCount=5)
             file_handler.setFormatter(formatter)
             self.log.addHandler(file_handler)
@@ -121,11 +125,11 @@ class BaseModule:
             self.log.addHandler(stdout_handler)
 
         # Run async connection before returning
-        if amqp_url is None:
-            amqp_url = load_globals()["amqp_url"]
-        asyncio.get_event_loop().run_until_complete(self.__connect(amqp_url))
-
-        #asyncio.get_event_loop().create_task(self.heartbeat_task(10))
+        self.amqp_url = amqp_url
+        if self.amqp_url is None:
+            self.amqp_url = load_globals()["amqp_url"]
+        asyncio.get_event_loop().run_until_complete(self.__connect())
+        asyncio.get_event_loop().create_task(self.heartbeat_task(10))
 
 
     def run(self):
@@ -133,10 +137,19 @@ class BaseModule:
         Start the async loop
         """
         loop = asyncio.get_event_loop()
+        logger, module_name = self.log, self.module_name
+
+        def exception_handler(loop, ctx):
+            e = ctx.get('exception', None)
+            logger.error(f"Task failed at {module_name}: {repr(e) if e else ''}: {ctx['message']}")
+            if e.__traceback__:
+                logger.error("\n".join(traceback.format_tb(e.__traceback__)))
+
+        loop.set_exception_handler(exception_handler)
         loop.run_forever()
 
 
-    async def __connect(self, amqp_url):
+    async def __connect(self, initial: bool = True):
         """
         AMQP connection coroutine. Called automatically by the __init__.
 
@@ -145,18 +158,23 @@ class BaseModule:
         """
 
         # Init AMQP
-        self.connection = await aiormq.connect(amqp_url)
+        self.connection = await aiormq.connect(self.amqp_url)
         self.channel = await self.connection.channel()
 
-        # Add AMQP log handler
-        amqp_handler = AMQPLogHandler(self.module_name, self.channel)
-        amqp_handler.setLevel(logging.INFO)
-        self.log.addHandler(amqp_handler)
+        # Init logging
+        if initial:
+            # Add AMQP log handler
+            self.amqp_log_handler = AMQPLogHandler(self.module_name, self.channel)
+            self.amqp_log_handler.setLevel(logging.INFO)
+            self.log.addHandler(self.amqp_log_handler)
 
-        await self.__autocreate_queues()
+            await self.__autocreate_queues()
 
-        # Init done
-        self.log.info("Module  %r started!", self.module_name)
+            # Init done
+            self.log.info("Module %r started!", self.module_name)
+        else:
+            self.amqp_log_handler.channel = self.channel
+            self.log.info("Module %r reconnected!", self.module_name)
 
 
     async def heartbeat_task(self, interval):
@@ -164,7 +182,8 @@ class BaseModule:
             Heartbeat task transmits
         """
         while True:
-            await self.publish("heartbeat", bool(self.module_name))
+            await self.publish({"alive": True}, bool(self.prefix),
+                               routing_key=(f"{self.prefix}." if self.prefix else "") + "heartbeat")
             await asyncio.sleep(interval)
 
     async def __autocreate_queues(self):
@@ -220,7 +239,45 @@ class BaseModule:
         if isinstance(msg, dict):
             msg = json.dumps(msg, default=json_formatter).encode("ascii")
 
-        await self.channel.basic_publish(msg, **kwargs)
+        await self._basic_publish(msg, **kwargs)
+
+
+    async def _basic_publish(self, msg: bytes, **kwargs):
+        """
+        Publish a message to AMQP exchange
+
+        Args:
+            msg: Message to be send in bytes.
+            kwargs: should include routing_key and exchange.
+        """
+        max_tries = 10
+        for i in range(max_tries):
+            try:
+                if self.channel.is_closed:
+                    await self.__connect(initial=False)
+                await self.channel.basic_publish(msg, **kwargs)
+                break
+            except aiormq.exceptions.ChannelNotFoundEntity as exc:
+                raise ConnectionError("Exchange not found!") from exc
+            except (ConnectionError, ConnectionRefusedError, aiormq.exceptions.AMQPConnectionError,
+                    aiormq.exceptions.ChannelClosed, aiormq.exceptions.ChannelInvalidStateError,
+                    aiormq.exceptions.AMQPError) as exc:
+                if i == max_tries - 1 or not self.channel.is_closed:
+                    raise ConnectionError("Failed to send message, tried %d times!" % (i + 1,)) from exc
+                await asyncio.sleep(2)
+
+
+    def task_done_handler(self, task: asyncio.Task, cancelled_msg: Union[str, bool, None] = None):
+        """
+        Handle task done callback
+        """
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            if cancelled_msg:
+                self.log.warning(f"Task {task.get_name()} cancelled" if cancelled_msg is True else cancelled_msg)
+        except Exception:
+            self.log.error(f"Task {task.get_name()} failed:", exc_info=True)
 
 
     async def send_rpc_response(self, request: aiormq.abc.DeliveredMessage, data: dict):
@@ -244,7 +301,7 @@ class BaseModule:
             data = json.dumps(data)
 
         # Send response and ACK
-        await self.channel.basic_publish(
+        await self._basic_publish(
             data.encode(),
             routing_key=request.header.properties.reply_to,
             properties=aiormq.spec.Basic.Properties(
@@ -270,7 +327,8 @@ class BaseModule:
             future.set_result(message.body)
         else:
             raise RuntimeError(
-                "Unknown correlation_id on RPC response queue! Possibly a late RPC response.")
+                f"RPC response queue is missing corr_id={corr_id}! "
+                f"Possibly a late RPC response from {message.delivery['routing_key']}: {message.body}")
 
 
     async def send_rpc_request(self, exchange: str, routing_key: str, query_data: Optional[dict] = None, timeout: float = 1):
@@ -297,26 +355,22 @@ class BaseModule:
         if isinstance(query_data, (dict, list)):
             query_data = json.dumps(query_data)
 
-        try:
-            # Create future for the RPC response
-            future = asyncio.get_event_loop().create_future()
-            corr_id = str(uuid.uuid4())
-            self.rpc_futures[corr_id] = future
+        # Create future for the RPC response
+        future = asyncio.get_event_loop().create_future()
+        corr_id = str(uuid.uuid4())
+        self.rpc_futures[corr_id] = future
 
-            # Send the RPC call
-            await self.channel.basic_publish(
-                query_data.encode(),
-                exchange=exchange,
-                routing_key=routing_key,
-                properties=aiormq.spec.Basic.Properties(
-                    content_type='text/plain',
-                    correlation_id=corr_id,
-                    reply_to=self.rpc_response_queue,
-                )
+        # Send the RPC call
+        await self._basic_publish(
+            query_data.encode(),
+            exchange=exchange,
+            routing_key=routing_key,
+            properties=aiormq.spec.Basic.Properties(
+                content_type='text/plain',
+                correlation_id=corr_id,
+                reply_to=self.rpc_response_queue,
             )
-
-        except aiormq.exceptions.ChannelNotFoundEntity as exc:
-            raise RPCRequestError("Exchange not found!") from exc
+        )
 
         try:
             # Wait until the future is fulfilled

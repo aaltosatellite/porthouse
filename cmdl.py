@@ -59,7 +59,6 @@ def configure(repl: PythonRepl):
     repl.eval_async = auto_async_eval
 
 
-
 async def logger() -> None:
     """
     Log printer coroutine
@@ -133,20 +132,26 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     except FileNotFoundError:
         cmdl_cfg = { }
 
-
     #
     # Load the environment
     #
     services = [
         {
-            "name": "rotator",
+            "name": "uhf_rotator",
             "class": "porthouse.gs.hardware.interface.RotatorInterface",
             "params": {
                 "prefix": "uhf"
             }
         },
         {
-            "name": "torator",
+            "name": "b_uhf_rotator",
+            "class": "porthouse.gs.hardware.interface.RotatorInterface",
+            "params": {
+                "prefix": "uhf2"
+            }
+        },
+        {
+            "name": "sband_rotator",
             "class": "porthouse.gs.hardware.interface.RotatorInterface",
             "params": {
                 "prefix": "sband"
@@ -155,7 +160,11 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
         {
             "name": "tracker",
             "class": "porthouse.gs.tracking.interface.OrbitTrackerInterface",
-        }
+        },
+        {
+            "name": "scheduler",
+            "class": "porthouse.gs.scheduler.interface.SchedulerInterface",
+        },
     ]
 
     for service in services:
@@ -176,8 +185,6 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
 
         globals()[service["name"]] = class_object(**params)
 
-
-
     #
     # Connect to AMQP broker
     #
@@ -185,8 +192,6 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     async def connect_broker(amqp_url: str):
         global connection, channel
         connection, channel = await amqp_connect(amqp_url)
-
-
 
     print(r"                  _   _                           ")
     print(r" _ __   ___  _ __| |_| |__   ___  _   _ ___  ___  ")
@@ -207,4 +212,3 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
             loop.run_until_complete(repl_task)
         except KeyboardInterrupt:
             repl_task.cancel()
-

@@ -3,510 +3,823 @@
 """
 
 import asyncio
-import enum
-import json
+from collections import OrderedDict
+from typing import List, Union, Optional
 import yaml
-from datetime import datetime, timedelta
-import skyfield.api as skyfield
+
+from datetime import datetime, timedelta, timezone
 
 from porthouse.core.config import cfg_path
-from porthouse.core.basemodule_async import BaseModule, RPCError, queue, rpc, bind
-from porthouse.gs.tracking.utils import *
+from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, bind, RPCRequestTimeout
+from porthouse.gs.scheduler.model import Schedule, TaskStatus, Process, Task
+from porthouse.gs.tracking.gnss_tracker import PointTracker
+from porthouse.gs.tracking.orbit_tracker import OrbitTracker
+from porthouse.gs.tracking.utils import SkyfieldModuleMixin, CelestialObject, parse_time
 
 
-class PassStatus(enum.Enum):
-    """ Pass states """
-    ERROR = -1
-    NOT_SCHEDULED = 0
-    SCHEDULED = 1
-    ONGOING = 2
-    SUCCESS = 3
-    DELETED = 4
-
-
-class Scheduler(BaseModule):
+class Scheduler(SkyfieldModuleMixin, BaseModule):
     """
+    Scheduler module
     """
 
-    PREAOS_PERIOD = 120  # [s]
-    TIME_DELTA = 180  # [s]
+    MISC_TRACKER_PREFIX = "misc:"
 
-    def __init__(self, schedule_file="schedule.json", **kwarg):
+    def __init__(self, main_processes_file="processes.yaml", misc_processes_file="misc-processes.yaml",
+                 main_schedule_file="schedule.yaml", misc_schedule_file="misc-schedule.yaml", **kwargs):
         """
         Initialization
         """
-        super().__init__(**kwarg)
+        super().__init__(**kwargs)
 
-        self.gs: skyfield.Topos = None
-        self.schedule = []
-        self.schedule_file = schedule_file
+        self.main_processes_file = main_processes_file
+        self.misc_processes_file = misc_processes_file
+        self.processes = OrderedDict()
 
+        self.main_schedule_file = main_schedule_file
+        self.misc_schedule_file = misc_schedule_file
+        self.schedule = Schedule(self)
+        self.schedule_updated_date = None
+        self._create_schedule_task = None
+        self._debug_log_time = datetime.fromtimestamp(0).replace(tzinfo=timezone.utc)
+
+        # Schedule updating via execution, new task creation, api task addition & removal  can in general be done
+        # concurrently. However, schedule updating by reloading the schedule file should be done exclusively.
+        self.schedule_lock = asyncio.Lock()
+
+        self.tle_sats = []
+        self.gs_rotators = []
+
+        self.sync_schedule_files = True
 
         loop = asyncio.get_event_loop()
-        loop.create_task(self.setup())
-
+        task = loop.create_task(self.setup(), name="scheduler.setup")
+        task.add_done_callback(self.task_done_handler)
 
     async def setup(self):
-        """
-        """
+        self.gs_rotators = await self.check_rotators(self.gs.config["rotators"])
 
-        tracker_cfg = yaml.load(open(cfg_path("groundstation.yaml"), "r"), Loader=yaml.Loader)
+        await asyncio.sleep(5)  # sleep so that tle server has time to load the tles
+        tle_list = await self.send_rpc_request("tracking", "tle.rpc.get_tle", timeout=6)
+        self.tle_sats = [tle["name"] for tle in tle_list["tle"]]
 
-        self.gs_name = tracker_cfg["name"]
-        self.gs = skyfield.Topos(
-            latitude=skyfield.Angle(degrees=tracker_cfg["lat"]),
-            longitude=skyfield.Angle(degrees=tracker_cfg["lon"]),
-            elevation_m=tracker_cfg["elevation"]
-        )
-
-
-        tle_list = await self.send_rpc_request("tracking", "tle.rpc.get_tle")
-        self.sat_list = [tle["name"] for tle in tle_list["tle"]]
-
-        self.scheduled_sats = ["Aalto-1", "Suomi 100"]
-        for sat in self.scheduled_sats:
-            if sat not in self.sat_list:
-                raise RuntimeError("No TLEs configured for %s", sat)
-
-        self.schedule = []
-        self.read_schedule()
+        # TODO: make the following lines unnecessary by updating the tle server code
+        for proc in self.processes.values():
+            if proc["tracker"] == OrbitTracker.TRACKER_TYPE and proc["target"] not in self.tle_sats:
+                raise RuntimeError("No TLEs configured for %s", proc["target"])
 
         while True:
-            self.check_schedule()
+            await self.execute_schedule()
             await asyncio.sleep(1)
 
-
-
-    def read_schedule(self):
+    async def check_rotators(self, rotators: List[str]):
         """
-        Read schedule from json file
+        Check if rotators are available.
         """
+        await asyncio.sleep(1)
 
-        # Read schedule
-        try:
-            with open(self.schedule_file, "r") as fp:
-                schedule = json.load(fp)
-                schedule = schedule["schedule"]
-        except Exception as e:
-            self.log.error("Failed to read ", exc_info=True)
+        available_rotators = []
+        for prefix in rotators:
+            try:
+                status = await self.send_rpc_request("rotator", f"{prefix}.rpc.status", timeout=2)
+                if len(status):
+                    available_rotators.append(prefix)
+            except (RPCRequestTimeout, asyncio.exceptions.TimeoutError):
+                self.log.warning(f"Rotator {prefix} not available")
+
+        self.log.debug(f"Available rotators: {available_rotators}")
+        return rotators
+
+    async def execute_schedule(self):
+        """
+        Executes the schedule (i.e. checks for passes), starts/stops tracking accordingly, creates new tasks
+        every 24h.
+        """
+        await asyncio.sleep(0)
+
+        write_schedule = False
+        # update schedule from file if schedule is not being updated by another task
+        if not self.schedule_lock.locked():
+            await self.schedule_lock.acquire()
+            self.read_processes()
+            write_schedule = self.sync_schedule_files
+            await self.read_schedule()
+            if not write_schedule:
+                self.schedule_lock.release()
+
+        now = datetime.now(timezone.utc).replace(microsecond=0)  # + timedelta(minutes=1*60 + 3)
+
+        # check for tasks that should start
+        for task in self.schedule.start_times:
+            if task.status == TaskStatus.SCHEDULED:
+                if task.start_time <= now < task.end_time:
+                    await self.start_task(task)
+                elif task.start_time > now:
+                    if self._debug_log_time + timedelta(seconds=10) <= now:
+                        self._debug_log_time = now
+                        self.log.debug(f"Task \"{task.task_name}\" starting in {task.start_time - now}"
+                                       f" ({task.start_time}) channel ok: {not self.channel.is_closed}")
+                    break
+
+        # check for tasks that should be terminated or removed
+        remove_tasks = []
+        for task in self.schedule.end_times:
+            if task.status == TaskStatus.ONGOING and now >= task.end_time:
+                remove_tasks.append(task)
+                await self.end_task(task)
+            elif now >= task.end_time:
+                remove_tasks.append(task)
+            elif task.status == TaskStatus.ONGOING \
+                    and now >= task.start_time + timedelta(seconds=task.process_overrides["preaos_time"]):
+                await self.aos_for_task(task)
+            elif task.end_time > now:
+                break
+
+        for task in remove_tasks:
+            self.schedule.remove(task)
+
+        if write_schedule:
+            self.write_schedule()
+            self.schedule_lock.release()
+
+        self.maybe_start_schedule_creation()
+
+    def maybe_start_schedule_creation(self, start_time=None, end_time=None, force=False, process_name=None):
+        """
+        Create new tasks every 24h, up to 48h into the future, starting from the last scheduled task or 24h into
+        the future, whichever is earlier. Can also be used to force schedule creation for a given time interval,
+        possibly limiting the creation to a certain process only.
+        """
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+
+        if force or self.schedule_updated_date is None or self.schedule_updated_date < now - timedelta(hours=24):
+            if self._create_schedule_task is not None:
+                if force:
+                    raise RPCError("Schedule creation already in progress")
+                self.log.warning("Previous schedule creation task has not finished! Cancelling it now.")
+                self._create_schedule_task.cancel()
+                self._create_schedule_task = None
+
+            if self.schedule_updated_date is None:
+                # first schedule creation after startup, generate from now to 48h into the future
+                start_time = now if start_time is None else start_time
+
+            if process_name is None:
+                self.schedule_updated_date = now
+
+            if start_time is None:
+                end_times = [task.end_time for task in self.schedule.end_times
+                                           if process_name is None or task.get_process_name() == process_name]
+                start_time = now if len(end_times) == 0 else end_times[-1]
+                start_time = min(start_time, now + timedelta(hours=24))
+
+            if end_time is None:
+                end_time = now + timedelta(hours=48)
+
+            loop = asyncio.get_event_loop()
+            self._create_schedule_task = loop.create_task(self.create_schedule(start_time, end_time, process_name),
+                                                          name="scheduler.create_schedule")
+            self._create_schedule_task.add_done_callback(self.schedule_creation_done_handler)
+
+    def schedule_creation_done_handler(self, task):
+        super().task_done_handler(task)
+        self._create_schedule_task = None
+
+    def read_processes(self):
+        """
+        Read processes from file
+        """
+        if not self.sync_schedule_files:
             return
 
-        #
-        schedule = []
-        for elem in schedule:
-            schedule.append(Pass.from_dict(elem))
-        self.schedule = schedule
+        self.processes = OrderedDict()
 
+        for file, storage in ((self.main_processes_file, Process.STORAGE_MAIN),
+                              (self.misc_processes_file, Process.STORAGE_MISC)):
+            try:
+                with open(cfg_path(file), "r") as fp:
+                    processes = yaml.load(fp, Loader=yaml.Loader)
+            except FileNotFoundError:
+                if storage == Process.STORAGE_MAIN:
+                    self.log.error(f"Failed to open processes file {file}", exc_info=True)
+                continue
+
+            for proc in (processes or []):
+                proc = Process.from_dict(proc, storage=storage)
+                if storage == Process.STORAGE_MAIN or not proc.expired():
+                    self.processes[proc.process_name] = proc
+
+    def write_processes(self, skip_main=True):
+        """
+        Write schedule to YAML file
+        """
+        if not self.sync_schedule_files:
+            return
+
+        for file, storage in ((self.main_processes_file, Process.STORAGE_MAIN),
+                              (self.misc_processes_file, Process.STORAGE_MISC)):
+            if skip_main and storage == Process.STORAGE_MAIN:
+                # TODO: should we be able to write main processes file or not?
+                continue
+
+            processes = [proc.to_dict() for proc in self.processes.values()
+                         if proc.storage == storage and (storage == Process.STORAGE_MAIN or not proc.expired())]
+
+            try:
+                with open(cfg_path(file), "w") as fp:
+                    yaml.dump(processes, fp, indent=4, sort_keys=False)
+            except Exception as e:
+                self.log.error(f"Failed to write schedule file {file}: {e}", exc_info=True)
+
+    def add_process(self, process_dict, deny_main=True):
+        """
+        Add process to the scheduler
+        """
+        storage = process_dict.pop("storage", Process.STORAGE_MISC)
+        process = Process.from_dict(process_dict, storage=storage)
+        if process.process_name in self.processes:
+            raise SchedulerError(f"Process {process.process_name} already exists")
+        if deny_main and process.storage == Process.STORAGE_MAIN:
+            raise SchedulerError(f"Process {process.process_name} is a MAIN-storage process, adding through API "
+                                 f"currently not allowed.")
+
+        self.processes[process.process_name] = process
+        self.write_processes(skip_main=deny_main)
+        return True
+
+    async def update_process(self, process_dict, affect_tasks=True, deny_main=True):
+        """
+        Update process in the scheduler
+        """
+        storage = process_dict.pop("storage", Process.STORAGE_MISC)
+        process = Process.from_dict(process_dict, storage=storage)
+        if process.process_name not in self.processes:
+            raise SchedulerError(f"Process {process.process_name} does not exist")
+        if deny_main and process.storage == Process.STORAGE_MAIN:
+            raise SchedulerError(f"Process {process.process_name} is a MAIN-storage process, changes through API "
+                                 f"currently not allowed.")
+
+        state_changed = self.processes[process.process_name].enabled != process.enabled
+        self.processes[process.process_name] = process
+        self.write_processes(skip_main=deny_main)
+
+        if affect_tasks and state_changed:
+            async with self.schedule_lock:
+                for task in self.schedule:
+                    if task.process_name == process.process_name:
+                        if process.enabled and task.status == TaskStatus.NOT_SCHEDULED:
+                            task.status = TaskStatus.SCHEDULED
+                        elif not process.enabled:
+                            if task.status == TaskStatus.SCHEDULED:
+                                # before was so that task continued to reserve a place in the schedule with:
+                                #   task.status = TaskStatus.NOT_SCHEDULED
+                                # now we remove the task from the schedule
+                                await self.remove_task(task.task_name, deny_main=deny_main, lock=False)
+                            elif task.status == TaskStatus.ONGOING:
+                                await self.remove_task(task.task_name, deny_main=deny_main, lock=False)
+                self.write_schedule()
+        return True
+
+    def remove_process(self, process_name, remove_tasks=True, deny_main=True):
+        """
+        Remove process from the scheduler
+        """
+        if process_name not in self.processes:
+            raise SchedulerError(f"Process {process_name} does not exist")
+        if deny_main and self.processes[process_name].storage == Process.STORAGE_MAIN:
+            raise SchedulerError(f"Process {process_name} is a MAIN-storage process, deletion through API "
+                                 f"currently not allowed.")
+
+        for task in self.schedule:
+            if task.process_name == process_name:
+                if remove_tasks:
+                    self.schedule.remove(task)
+                else:
+                    raise SchedulerError(f"Process {process_name} is still in use by task {task.task_name}")
+
+        del self.processes[process_name]
+        self.write_processes(skip_main=deny_main)
+        return True
+
+    async def read_schedule(self):
+        """
+        Read schedule from file
+        """
+        if not self.sync_schedule_files:
+            return
+
+        self.schedule = Schedule(self)
+
+        for file, storage in ((self.main_schedule_file, Task.STORAGE_MAIN),
+                              (self.misc_schedule_file, Task.STORAGE_MISC)):
+            try:
+                with open(cfg_path(file), "r") as fp:
+                    schedule = yaml.load(fp, Loader=yaml.Loader) or []
+            except FileNotFoundError:
+                schedule = []
+
+            try:
+                for task in schedule:
+                    self.schedule.add(Task.from_dict(task, storage=storage))
+            except ValueError as e:
+                self.log.error(f"Failed to read schedule file {file}: {e}", exc_info=True)
 
     def write_schedule(self):
         """
-        Write schedule to JSON file
+        Write schedule to YAML file
         """
+        if not self.sync_schedule_files:
+            return
 
-        schedule = []
-        for entry in self.schedule:
+        for file, storage in ((self.main_schedule_file, Task.STORAGE_MAIN),
+                              (self.misc_schedule_file, Task.STORAGE_MISC)):
+            schedule = [task.to_dict()
+                        for task in self.schedule.all()
+                        if task.storage == storage and (
+                            task.status not in (TaskStatus.EXECUTED, TaskStatus.CANCELLED)
+                            or (datetime.now(timezone.utc) - task.end_time) < timedelta(hours=24))]
 
-            # Skip entries which are older than 24 hours
-            if (datetime.utcnow() - entry.los) > timedelta(hours=24):
-                if entry.status == PassStatus.DELETED:
-                    continue
+            try:
+                with open(cfg_path(file), "w") as fp:
+                    yaml.dump(schedule, fp, indent=4, sort_keys=False)
+            except Exception as e:
+                self.log.error(f"Failed to write schedule file {file}: {e}", exc_info=True)
 
-            schedule.append(entry.to_dict())
-
-        # Save schedule to JSON file
-        try:
-            with open(self.schedule_file, "w") as fp:
-                json.dump({"schedule": schedule}, fp, indent=4)
-        except:
-            self.log.error("Failed to write schedule file", exc_info=True)
-
-
-    def check_schedule(self):
+    def add_task(self, task_dict, deny_main=True, mode='strict'):
         """
-        Checks schedule for passes.
+        Add task to the schedule
         """
+        storage = task_dict.get("storage", Task.STORAGE_MISC)
+        task = Task.from_dict(task_dict, storage=storage)
+        if task.task_name in self.schedule.tasks:
+            raise SchedulerError(f"Task {task.task_name} already exists")
+        if task.process_name not in self.processes:
+            raise SchedulerError(f"Process referred to ({task.process_name}) in task {task.task_name} does not exist")
+        if deny_main and self.processes[task.process_name].storage == Process.STORAGE_MAIN:
+            raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, adding tasks to it "
+                                 f"through the API is currently not allowed.")
 
-        self.read_schedule()
-        now = datetime.utcnow().timestamp()
+        with self.schedule_lock:
+            self.add_tasks(task, mode=mode)
+            self.write_schedule()
+        return True
 
-        for elem in self.schedule:
-            if now >= elem.los:
-                if elem.status != PassStatus.ERROR:
-                    elem.status = PassStatus.DELETED
-
-            elif now >= elem.aos - self.PREAOS_PERIOD:
-                if elem.gs != self.gs_name:
-                    continue
-
-                if elem.status == PassStatus.SCHEDULED:
-                    self.start_pass(elem)
-                    elem.status = PassStatus.ONGOING
-
-        self.schedule = sorted(self.schedule, key = lambda elem: elem.aos)
-
-        self.write_schedule()
-
-
-    def create_schedule(self):
+    def update_task(self, task_dict, deny_main=True, mode='strict'):
         """
-        Create schedule from predicting passes.
+        Update task in the schedule
         """
-        for sat in self.scheduled_sats:
-            passes = self.predict_passes(sat)
-            self.add_pass(passes)
+        storage = task_dict.get("storage", Task.STORAGE_MISC)
+        task = Task.from_dict(task_dict, storage=storage)
+        if task.task_name not in self.schedule.tasks:
+            raise SchedulerError(f"Task {task.task_name} does not exist")
+        if task.process_name not in self.processes:
+            raise SchedulerError(f"Process referred to ({task.process_name}) in task {task.task_name} does not exist")
+        if deny_main and (
+                self.schedule.tasks[task.task_name].storage == Task.STORAGE_MAIN
+                or self.processes[task.process_name].storage == Process.STORAGE_MAIN):
+            raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, changing tasks related "
+                                 f"to it through the API is currently not allowed.")
+        with self.schedule_lock:
+            old_task = self.schedule.tasks[task.task_name]
+            if old_task.status not in (TaskStatus.NOT_SCHEDULED, TaskStatus.SCHEDULED):
+                raise SchedulerError(f"{task.task_name} is in status {task.status}. "
+                                     f"Can only change a tasks with NOT_SCHEDULED or SCHEDULED status.")
+            self.schedule.remove(old_task)
+            self.add_tasks(task, mode=mode)
+            self.write_schedule()
+        return True
 
-
-    def get_schedule(self, name=None, period=None, unscheduled=False):
+    async def remove_task(self, task_name, deny_main=True, lock=True):
         """
-        Get schedule
+        Remove task from the schedule
         """
+        if task_name not in self.schedule.tasks:
+            raise SchedulerError(f"Task {task_name} does not exist")
+        if deny_main and self.schedule.tasks[task_name].storage == Task.STORAGE_MAIN:
+            raise SchedulerError(f"Task {task_name} is a MAIN-storage task, deletion through API "
+                                 f"currently not allowed.")
 
-        schedule = []
-        self.read_schedule()
+        def _remove_task(task_name):
+            task = self.schedule.tasks[task_name]
+            cancel, tracker = task.status == TaskStatus.ONGOING, None
+            if cancel:
+                tracker = self.processes[task.get_process_name()].tracker
+            self.schedule.remove(task)
+            self.write_schedule()
+            return task, cancel, tracker
 
-        for elem in self.schedule:
-            if name is not None:
-                if elem.name != name:
-                    continue
+        if lock:
+            async with self.schedule_lock:
+                task, cancel, tracker = _remove_task(task_name)
+        else:
+            task, cancel, tracker = _remove_task(task_name)
 
-            if period is not None:
-                if (datetime.utcnow() - elem.los) >= timedelta(hours=1):
-                    continue
+        if cancel:
+            await self.send_rpc_request("tracking", f"{tracker}.rpc.remove_target", {"task_name": task_name})
+            await self.end_task(task)
 
-            if unscheduled and elem.status != PassStatus.NOT_SCHEDULED:
-                continue
+        return True
 
-            if not unscheduled and elem.status != PassStatus.SCHEDULED:
-                continue
+    async def start_task(self, task):
+        self.log.info(f"Start task \"{task.task_name}\" {task.rotators}")
+        task.status = TaskStatus.ONGOING
 
-            schedule.append(elem.to_dict())
+        # Save current process data to the task so that even if the process is changed later,
+        # the task will retain the data that was used for its execution.
+        process_data = self.processes[task.process_name].to_dict()
+        process_data.update(task.process_overrides or {})
+        process_data = {k: v for k, v in process_data.items() if k not in ("enabled", "process_name")}
+        task.process_overrides = process_data
+        await self.publish(task.get_task_data(), exchange="scheduler", routing_key="task.start")
 
+    async def aos_for_task(self, task):
+        if task.aos_sent:
+            return
+
+        task.aos_sent = True
+        self.log.info(f"AOS for task \"{task.task_name}\" {task.rotators}")
+        await self.publish(task.get_task_data(), exchange="scheduler", routing_key="task.aos")
+
+    async def end_task(self, task):
+        self.log.info(f"End task \"{task.task_name}\" {task.rotators}")
+        await self.publish(task.get_task_data(), exchange="scheduler", routing_key="task.end")
+
+    def export_schedule(self, process_name=None, target=None, rotators=None, status=None, limit=None):
+        def filter_task(task):
+            if process_name is not None and task.get_process_name() != process_name:
+                return False
+            if target is not None and task.target != target:
+                return False
+            if rotators is not None and len(set(rotators).intersection(task.rotators)) == 0:
+                return False
+            if status is not None and task.status != status:
+                return False
+            return True
+
+        schedule = [task.to_dict() for task in self.schedule.all() if filter_task(task)][:limit]
         return schedule
 
+    def export_processes(self, process_name=None, target=None, rotators=None, enabled=None, storage=None, limit=None):
+        def filter_process(process):
+            if process_name is not None and process.process_name != process_name:
+                return False
+            if target is not None and target not in process.target:
+                return False
+            if rotators is not None and len(set(rotators).intersection(process.rotators)) == 0:
+                return False
+            if enabled is not None and process.enabled != enabled:
+                return False
+            if storage is not None and process.storage != storage:
+                return False
+            return True
 
-    def broadcast_changed_schedule(self):
+        processes = [process.to_dict() for process in self.processes.values() if filter_process(process)][:limit]
+        return processes
+
+    async def create_schedule(self, start_time: datetime = None, end_time: datetime = None, process_name: str = None):
         """
-        Broadcast when scheduled is changed.
+        Create schedule by predicting passes.
         """
+        start_time = start_time or datetime.now(timezone.utc)
+        end_time = end_time or start_time + timedelta(hours=24)
 
-        self.publish({
-            "time": datetime.utcnow().isoformat(),
-            "schedule": [ entry.as_dict() for entry in self.schedule ]
-        }, exchange="scheduler", routing_key="schedule.changed")
+        self.log.debug(f"Creating schedule from {start_time.isoformat()} to {end_time.isoformat()}"
+                       + ('' if process_name is None else f' for process {process_name} only') + "...")
+        self.read_processes()
 
+        # sort so that higher priority (low prio number) processes are scheduled first
+        added_count = 0
+        async with self.schedule_lock:
+            for proc in sorted(list(self.processes.values()), key=lambda p: p.priority, reverse=False):
+                if process_name is not None and proc.process_name != process_name or not proc.enabled:
+                    continue
+                tasks = await self.create_tasks(proc, start_time, end_time)
+                self.log.debug(f"Adding {len(tasks)} tasks for process {proc.process_name}")
+                c = self.add_tasks(tasks, 'procrustean')    # modify added tasks to fit into the schedule
+                self.log.debug(f"After fitting to schedule, added {c} tasks for process {proc.process_name}")
+                added_count += c
+            self.write_schedule()
 
-    def add_pass(self, sc_passes):
+        self.log.info(f"Added {added_count} tasks to the schedule between "
+                      f"{start_time.isoformat()} and {end_time.isoformat()}.")
+        self._create_schedule_task = None
+
+    def add_tasks(self, tasks: Union[List['Task'], 'Task'], mode='strict'):
         """
-        Add list of passes to the schedule.
+        Add tasks to the schedule
 
         Args:
-            passes: List of Pass objects to be added to schedule
+            tasks: List of Task objects to be added to the schedule
+            mode: 'strict': Raise SchedulerError if new task overlaps with existing task (default)
+                  'force':  Force adding tasks to the schedule even if they overlap with existing tasks,
+                            shorten, split, or cancel existing tasks if necessary
+                  'procrustean': If True, force tasks to fit into the schedule
         """
 
-        self.read_schedule()
-        if isinstance(sc_passes, Pass):
-            sc_passes = [sc_passes]
+        if isinstance(tasks, Task):
+            tasks = [tasks]
 
-        for sc_pass in sc_passes:
-            sc_pass = self.check_overlap(sc_pass)
+        added_count = 0
+        for task in tasks:
+            assert task.start_time and task.end_time and task.start_time < task.end_time \
+                   and task.start_time.tzinfo == timezone.utc and task.end_time.tzinfo == timezone.utc, \
+                   f"Invalid task start and/or end time: {task.start_time} - {task.end_time}"
 
-            if sc_pass is None:
-                continue
+            if mode == 'strict':
+                try:
+                    added_count += self.schedule.add(task, apply_limits=True)
+                except ValueError:
+                    raise SchedulerError("New task overlaps with existing task")
 
-            if sc_pass.is_valid():
-                self.schedule.append(sc_pass)
+            elif mode == 'force':
+                added_count += self.make_room_in_schedule(task)
 
-        self.write_schedule()
-        self.broadcast_changed_schedule()
+            else:
+                assert mode == 'procrustean', f"Unknown mode: {mode}"
+                added_count += self.fit_to_schedule(task)
 
+        return added_count
 
-    def modify_pass_status(self, sc_pass):
+    def make_room_in_schedule(self, new_task: 'Task'):
         """
-        Modifies pass status that is in the schedule.
-        """
-        aos_search = sc_pass.aos - self.TIME_DELTA
-        los_search = sc_pass.los + self.TIME_DELTA
-
-        self.read_schedule()
-        for sd_pass in self.schedule:
-            if sc_pass.name != sd_pass.name:
-                continue
-
-            if sc_pass.gs != sd_pass.gs:
-                continue
-
-            if sd_pass.aos >= aos_search and sd_pass.los <= los_search:
-                sd_pass.status = sc_pass.status
-
-        self.write_schedule()
-        self.broadcast_changed_schedule()
-
-
-    def check_overlap(self, sc_pass):
-        """
-        Checks whether pass overlaps with already scheduled pass
-
-        If new pass is overlapping, pass is modified to give scheduled pass
-        precedence.
+        Checks whether new task overlaps with already scheduled tasks, if yes,
+        modifies those tasks so that new task fits into the schedule.
         """
 
-        for sd_pass in self.schedule:
-            if sc_pass.is_inside(sd_pass):
-                return None
-            elif sc_pass.is_outside(sd_pass):
-                return None
-            elif sc_pass.is_reaching_into(sd_pass):
-                sc_pass.los = sd_pass.aos - self.PREAOS_PERIOD
-            elif sc_pass.is_reaching_out(sd_pass):
-                sc_pass.aos = sd_pass.los + 1
+        sched_tasks = self.schedule.get_overlapping(new_task.start_time, new_task.end_time, new_task.rotators)
 
-        return sc_pass
+        for sched_task in sched_tasks:
+            if sched_task.is_inside(new_task):
+                self.schedule.remove(sched_task)
 
+            elif sched_task.is_reaching_into(new_task):
+                sched_task.end_time = new_task.start_time - timedelta(seconds=1)
+                if not sched_task.is_valid(self.processes.get(sched_task.process_name, None)):
+                    self.schedule.remove(sched_task)
 
-    async def broadcast_pass(self, sc_pass):
+            elif sched_task.is_reaching_out(new_task):
+                sched_task.start_time = new_task.end_time + timedelta(seconds=1)
+                if not sched_task.is_valid(self.processes.get(sched_task.process_name, None)):
+                    self.schedule.remove(sched_task)
+
+            elif sched_task.is_encompassing(new_task):
+                subtasks = sched_task.split([(new_task.start_time, new_task.end_time)])
+                self.schedule.remove(sched_task)
+                for task in subtasks:
+                    self.schedule.add(task, apply_limits=True)
+
+        return self.schedule.add(new_task, apply_limits=True)
+
+    def fit_to_schedule(self, new_task: 'Task'):
         """
-        Broadcast pass information of current pass
-        """
-        await self.publish(sc_pass.to_dict(), exchange="scheduler", routing_key="pass.current")
-        self.log.debug("Current pass of %s at GS %s: AOS %rs LOS %s",
-                       sc_pass.name, sc_pass.gs, sc_pass.aos, sc_pass.los)
-
-
-    async def start_pass(self, sc_pass):
-        """
-        Broadcast pass info, set rotators automatic and change target
+        Checks whether new task overlaps with already scheduled tasks, if yes,
+        modifies the new task (trim, split, or discard) so that it fits into the schedule.
+        Returns a list of modified tasks.
         """
 
-        self.log.debug("Starting pass of %s at GS %s", sc_pass.name, sc_pass.gs)
-        await self.broadcast_pass(sc_pass)
+        sched_tasks = self.schedule.get_overlapping(new_task.start_time, new_task.end_time, new_task.rotators)
 
-        await self.publish({
-            "mode": "automatic"
-        }, exchange="rotator", routing_key="uhf.rpc.tracking")
+        holes = []
+        for sched_task in sched_tasks:
+            if new_task.is_inside(sched_task):
+                return 0
+            if not sched_task.is_outside(new_task):
+                holes.append((sched_task.start_time, sched_task.end_time))
 
-        await self.publish({
-            "satellite": sc_pass.name
-        }, exchange="tracking", routing_key="rpc.set_target")
+        new_tasks = new_task.split(holes)
 
+        added_count = 0
+        for new_task in new_tasks:
+            added_count += self.schedule.add(new_task, apply_limits=True)
+
+        return added_count
 
     @rpc()
     @bind("scheduler", "rpc.#")
-    def rpc_handler(self, request_name, request_data):
+    async def rpc_handler(self, request_name, request_data):
         """
             Parse command
         """
-        if request_name == "rpc.get_schedule":
-            return self.get_schedule(**request_data)
+        await asyncio.sleep(0)
 
-        elif request_name == "rpc.add_pass":
+        def date_arg(date_field):
+            if date_field in request_data and request_data[date_field]:
+                return parse_time(request_data[date_field]).utc_datetime()
+            return None
+
+        if request_name == "rpc.get_processes":
             #
-            # Schedule new pass
+            # Get all processes. Can be filtered by process_name, target, rotators, status, and limit.
             #
+            return self.export_processes(**request_data)
 
-            name = request_data["name"]
-            gs = request_data["gs"]
-            aos = request_data["aos"]
-            los = request_data["los"]
-
-            if name in self.sat_list:
-                sc_pass = Pass(name, gs, aos, los)
-                sc_pass.status = PassStatus.SCHEDULED
-                self.add_pass(sc_pass)
-
-        elif request_name == "rpc.remove_pass":
+        elif request_name == "rpc.add_process":
             #
-            # Remove pass from the schedule
+            # Add a new process. Request data must be a dict understood by the Process.from_dict constructor.
             #
+            ok = self.add_process(request_data)
+            return {"success": ok}
 
-            name = request_data["name"]
-            gs = request_data["gs"]
-            aos = request_data["aos"]
-            los = request_data["los"]
-
-            if name in self.sat_list:
-                sc_pass = Pass(name, gs, PassStatus.DELETED, aos, los)
-                sc_pass.status = PassStatus.DELETED
-                self.modify_pass_status(sc_pass)
-
-        elif request_name == "rpc.schedule_pass":
+        elif request_name == "rpc.update_process":
             #
+            # Update an existing process. Existing process storage type must be MISC.
+            # Request data must be a dict understood by the Process.from_dict constructor.
             #
+            ok = await self.update_process(request_data)
+            return {"success": ok}
+
+        elif request_name == "rpc.remove_process":
             #
-
-            name = request_data["name"]
-            gs = request_data["gs"]
-            aos = request_data["aos"]
-            los = request_data["los"]
-
-            if name in self.sat_list:
-                sc_pass = Pass(name, gs, PassStatus.SCHEDULED, aos, los)
-                self.modify_pass_status(sc_pass)
-
-        elif request_name == "rpc.unschedule_pass":
-            name = request_data["name"]
-            gs = request_data["gs"]
-            aos = request_data["aos"]
-            los = request_data["los"]
-
-            if name in self.sat_list:
-                sc_pass = Pass(name, gs, PassStatus.NOT_SCHEDULED, aos, los)
-                self.modify_pass_status(sc_pass)
-
-        elif request_name == "rpc.get_sat_pass":
+            # Remove an existing process. Existing process storage type must be MISC.
+            # All tasks related to the process are also removed.
             #
-            # List all passes for the satellite
+            if "process_name" not in request_data:
+                raise RPCError("process_name (str) parameter not given")
+            ok = self.remove_process(request_data["process_name"])
+            return {"success": ok}
+
+        elif request_name == "rpc.get_schedule":
             #
+            # Get currently scheduled tasks. Can be filtered by process_name, target, rotators, status, and limit.
+            #
+            return self.export_schedule(**request_data)
 
-            if "name" not in request_data:
-                raise RPCError("No satellite name given")
+        elif request_name == "rpc.add_task":
+            #
+            # Add a new task. Request data must be a dict understood by the Task.from_dict constructor.
+            # The process which the task refers to must be of storage type MISC.
+            #
+            deny_main = request_data.pop("deny_main", True)
+            mode = request_data.pop("mode", "strict")
+            ok = self.add_task(request_data, deny_main=deny_main, mode=mode)
+            return {"success": ok}
 
-            passes = self.predict_passes(**request_data)
-            return [ elem.to_dict() for elem in passes ]
+        elif request_name == "rpc.update_task":
+            #
+            # Update an existing task. Existing task's process storage type must be MISC, also the new task's process.
+            # Request data must be a dict understood by the Task.from_dict constructor.
+            #
+            deny_main = request_data.pop("deny_main", True)
+            mode = request_data.pop("mode", "strict")
+            ok = self.update_task(request_data, deny_main=deny_main, mode=mode)
+            return {"success": ok}
+
+        elif request_name == "rpc.remove_task":
+            #
+            # Remove an existing task. Existing task's process storage type must be MISC.
+            #
+            if "task_name" not in request_data:
+                raise RPCError("task_name (str) parameter not given")
+            ok = await self.remove_task(request_data["task_name"], deny_main=request_data.get("deny_main", True))
+            return {"success": ok}
+
+        elif request_name == "rpc.update_schedule":
+            #
+            # Trigger schedule updating, i.e. generation of new tasks based on currently active processes.
+            # If reset=True, remove all pending tasks before generating new ones.
+            # If wait=True, wait for the schedule creation to finish before returning.
+            # If start_time and end_time are given, only generate tasks for that time interval.
+            # Same applies to process_name.
+            #
+            start_time, end_time = date_arg("start_time"), date_arg("end_time")
+            wait = request_data.get("wait", False)
+
+            if request_data.get("reset", False):
+                process_name = request_data.get("process_name", None)
+                reset_ongoing = request_data.get("reset_ongoing", False)
+                affected_statuses = [TaskStatus.SCHEDULED] + ([TaskStatus.ONGOING] if reset_ongoing else [])
+
+                async with self.schedule_lock:
+                    tbr = [task for task in self.schedule
+                           if task.status in affected_statuses and task.auto_scheduled
+                              and (start_time is None or task.start_time >= start_time)
+                              and (end_time is None or task.end_time <= end_time)
+                              and (process_name is None or task.process_name == process_name)]
+                    tbc = [task for task in tbr if task.status == TaskStatus.ONGOING]
+                    for task in tbr:
+                        self.schedule.remove(task)
+                    self.write_schedule()
+
+                for task in tbc:
+                    await self.send_rpc_request("tracking", "orbit.rpc.remove_target", {"task_name": task.task_name})
+                    await self.end_task(task)
+
+            start_time = start_time or datetime.now(timezone.utc)
+            end_time = end_time or start_time + timedelta(hours=48)
+            self.maybe_start_schedule_creation(start_time=start_time, end_time=end_time, force=True,
+                                               process_name=request_data.get("process_name", None))
+            if wait:
+                while self._create_schedule_task is not None:
+                    await asyncio.sleep(0.5)
+            return {"success": True}
+
+        elif request_name == "rpc.enable_schedule_file_sync":
+            #
+            # Enable/disable constant writing of the schedule and processes files so that they can be manually edited
+            # while the scheduler is running
+            #
+            if "enable" not in request_data:
+                raise RPCError("enable (bool) parameter not given")
+            self.sync_schedule_files = request_data["enable"]
+            return {"success": True}
+
+        elif request_name == "rpc.get_potential_tasks":
+            #
+            # Get potential tasks, i.e. tasks that are unaffected by other higher priority processes
+            #
+            if "target" not in request_data:
+                raise RPCError("No target given")
+            request_data["process_name"] = request_data.get("process_name", "unnamed")
+            request_data["tracker"] = request_data.get("tracker", "orbit")
+            request_data["rotators"] = request_data.get("rotators", [])
+
+            start_time, end_time = date_arg("start_time"), date_arg("end_time")
+            tasks = await self.create_tasks(Process.from_dict(request_data), start_time, end_time)
+            return [task.to_dict() for task in tasks]
 
         raise RPCError("Unknown command")
 
+    async def create_tasks(self, process: 'Process', start_time: datetime, end_time: datetime):
+        start_time = start_time or datetime.now(timezone.utc)
+        end_time = end_time or start_time + timedelta(hours=24)
 
-
-    def find_passes(self, sat, gs, start_time, period=None, min_elevation=0):
-        """
-        """
-
-        if start_time is None:
-            t = datetime.utcnow().replace(tzinfo=utc)
-        elif isinstance(start_time, datetime):
-            t = start_time.replace(tzinfo=utc)
-        elif isinstance(start_time, skyfield.Time):
-            t = start_time.utc_datetime()
+        if process.tracker == OrbitTracker.TRACKER_TYPE:
+            tasks = await self._create_tasks(process, start_time, end_time)
+        elif process.tracker.startswith(Scheduler.MISC_TRACKER_PREFIX):
+            tasks = await self._create_tasks_misc(process, start_time, end_time)
         else:
-            raise ValueError("Invalid start_time type")
+            assert process.tracker == PointTracker.TRACKER_TYPE, \
+                f"Unknown tracker type for process {process.process_name}: " + process.tracker
+            tasks = await self._create_tasks_fixed(process, start_time, end_time)
 
-        if period is None:
-            end_time = t + timedelta(hours=24)
-        elif isinstance(period, timedelta):
-            end_time = t + period
-        else:
-            raise ValueError("Invalid period type")
+        if process.storage == Process.STORAGE_MISC:
+            for task in tasks:
+                task.storage = Task.STORAGE_MISC
 
-        el, _, _ = (sat - gs).at(ts.utc(t)).altaz()
-        if el.degrees > 0:
-            t -= timedelta(minutes=30)
+        return tasks
 
-        t_event, events = sat.find_events(gs, ts.utc(t), ts.utc(end_time), min_elevation)
-        t_aos, az_aos, t_max, el_max, t_los, az_los = None, None, None, None, None, None
-
-        pass_list = []
-        for t, event in zip(t_event, events):
-            el, az, _ = (sat - gs).at(t).altaz()
-
-            if event == 0: # AOS
-                t_aos, az_aos = t.utc_datetime(), az.degrees
-            elif event == 1: # Max
-                t_max, el_max = t.utc_datetime(), el.degrees
-            elif event == 2: # LOS
-                t_los, az_los = t.utc_datetime(), az.degrees
-
-                if t_aos and t_max:
-                    pass_list.append(tuple(t_aos, az_aos, t_max, el_max, t_los, az_los))
-
-                t_aos, az_aos, t_max, el_max, t_los, az_los = None, None, None, None, None, None
-
-        return pass_list
-
-
-    async def predict_passes(self, name, period=24.0):
+    async def _create_tasks(self, process: 'Process', start_time: datetime, end_time: datetime):
         """
-            Predict upcoming passes of satellite w.r.t. to ground station.
+        Create tasks for a process related to a satellite or celestial object
         """
-        request = {"satellite": name}
-        tle = await self.send_rpc_request("tracking", "tle.rpc.get_tle", request)
+        start_time, end_time = map(lambda x: x.replace(microsecond=0), (start_time, end_time))
+        pass_start_time = start_time + timedelta(seconds=process.preaos_time)
+        kwargs = dict(target=process.target, start_time=pass_start_time, end_time=end_time,
+                      min_elevation=process.min_elevation, min_max_elevation=process.min_max_elevation,
+                      sun_max_elevation=process.sun_max_elevation, sunlit=process.obj_sunlit)
 
-        satellite = ephem.readtle(tle["name"], tle["tle1"], tle["tle2"])
+        obj = None
+        try:
+            if CelestialObject.is_class_of(process.target):
+                # always generate tasks, even if no start or end event detected:
+                #   - start by default, end by partial_last_pass=True
+                obj = await self.get_celestial_object(partial_last_pass=True, **kwargs)
+            else:
+                obj = await self.get_satellite(**kwargs)
+        except Exception as e:
+            self.log.error(f"Failed to get object {process.target}: {e}", exc_info=True)
+        assert obj is not None, 'Failed to get target object'
 
-        start = ephem.now()
-        self.gs.date = start
+        tasks = []
+        for sc_pass in obj.passes:
+            task = Task()
+            task.task_name = self.schedule.new_task_name(process.process_name)
+            task.start_time = (sc_pass.t_aos - timedelta(seconds=process.preaos_time)).replace(microsecond=0)
+            task.start_time = max(task.start_time, start_time)
+            task.end_time = sc_pass.t_los.replace(microsecond=0)
+            task.process_name = process.process_name
+            task.rotators = process.rotators.copy()
+            if task.is_valid(process):
+                tasks.append(task)
 
-        passes = []
+        return tasks
 
-        satellite.compute(self.gs)
+    async def _create_tasks_misc(self, process: 'Process', start_time: datetime, end_time: datetime):
+        overlapping = self.schedule.get_overlapping(start_time, end_time, process.rotators)
+        holes = [(t.start_time, t.end_time) for t in overlapping]
+        exchange, routing_key = process.tracker[len(Scheduler.MISC_TRACKER_PREFIX):].split(":")
 
-        # If a pass has already started go little bit back in time.
-        if satellite.alt > 0:
-            self.gs.date -= 15 * ephem.minute
-            satellite.compute(self.gs)
+        # NOTE: these tasks override the process settings, such as tracker, target, etc.
+        tasks = await self.send_rpc_request(exchange, routing_key, {
+            "process": process.to_dict(),
+            "start_time": start_time,
+            "end_time": end_time,
+            "holes": holes,
+        }, timeout=30)
 
-        # Calculate passes for the given prediction period
-        while self.gs.date < ephem.Date(start + period * ephem.hour):
+        tasks = [Task.from_dict(task, storage=Task.STORAGE_MISC) for task in tasks]
+        return tasks
 
-            try:
-                tr, _, tt, _, ts, _ = next_pass = self.gs.next_pass(satellite)
+    async def _create_tasks_fixed(self, process: 'Process', start_time: datetime, end_time: datetime):
+        # TODO: implement gnss tracking task creation
+        return []
 
-                if tr == None:
-                    raise ValueError
 
-                aos = ephem.localtime(tr).timestamp()
-                los = ephem.localtime(ts).timestamp()
-
-                sc_pass = Pass(satellite.name, self.gs_name,
-                               PassStatus.NOT_SCHEDULED, aos, los, satellite._orbit)
-
-                # Calculate azimuth at max elevation
-                self.gs.date = tt
-                satellite.compute(self.gs)
-                next_pass = (next_pass[0], next_pass[1], next_pass[2],
-                             satellite.az, next_pass[3], next_pass[4], next_pass[5])
-
-                passes.append(sc_pass)
-
-            except ValueError:
-                ts = ephem.Date(self.gs.date + ephem.hour)
-
-            self.gs.date = ephem.Date(ts + 0.1 * ephem.hour)
-
-        # Make sure we have some kind of result
-        if len(passes) == 0:
-            self.log.warning("No future passes were found for %s!", satellite.name)
-            return
-
-        # Pick pass parameters
-        #tr, _, tt, _, altt, ts, _ = passes[0]
-#
-        # Construct info message
-        # msg = "Next pass for %s (Orbit %d)" % (
-        #    satellite.name, satellite._orbit)
-        #msg += ", AOS: %s" % ephem.localtime(tr).strftime("%Y-%m-%d %H:%M:%S")
-        #msg += ", LOS: %s" % ephem.localtime(ts).strftime("%Y-%m-%d %H:%M:%S")
-        # msg += ", Pass length: %s" % (ephem.localtime(ts) -
-        #                              ephem.localtime(tr))
-        #msg += ", Maximum elevation: %d degrees" % math.degrees(altt)
-        # self.log.info(msg)
-#
-        # if self.debug:
-        #    print("--------------------------------------------------------------")
-        #    print("      Date/Time        Elev/Azim    Alt     Range     RVel    ")
-        #    print("--------------------------------------------------------------")
-#
-        #    self.gs.date = tr
-#
-        #    while self.gs.date <= ts:
-        #        satellite.compute(self.gs)
-#
-        #        print("{0} | {1:4.1f} {2:5.1f} | {3:5.1f} | {4:6.1f} | {5:+7.1f}".format(
-        #            ephem.localtime(self.gs.date).strftime(
-        #                "%Y-%m-%d %H:%M:%S"),
-        #            math.degrees(satellite.alt),
-        #            math.degrees(satellite.az),
-        #            satellite.elevation/1000.,
-        #            satellite.range/1000.,
-        #            satellite.range_velocity))
-#
-        #        self.gs.date = ephem.Date(self.gs.date + 20 * ephem.second)
-#
-        return passes
+class SchedulerError(Exception):
+    pass
 
 
 if __name__ == '__main__':
     Scheduler(
         amqp_url="amqp://guest:guest@localhost:5672/",
-        schedule_file=".schedule.json",
         debug=True
     ).run()

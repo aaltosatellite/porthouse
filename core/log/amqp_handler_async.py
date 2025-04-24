@@ -44,18 +44,22 @@ class AMQPLogHandler(logging.Handler):
         """
 
         # If amqp connection has been closed
-        if not self.channel or not self.channel.connection:
+        if not self.channel or self.channel.is_closed or not self.channel.connection:
             return
 
-        msg = json.dumps({
-            "module": self.module,
-            "level": record.levelname.lower(),
-            "created": record.created,
-            "message": record.msg % record.args
-        }).encode("ascii")
+        try:
+            msg = json.dumps({
+                "module": self.module,
+                "level": record.levelname.lower(),
+                "created": record.created,
+                "message": (record.msg % record.args if record.args else record.msg),
+            }).encode("ascii")
 
-        # TODO: The ugly part!
-        asyncio.create_task(self.channel.basic_publish(msg, exchange='log', routing_key=record.levelname.lower()))
+            # TODO: The ugly part!
+            asyncio.get_event_loop().create_task(
+                self.channel.basic_publish(msg, exchange='log', routing_key=record.levelname.lower()))
+        except Exception as e:
+            raise Exception("Error %s in AMQPLogHandler, msg: %s, args: %s" % (e, record.msg, record.args)) from e
 
 
 if __name__ == "__main__":

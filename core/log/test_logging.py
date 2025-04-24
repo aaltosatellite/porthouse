@@ -3,7 +3,7 @@ import unittest
 import time
 import json
 import socket
-from porthouse.core.static_basemodule import BaseModule, rpc, queue, bind
+from porthouse.core.basemodule_async import BaseModule, rpc, queue, bind
 
 
 class LogServerTester(BaseModule):

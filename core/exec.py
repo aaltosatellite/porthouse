@@ -6,9 +6,10 @@
 """
 
 import shlex
-import subprocess
+import asyncio
 
-from porthouse.core.static_basemodule import BaseModule
+from porthouse.core.basemodule_async import BaseModule
+
 
 class Exec(BaseModule):
     """
@@ -23,15 +24,23 @@ class Exec(BaseModule):
         self.cmd = shlex.split(cmd)
 
 
-    def run(self):
+    async def run(self):
         """
         Run the process aka fork a child process.
         """
+        proc = None
         try:
-            proc = subprocess.Popen(self.cmd)
-            ret = proc.wait()
-            print("%s exited with code %d!" % (self.cmd[0], ret))
-            self.log.error("%s exited with code %d!", self.cmd[0], ret)
+            proc = await asyncio.create_subprocess_exec(
+                *self.cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE)
+            # stdout, stderr = await proc.communicate()
+            await proc.wait()
+            ret = proc.returncode
+            if ret != 0:
+                self.log.error("%s exited with code %d!", self.cmd[0], ret)
+            else:
+                self.log.info("%s exited with code %d", self.cmd[0], ret)
 
         except AttributeError:
             # Log object has been destroyed!
@@ -41,7 +50,8 @@ class Exec(BaseModule):
             pass  # Child process was killed by somebody else
 
         finally:
-            proc.kill()
+            if proc is not None:
+                proc.kill()
 
 
 if __name__ == "__main__":

@@ -2,123 +2,284 @@
     Interface class for controlling Aalto Satellites Rotator controller.
 """
 
-import asyncio
+import os
 import time
-import serial # serial_asyncio
+import math
+import struct
+import asyncio
+import serial
+from serial_asyncio import open_serial_connection
 
-from typing import Tuple, Optional, Union
+from typing import Tuple, Optional, List, Union
 
+from .base import RotatorController, RotatorError, PositionType
 
-class RotatorError(Exception):
-    """ Exception class for all rotator hardware """
 
 class ControllerBoxError(RotatorError):
-    """ Exception class for all rotator hardware error returned by control box """
+    """ Exception class for all rotator hardware error returned by the Aalto controller box """
 
-PositionType = Tuple[float, float]
 
-class ControllerBox:
+class ControllerBox(RotatorController):
     """
-    Rotator controller wrapper class.
+    Controller class for Aalto rotator controller box
     """
-
-    current_position: PositionType
-    az_min: int
-    az_max: int
-    el_min: int
-    el_max: int
-
-    debug: bool
 
     def __init__(self,
-            address: str,
-            baudrate: int=115200,
-            az_min: int =-90,
-            az_max: int =450,
-            el_min: int =0,
-            el_max: int =90,
-            debug=False):
+                 address: str,
+                 baudrate: int = 115200,
+                 az_min: float = -90,
+                 az_max: float = 450,
+                 el_min: float = 0,
+                 el_max: float = 90,
+                 rotator_model: Optional[dict] = None,
+                 horizon_map_file: Optional[str] = None,
+                 min_sun_angle: Optional[float] = None,
+                 control_sw_version=1,
+                 parking_position: Optional[Tuple[float, float]] = None,
+                 log=None,
+                 debug: bool = False,
+                 prefix="") -> None:
         """
-        Initialzie controller box including serial com to controller box.
+        Initialize controller box including serial com to controller box.
 
         Args:
             address: Controller serial port address
             baudrate: Controller serial baudrate
-            az_min: Minimum allowed azimuth
-            az_max: Maximum allowed azimuth
-            el_min: Minimum allowed elecation
-            el_max: Maximum allowed elecation
-            debug: Debug flag. If true, debug information is printedout to log file during runtime.
+            az_min: Minimum allowed azimuth angle
+            az_max: Maximum allowed azimuth angle
+            el_min: Minimum allowed elevation angle
+            el_max: Maximum allowed elevation angle
+            rotator_model: A dictionary containing the rotator model that is used to transform real azimuth and
+                           elevation values to motor angles.
+            horizon_map_file: A file that can be read with numpy load and results in two column array (az, el), where
+                              rows are points on the horizon. If set, the horizon map is used to limit the elevation.
+            min_sun_angle: Minimum allowed sun angle
+            debug: Debug flag. If true, debug information is logged to a file during runtime.
         """
 
-        self.az_min = az_min
-        self.az_max = az_max
-        self.el_min = el_min
-        self.el_max = el_max
-        self.debug = debug
-        self.current_position = (0.0, 0.0)
+        super().__init__(address, az_min, az_max, el_min, el_max, rotator_model, horizon_map_file,
+                         min_sun_angle, control_sw_version, parking_position, debug, log)
+
         self.err_cnt = 0
+        self.prefix = prefix
+        self.sync_offset = 0.003     # initial guess for time-sync offset
+        self.epoch = time.time_ns()
+        self.dlog = None
+        self.mlog = None
 
-        if self.debug:
-            self.log = open(f"controlbox_debug_{time.time():d}.log", "w")
+        if self.debug:  # TODO: where would be best to put this?
+            os.makedirs("logs", exist_ok=True)
+            self.dlog = open(f"logs/{self.prefix}_debug_{time.time():.0f}.log", "w")
 
-        # Creates and opens serial com
-        self.ser = serial.Serial(port=address, baudrate=baudrate, timeout=0.3)
+        # serial connection opened in during call to setup()
+        self._timeout = 1.0
+        self._address = address
+        self._baudrate = baudrate
+        self._limits = (az_min, az_max, el_min, el_max)
+        self._reader = None
+        self._writer = None
+        self._lock = asyncio.Lock()
 
+    def _open_mlog(self):
+        os.makedirs("logs", exist_ok=True)
+        self.mlog = open(f"logs/{self.prefix}_motion_{time.time():.0f}.bin", "wb")
 
-    def open(self):
-        """Open serial com to controller box."""
-        self.flush_buffers()
-        self.ser.open()
-
-    def close(self):
-        """Close serial com to controller box."""
-        self.ser.close()
-        self.flush_buffers()
-
-    def reset(self, wait_time=1):
-        """Reset serial com to controller box."""
-        self.close()
-        time.sleep(wait_time)
-        self.open()
-
-    def flush_buffers(self):
-        """ Clear/flush the input and output buffer of serial com. """
-        self.ser.flushInput()
-        self.ser.flushOutput()
-
-
-    def _read_response(self) -> bytes:
-        """
-        Read one line input of serial com.
-
-        Returns:
-            Received `bytes` from the controller box
-
-        Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
-        """
-
+    async def setup(self):
+        async with self._lock:
+            self._reader, self._writer = await open_serial_connection(url=self._address,
+                                                                      baudrate=self._baudrate)
         try:
-            rsp = self.ser.readline()
+            await self.get_position()         # get current_position, also move to valid position if currently invalid
+        except ControllerBoxError as e:
+            # sometimes the controller box returns malformed output at first
+            await self.get_position()         # get current_position, also move to valid position if currently invalid
+        await self.set_position_range(*self._limits)
 
-            if self.debug:
-                self.log.write(f"{time.time()} READ: {rsp}\n")
-                self.log.flush()
+    async def stop(self) -> None:
+        await self._rpc(b"S")
 
-        except Exception as e:
-            raise ControllerBoxError(
-                f"Error while reading message from controller box: {e}"
-            ) from e
+    async def get_position(self, with_timestamp=False) -> Union[PositionType, Tuple[PositionType, float]]:
+        res = await self._rpc(b"P -s", True)
+        self.current_pos_ts = time.time()
+        motor_pos = self._parse_position_output(res)
+        self.current_position = self.rotator_model.to_real(*motor_pos)
+        self.err_cnt = 0  # Reset error counter
 
-        # Raise error if the line starts with "Error"
-        if rsp.startswith(b"Error: "):
-            raise ControllerBoxError(str(rsp[7:]))
+        await self.maybe_enforce_limits()
+        return self.current_position if not with_timestamp else (self.current_position, self.current_pos_ts)
 
-        return rsp
+    async def set_position(self,
+                     az: float,
+                     el: float,
+                     vel: Optional[Tuple[float, float]] = None,
+                     ts: Optional[float] = None,
+                     shortest_path: bool = True) -> PositionType:
 
+        # Check whether az and el are within allowed limits
+        self.position_valid(az, el, raise_error=True)
+        self.target_position = (az, el)
+        self.target_velocity = vel or (0.0, 0.0)
+        self.target_pos_ts = ts or time.time()
+        maz, mel = self.rotator_model.to_motor(az, el)
 
-    def _write_command(self, cmd: bytes) -> None:
+        if self.control_sw_version > 2:
+            adj = 1.25e9 if True else 0.0  # anticipate satellite movement by 1.25 s?
+            t0 = (time.time_ns() + adj - self.epoch) / 1e9
+            resp = await self._rpc(f"ST {t0 + self.sync_offset:.6f}".encode("ascii"), True)
+            t1 = (time.time_ns() + adj - self.epoch) / 1e9
+            self.sync_offset = (t1 - t0) / 2
+            dt, gain = self._parse_position_output(resp)
+            self.log.debug(f"Time-sync, rtt: {t1-t0:.6f} s, diff: {dt:.6f} s, gain: {gain:.3e} s/tick")
+
+        if self.control_sw_version > 2 and shortest_path:
+            ts = self.target_pos_ts - self.epoch/1e9
+            await self._rpc(f"WA {ts:.3f} {maz:.2f} {mel:.2f}".encode("ascii"))
+        else:
+            if shortest_path:
+                await self._rpc(f"MS -a {maz:.2f}".encode("ascii"))
+                await self._rpc(f"MS -e {mel:.2f}".encode("ascii"))
+            else:
+                await self._rpc(f"M -a {maz:.2f}".encode("ascii"))
+                await self._rpc(f"M -e {mel:.2f}".encode("ascii"))
+            await self.get_position_target()
+
+    async def get_position_target(self, get_vel=False) -> PositionType | Tuple[PositionType, PositionType]:
+        res = await self._rpc(b"M -s", True)
+        trg_motor_pos = self._parse_position_output(res)
+
+        if get_vel and self.control_sw_version > 1:
+            res = await self._rpc(b"MV -s", True)   # NOTE: not yet deployed for original UHF controller
+            trg_motor_vel = self._parse_position_output(res)
+            self.target_position, self.target_velocity = self.rotator_model.to_real(*trg_motor_pos, *trg_motor_vel)
+        else:
+            self.target_position = self.rotator_model.to_real(*trg_motor_pos)
+
+        return self.target_position if not get_vel else (self.target_position, self.target_velocity)
+
+    async def get_position_range(self) -> Tuple[float, float, float, float]:
+        """
+        Get the allowed position range in motor angles from the controller
+        """
+        res = await self._rpc(b"R+ -s", True)
+        self.az_max, self.el_max = ControllerBox._parse_position_output(res)
+
+        res = await self._rpc(b"R- -s", True)
+        self.az_min, self.el_min = ControllerBox._parse_position_output(res)
+
+        return self.az_min, self.az_max, self.el_min, self.el_max
+
+    async def set_position_range(self,
+                           az_min: Optional[float] = None,
+                           az_max: Optional[float] = None,
+                           el_min: Optional[float] = None,
+                           el_max: Optional[float] = None) -> Tuple[float, float, float, float]:
+        """
+        Set the allowed position range in motor angles from the controller
+        """
+        await super().set_position_range(az_min, az_max, el_min, el_max)
+
+        if az_min is not None:
+            await self._rpc(f"R- -a {az_min:.2f}".encode("ascii"))
+
+        if az_max is not None:
+            await self._rpc(f"R+ -a {az_max:.2f}".encode("ascii"))
+
+        if el_min is not None:
+            await self._rpc(f"R- -e {el_min:.2f}".encode("ascii"))
+
+        if el_max is not None:
+            await self._rpc(f"R+ -e {el_max:.2f}".encode("ascii"))
+
+        return await self.get_position_range()
+
+    async def reset_position(self,
+                       az: float,
+                       el: float) -> None:
+
+        self.rotator_model.az_off = 0
+        self.rotator_model.el_off = 0
+        maz, mel = self.rotator_model.to_motor(az, el)
+
+        # Force current position to be az, el
+        await self._rpc(f"P -a {maz: .2f}".encode("ascii"))
+        await self._rpc(f"P -e {mel: .2f}".encode("ascii"))
+
+        self.target_position = (az, el)
+
+        # update current_position, also move to valid position if currently invalid
+        await self.get_position()
+
+    async def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
+        res = await self._rpc(b"D+ -s", True)
+        range_max = ControllerBox._parse_position_output(res)
+
+        res = await self._rpc(b"D- -s", True)
+        range_min = ControllerBox._parse_position_output(res)
+
+        return float(range_min[0]), float(range_max[0]), float(range_min[1]), float(range_max[1])
+
+    async def set_dutycycle_range(self,
+                            az_duty_min: Optional[float]=None,
+                            az_duty_max: Optional[float]=None,
+                            el_duty_min: Optional[float]=None,
+                            el_duty_max: Optional[float]=None) -> None:
+
+        if az_duty_min is not None:
+            await self._rpc(f"D- -a {az_duty_min:.2f}".encode("ascii"))
+
+        if az_duty_max is not None:
+            await self._rpc(f"D+ -a {az_duty_max:.2f}".encode("ascii"))
+
+        if el_duty_min is not None:
+            await self._rpc(f"D- -e {el_duty_min:.2f}".encode("ascii"))
+
+        if el_duty_max is not None:
+            await self._rpc(f"D+ -e {el_duty_max:.2f}".encode("ascii"))
+
+    async def preaos(self) -> None:
+        self.epoch = time.time_ns()
+
+    async def aos(self) -> None:
+        pass
+
+    async def los(self) -> None:
+        if self.parking_position:
+            await self.set_position(*self.parking_position, shortest_path=False)
+
+    async def pop_motion_log(self):
+        """
+        Reads, resets and returns the motion log from the controller box. Call this function
+        frequently enough to avoid log overflow.
+        """
+        if not self.mlog:
+            self._open_mlog()
+
+        ts = struct.pack('<Q', time.time_ns())
+        sep = struct.pack('<fffff', math.nan, math.nan, math.nan, math.nan, math.nan)
+        bytes = await self._rpc(b"L", True, binary_resp_end_seq=sep)
+        if not bytes.endswith(sep):
+            raise ControllerBoxError(f"Failed to read motion log, total bytes read: "
+                                     f"{len(bytes)}, last 20 bytes: 0x{bytes[-20:].hex()}, "
+                                     f"should have been 0x{sep.hex()}")
+        self.mlog.write(ts)
+        self.mlog.write(bytes)
+        # self.mlog.flush()
+
+    async def _rpc(self, cmd: bytes, ret=False, binary_resp_end_seq=None) -> bytes:
+        """
+        Send a command to the controller box and return the response.
+
+        Args:
+            cmd: Command to send
+        """
+        async with self._lock:
+            await self._write_command(cmd)
+            if ret:
+                if binary_resp_end_seq:
+                    return await self._read_bin_resp(binary_resp_end_seq)
+                return await self._read_response()
+
+    async def _write_command(self, cmd: bytes) -> None:
         """
         Write message to controller box via serial port.
 
@@ -126,21 +287,26 @@ class ControllerBox:
             cmd:
 
         Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
+            `ControllerBoxError` - in case the controller box encountered an error.
         """
 
         if not isinstance(cmd, bytes):
             raise ValueError("Wrong input format")
 
-        if cmd[-1] != b"\n":
-            cmd += b"\n"
+        if cmd[-1] != b"\r":
+            cmd += b"\r"
 
         try:
-            ret = self.ser.write(cmd)
+            self._writer.write(cmd)
+            await asyncio.wait_for(self._writer.drain(), timeout=self._timeout)
 
             if self.debug:
-                self.log.write(f"{time.time()} WRITE: {cmd}\n")
-                self.log.flush()
+                self.dlog.write(f"{time.time()} WRITE: {cmd}\n")
+                # self.dlog.flush()
+
+        except asyncio.TimeoutError:
+            if self.log is not None:
+                self.log.warning("Timeout while reading binary response from controller box")
 
         except serial.SerialTimeoutException as e:
             raise ControllerBoxError("Serial connection to controller box timed out: ", e)
@@ -148,265 +314,70 @@ class ControllerBox:
         except Exception as e:
             raise ControllerBoxError("Communication error while writing to controller box: ", e) from e
 
-
-
-    def stop(self) -> None:
+    async def _read_response(self) -> bytes:
         """
-        Stop rotator movement
-        """
-        self._write_command(b"S")
-        self._read_response()
-
-
-    def get_position(self) -> PositionType:
-        """
-        Read rotator's current position.
+        Read one line input of serial com.
 
         Returns:
-            A tuple containing current azimuth and elevation.
+            Received `bytes` from the controller box
+
+        Raises:
+            `ControllerBoxError` - in case the controller box encountered an error.
         """
+        rsp = b""
+        while True:
+            try:
+                rsp = await asyncio.wait_for(self._reader.readline(), timeout=self._timeout)
 
-        self._write_command(b"P -s")
-        self.current_position = ControllerBox._parse_position_output(self._read_response())
+                if self.debug:
+                    self.dlog.write(f"{time.time()} READ: {rsp}\n")
+                    # self.dlog.flush()
 
-        self.err_cnt = 0 # Reset error counter
+            except asyncio.TimeoutError:
+                if self.log is not None:
+                    self.log.warning("Timeout while reading binary response from controller box")
 
-        return self.current_position
+            except Exception as e:
+                raise ControllerBoxError(
+                    f"Error while reading message from controller box: {e}"
+                ) from e
 
+            # Raise error if the line starts with "Error"
+            if rsp.startswith(b"Error: "):
+                if b"position cannot be sensed" in rsp:
+                    if self.log is not None:
+                        self.log.warning(rsp[7:].decode("ascii").strip())
+                    continue
+                raise ControllerBoxError(rsp[7:].decode("ascii").strip())
+            break
 
-    def set_position(self,
-            az: float,
-            el: float,
-            rounding: int=1,
-            shortest_path: bool=True
-        ) -> PositionType:
+        return rsp
+
+    async def _read_bin_resp(self, end_seq: bytes) -> bytes:
         """
-        Set azimuth and elevation to precision of rounding and threshold.
-        Additionally, possible to not use shortest path.
-
-        Args:
-            az: Target azimuth angle
-            el: Target elevation angle
-            rounding: Number of decimals
-            shortets_path: Should the rotator try move using shortest path
+        Read until (and including) `end_seq` from the serial port.
 
         Returns:
-            Returns the current rotator position as tuple
-
-        Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
+            Received `bytes` from the controller box
         """
-
-        # Check whether az and el are within allowed limits
-        if az < self.az_min or az > self.az_max:
-            raise ControllerBoxError("Azimuth value outside allowed limits.")
-        if el < self.el_min or el > self.el_max:
-            raise ControllerBoxError("Elevation value outside allowed limits.")
-
-        if shortest_path:
-            self._write_command(f"MS -a {round(az, rounding)}".encode("ascii"))
-            self._write_command(f"MS -e {round(el, rounding)}".encode("ascii"))
-        else:
-            self._write_command(f"M -a {round(az, rounding)}".encode("ascii"))
-            self._write_command(f"M -e {round(el, rounding)}".encode("ascii"))
-
-        self._read_response()
-
-        return self.get_position_target()
-
-
-    def get_position_target(self) -> PositionType:
-        """
-        Get position where the rotator is moving to.
-
-        Returns:
-            Target position as tuple
-
-        Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
-        """
-
-        self._write_command(b"M -s")
-        return ControllerBox._parse_position_output(self._read_response())
-
-
-    def get_position_range(self) -> Tuple[float, float, float, float]:
-        """
-        Read back the allowed range of azimuth (az) and elevation (el) coordinates.
-
-        Returns:
-            A tuple containing ranges: az_min, az_max, el_min, el_max
-
-        Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
-        """
-
-        self._write_command(b"R+ -s")
-        self.az_max, self.el_max = ControllerBox._parse_position_output(self._read_response())
-
-        self._write_command(b"R- -s")
-        self.az_min, self.el_min = ControllerBox._parse_position_output(self._read_response())
-
-        return self.az_min, self.az_max, self.el_min, self.el_max
-
-
-    def set_position_range(self,
-           az_min: Optional[float]=None,
-           az_max: Optional[float]=None,
-           el_min: Optional[float]=None,
-           el_max: Optional[float]=None,
-           rounding: int=1):
-        """
-        Sets azimuth and elevation range limts.
-
-        Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
-        """
-        if az_min is not None:
-            self._write_command(f"R- -a {round(az_min, rounding)}".encode("ascii"))
-            self._read_response() # Just "OK" ack
-
-        if az_max is not None:
-            self._write_command(f"R+ -a {round(az_max, rounding)}".encode("ascii"))
-            self._read_response() # Just "OK" ack
-
-        if el_min is not None:
-            self._write_command(f"R- -e {round(el_min, rounding)}".encode("ascii"))
-            self._read_response() # Just "OK" ack
-
-        if el_max is not None:
-            self._write_command(f"R+ -e {round(el_max, rounding)}".encode("ascii"))
-            self._read_response() # Just "OK" ack
-
-        return self.get_position_range()
-
-
-    def calibrate(self,
-            az: float,
-            el: float,
-            rounding: int=1,
-            timeout=120
-        ) -> PositionType:
-        """
-        Calibrate azimuth and elevation by moving to position values
-        and redefining as new (0, 0) position.
-
-        Remarks:
-            This command will **block** the execution till the calibration movement
-            has been completed
-
-        Args:
-            az:
-            el:
-            rounding:
-            timeout:
-
-        Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
-        """
-
-        self.set_position(az, el, rounding=rounding, shortest_path=False)
-
-        timeout = time.time() + timeout
-        while (not self._check_pointing((az, el)) and timeout < time.time()):
-            time.sleep(1)
-            self.get_position()
-
-        # Check if the target was achieved
-        if self._check_pointing((az, el)):
-
-            # Force current position to be 0,0
-            self._write_command(b"P -a 0")
-            self._read_response()
-
-            self._write_command(b"P -e 0")
-            self._read_response()
-        else:
-            raise ControllerBoxError(
-                "The setpoint was not reached during calibration!")
-
-        return self.get_position()
-
-
-    def get_dutycycle_range(self) -> Tuple[int, int, int, int]:
-        """
-        Get dutycycle range for azimuth and elevation.
-
-        Returns:
-            A tuple with (az_min, az_max, el_min, el_max) dutycycles.
-
-        Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
-        """
-
-        self._write_command(b"D+ -s")
-        range_max = ControllerBox._parse_position_output(self._read_response())
-
-        self._write_command(b"D- -s")
-        range_min = ControllerBox._parse_position_output(self._read_response())
-
-        return int(range_min[0]), int(range_max[0]), int(range_min[1]), int(range_max[1])
-
-
-    def set_dutycycle_range(self,
-            az_duty_min: Optional[int]=None,
-            az_duty_max: Optional[int]=None,
-            el_duty_min: Optional[int]=None,
-            el_duty_max: Optional[int]=None
-        ) -> None:
-        """
-            Set dutycycle range for azimuth and elevation.
-
-        Args:
-            az_duty_min: Minimum duty cycle (start speed) for azimuth
-            az_duty_max: Maximum duty cycle (max speed) for azimuth
-            el_duty_min: Minimum duty cycle (start speed) for elevation
-            el_duty_max: Maximum duty cycle (max speed) for elevation
-
-        Raises:
-            `ControllerBoxError` - in case the controller box encoutered an error.
-        """
-
-        if az_duty_min is not None:
-            self._write_command(f"D- -a {az_duty_min:d}".encode("ascii"))
-            self._read_response()
-
-        if az_duty_max is not None:
-            self._write_command(f"D+ -a {az_duty_max:d}".encode("ascii"))
-            self._read_response()
-
-        if el_duty_min is not None:
-            self._write_command(f"D- -e {el_duty_min:d}".encode("ascii"))
-            self._read_response()
-
-        if el_duty_max is not None:
-            self._write_command(f"D+ -e {el_duty_max:d}".encode("ascii"))
-            self._read_response()
-
-
-    def _check_pointing(self, target_position: PositionType, accuracy: float=0.1) -> bool:
-        """
-        Checks if antenna is pointing to target.
-        Takes finite accuracy of rotators into account by allowing some dead-zone.
-
-        Args:
-            target_position:
-            accuracy:
-
-        Returns:
-            True if antenna is pointing to target within limits.
-        """
-
-        return  abs(self.current_position[0] - target_position[0]) <= accuracy \
-            and abs(self.current_position[1] - target_position[1]) <= accuracy
-
+        rsp = b''
+        while not rsp.endswith(end_seq):
+            try:
+                tmp = await asyncio.wait_for(self._reader.readuntil(end_seq), timeout=self._timeout)
+                rsp += tmp
+                if len(tmp) == 0:
+                    break
+            except asyncio.TimeoutError:
+                if self.log is not None:
+                    self.log.warning("Timeout while reading binary response from controller box")
+        return rsp
 
     @staticmethod
     def _parse_position_output(output: bytes) -> PositionType:
         """
         Parse azimuth and elevation output of rotator control box.
 
-        Expected input format: "Az: xxx.x <units> El: xxx.x <units>"
+        Expected input format: "Az: xxx.xx <units> El: xxx.xx <units>"
         """
 
         if not isinstance(output, bytes):

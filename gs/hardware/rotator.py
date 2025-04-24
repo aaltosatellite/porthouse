@@ -3,6 +3,7 @@
     Generic Rotator Module
 """
 
+import os
 import time
 import json
 import asyncio
@@ -10,9 +11,11 @@ import asyncio
 import aiormq.abc
 
 from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, queue, bind
+from porthouse.gs.hardware.base import RotatorController, RotatorError
+from porthouse.gs.hardware.hamlib_async import HamlibAsyncController
 
-from .controllerbox import ControllerBox, ControllerBoxError
-from .hamlib import rotctl
+from .controllerbox import ControllerBox
+from .hamlib import HamlibController
 from .dummyrotctl import DummyRotatorController
 
 
@@ -20,12 +23,12 @@ class Rotator(BaseModule):
     """
     """
 
-    # Statics
-    # minimum update interval for position queries,
-    # affects how often hardware functions are called
-    position_update_interval = 1.0
+    rotator: RotatorController
 
-    def __init__(self, driver, address, tracking_enabled=False, **kwarg):
+    def __init__(self, driver, address, tracking_enabled=False, threshold=0.1, refresh_rate=1.0,
+                 position_range=(-90, 450, 0, 90), rotator_model=None, horizon_map_file=None,
+                 control_sw_version=1, min_sun_angle=None, preaos_sequence=True, motion_logging=False,
+                 parking_position=None, **kwargs):
         """
         Initialize rotator module
 
@@ -33,91 +36,149 @@ class Rotator(BaseModule):
             address: Controller address
         """
 
-        BaseModule.__init__(self, **kwarg)
+        BaseModule.__init__(self, **kwargs)
 
         # TOGGLES between manual rotator use or tracker-controlled automatic mode.
         self.tracking_enabled = tracking_enabled
-        self.log.debug("Tracking enabled: %s" % (self.tracking_enabled,))
+        self.log.info("Tracking enabled: %s" % (self.tracking_enabled,))
 
-        # Default threshold, only move while position difference is bigger
-        # than threshold
-        self.threshold = 0.5
+        self.motion_logging = motion_logging
+        self.log.info("Motion logging enabled: %s" % (self.motion_logging,))
+
+        self.preaos_sequence = preaos_sequence
+        self.log.info("Pre-AOS sequence is enabled: %s" % (self.preaos_sequence,))
+
+        # min azimuth, max azimuth, min elevation, max elevation
+        assert position_range[0] < position_range[1], "azimuth min must be smaller than azimuth max"
+        assert position_range[2] < position_range[3], "elevation min must be smaller than elevation max"
+
+        # only move while position difference is larger, given in degrees
+        self.threshold = threshold
+        self.log.info("Threshold: %s" % (self.threshold,))
+
+        # refresh current position info this many times per second when rotating to target
+        #  - affects how often hardware functions are called
+        self.refresh_rate = refresh_rate
+        self.log.info("Refresh rate [Hz]: %s" % (self.refresh_rate,))
 
         self.prev_status = None
 
         # Set target azimuth and elevation values initially to default home
         # position (180,0) (debug)
         # current azimuth/elevation target coordinate
-        self.target_position = (0, 0)
-        self.old_target_position = (0, 0)
+        min_elevation = position_range[2]
+        self.target_position = (0, min_elevation)
+        self.old_target_position = (0, min_elevation)
+        self.target_velocity = (0, 0)
+        self.target_timestamp = time.time()
 
-        # Move to target using shortest path is default behaviour
+        # Move to target using the shortest path is default behaviour
         self.shortest_path = True
 
         # tries to avoid unnecessary rotate-calls, state-machine approach could be better
-        self.moving_to_target = True
+        self.moving_to_target = False
         self.target_valid = False
+        self.pass_ongoing = False
 
         # most recent received position received from hardware
-        self.current_position = (0, 0)
+        self.current_position = (0, min_elevation)
         self.position_timestamp = time.time()  # timestamp for most recent position
 
-        # Connect to rotator controller box
-        # Sets up connection to the controller box
-        ########### Actual call of rotator command ###########
-
-        if driver == "hamlib":
-            self.rotator = rotctl(address)
-        elif driver == "aalto":
-            self.rotator = ControllerBox(address)
-        elif driver == "dummy":
-            self.rotator = DummyRotatorController(address)
-        else:
+        # select given rotator controller, connect to rotator controller hardware
+        driver_cls = {"hamlib": HamlibController,
+                      "hamlib_async": HamlibAsyncController,
+                      "aalto": ControllerBox,
+                      "dummy": DummyRotatorController}.get(driver, None)
+        if driver_cls is None:
             raise ValueError(f"Unknown rotator driver {driver}")
+        self.rotator = driver_cls(address, az_min=position_range[0], az_max=position_range[1],
+                                  el_min=position_range[2], el_max=position_range[3], prefix=self.prefix,
+                                  rotator_model=rotator_model, control_sw_version=control_sw_version,
+                                  horizon_map_file=horizon_map_file, min_sun_angle=min_sun_angle,
+                                  parking_position=parking_position,
+                                  log=self.log, debug=self.debug)
+        self.default_dutycycle_range = None
+        self.log.info("Minimum Sun Angle: %s" % (self.rotator.min_sun_angle,))
+        self.log.info("Horizon map file: %s" % (self.rotator.horizon_map_file,))
+        self.log.info("Control SW Version: %s" % (self.rotator.control_sw_version,))
 
-        # Create setup coroutine
+        if self.debug:
+            os.makedirs("logs", exist_ok=True)
+            self.perf_log = open(f"logs/{self.prefix}_perf_{time.time():.0f}.csv", "w")
+            self.perf_log.write("ts_cur, az_cur, el_cur, ts_trg, az_trg, el_trg, "
+                                "az_vel_trg, el_vel_trg, d_ts, d_az, d_el, d_dist\n")
+            self.perf_log.flush()
+
+        self.loop_sleep_task = None
+
+        # create setup coroutine
         loop = asyncio.get_event_loop()
-        loop.create_task(self.setup())
-
+        task = loop.create_task(self.setup(), name="rotator.setup")
+        task.add_done_callback(self.task_done_handler)
 
     async def setup(self):
         """
         """
 
-        if hasattr(self.rotator, "setup"):
-            await self.rotator.setup()
+        await self.rotator.setup()
+        self.default_dutycycle_range = await self.rotator.get_dutycycle_range()
+
+        self.log.info(f"Rotator prefix={self.prefix} initialized with driver {self.rotator.__class__.__name__}, " +
+                      f"dutycycle_range={self.default_dutycycle_range}, "
+                      f"position_range={await self.rotator.get_position_range()}, "
+                      f"rotator_mode={self.rotator.rotator_model}, " +
+                      f"horizon_map_file={self.rotator.horizon_map_file}" +
+                      (f" (array shape: {self.rotator.horizon_map.shape})" if self.rotator.horizon_map_file else "") +
+                      f", and min_sun_angle={self.rotator.min_sun_angle}")
 
         while True:
+            t0 = time.time()
             await self.check_state()
-            await asyncio.sleep(1 if self.moving_to_target else 2)
+            st = max(0.0, 1.0 / self.refresh_rate - (time.time() - t0)) if self.pass_ongoing else 2.0
+            self.loop_sleep_task = asyncio.ensure_future(asyncio.sleep(st))
+            try:
+                await self.loop_sleep_task
+            except asyncio.CancelledError:
+                pass
 
-
-    def refresh_rotator_position(self, force_update=False):
+    async def refresh_rotator_position(self):
         """
-            returns latest rotator position.
-            If position information is fresh and recent enough it returns just
-            last known value to avoid slowing down hardware interface too much
-            (hardware is SLO-OW down there).
-            Can be forced to poll new position with "force_update".
+        returns latest rotator position
         """
-
-        # check if position information can be considered too old
-        if time.time() < self.position_timestamp + self.position_update_interval and not force_update:
-            self.log.debug("No update! Ellapsed time %f",
-                           time.time() - self.position_timestamp)
-            return
 
         try:
-            # record timestamp for new position
-            self.current_position = self.rotator.get_position()
-            self.position_timestamp = time.time()
+            # only update position if it's been a while since last update
+            if self.position_timestamp is None or time.time() - self.position_timestamp > 0.8 / self.refresh_rate:
+                self.current_position, self.position_timestamp = await self.rotator.get_position(with_timestamp=True)
 
-            self.log.debug("pos now %f %f", *self.current_position)
+                if self.motion_logging and self.target_valid and self.moving_to_target:
+                    try:
+                        await self.rotator.pop_motion_log()
+                    except RotatorError as e:
+                        self.log.warning("Failed to read properly the motion log: %s", e)
 
-        except ControllerBoxError as e:
+            if self.target_valid and self.pass_ongoing and self.debug:
+                d_az = self.target_position[0] - self.current_position[0]
+                d_el = self.target_position[1] - self.current_position[1]
+                d_ts = self.target_timestamp - self.position_timestamp
+
+                # header: ts_cur, az_cur, el_cur, ts_trg, al_trg, el_trg,
+                #         az_vel_trg, el_vel_trg, d_ts, d_az, d_el, d_dist
+                self.perf_log.write("%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.6f, %.6f, %.3f, %.3f, %.3f, %.3f\n" % (
+                                    self.position_timestamp, self.current_position[0], self.current_position[1],
+                                    self.target_timestamp, self.target_position[0], self.target_position[1],
+                                    self.target_velocity[0], self.target_velocity[1],
+                                    d_ts, d_az, d_el, (d_az**2 + d_el**2)**0.5))
+                # self.perf_log.flush()
+
+        except RotatorError as e:
             self.log.error("Could not get rotator position: %s", e, exc_info=True)
+            self.moving_to_target = False
+            try:
+                await self.rotator.stop()
+            except RotatorError as e:
+                self.log.error("Failed to stop rotator: %s", e.args[0], exc_info=True)
             return
-
 
     def get_status_msg(self):
         """
@@ -143,52 +204,71 @@ class Rotator(BaseModule):
             "el": self.current_position[1],
             "az_target": self.target_position[0],
             "el_target": self.target_position[1],
+            "az_vel_trg": self.target_velocity[0],
+            "el_vel_trg": self.target_velocity[1],
+            "az_off": self.rotator.total_adjustment()[0],
+            "el_off": self.rotator.total_adjustment()[1],
+            "ts_target": self.target_timestamp,
             "tracking": status,
             "rotating": self.moving_to_target,
         }
 
-        return status_message
+        if self.rotator.min_sun_angle is not None:
+            sun_angle, az_sun, el_sun = self.rotator.get_sun_angle(*self.current_position)
+            status_message["az_sun"] = round(az_sun, 2)
+            status_message["el_sun"] = round(el_sun, 2)
+            status_message["sun_angle"] = round(sun_angle, 2)
+            status_message["min_sun_angle"] = self.rotator.min_sun_angle
 
+        return status_message
 
     async def check_state(self):
         """
-        Check rotator's current state
+        Check rotator's current state, possibly after first setting a new target position.
 
         Calls the actual rotate -commands through hardware interface.
-        This method could and should be throttled to some rotator specific
-        safe update speed.
+        This method is called at a rotator specific safe update rate that is set using the refresh_rate parameter.
         """
-
-        self.refresh_rotator_position()
 
         # Check what we are doing atm and has anything changed
         if self.target_valid:
+
+            # the driver will avoid any safe zone violations by changing the target by itself, forgetting the given one
+            if self.moving_to_target and not self.close_positions(self.target_position,
+                                                                  self.rotator.target_position,
+                                                                  accuracy=self.threshold * 2):
+                self.log.info("Target position changed by driver (%s -> %s), trying to continue to previous target",
+                              [round(p, 2) for p in self.target_position],
+                              [round(p, 2) for p in self.rotator.target_position])
+                self.set_target_position(self.target_position, vel=self.target_velocity, ts=self.target_timestamp,
+                                         shortest_path=self.shortest_path)
 
             # If antenna is pointing already to current target,
             # don't send additional commands
             if not self.check_pointing():
 
                 # If antenna is already moving towards target position,
-                # don't spam rotate commands
+                # don't spam rotate commands (moving_to_target is set to False at set_target_position)
                 if not self.moving_to_target:
 
                     # Antenna is not at target and not yet moving to most
                     # recent target, command it to go there
                     try:
-
                         ########### Actual call of rotator command ###########
-                        r = self.rotator.set_position(
-                            *self.target_position,
-                            shortest_path=self.shortest_path)
+                        await self.rotator.set_position(*self.target_position, shortest_path=self.shortest_path,
+                                                        ts=self.target_timestamp, vel=self.target_velocity)
 
                         # toggle this on to avoid calling set_position
                         # multiple times in a row
                         self.moving_to_target = True
 
-                    except ControllerBoxError as e:
-                        self.rotator.get_position()
+                    except RotatorError as e:
+                        try:
+                            await self.rotator.get_position()
+                        except RotatorError:
+                            pass
                         self.log.error("Rotator could not set position: %s",
-                                       str(e), exc_info=True)
+                                        str(e), exc_info=True)
 
             else:
                 # toggle off as we are at target
@@ -201,13 +281,14 @@ class Rotator(BaseModule):
             # still waiting for new target coordinates, do nothing
             pass
 
+        await self.refresh_rotator_position()
+
         await self.publish(self.get_status_msg(),
             exchange="rotator",
             routing_key="status",
             prefixed=True)
 
-
-    def check_pointing(self, accuracy=0.1):
+    def check_pointing(self):
         """
         Checks if antenna is pointing to target. Takes finite accuracy of
         rotators into account by allowing some dead-zone.
@@ -215,29 +296,45 @@ class Rotator(BaseModule):
         Returns True if antenna is pointing to target within limits.
         """
 
-        return abs(self.current_position[0] - self.target_position[0]) <= accuracy and \
-               abs(self.current_position[1] - self.target_position[1]) <= accuracy
+        return self.close_positions(self.current_position, self.target_position, self.threshold)
 
+    @staticmethod
+    def close_positions(pos1, pos2, accuracy):
+        """
+        Checks if two positions are close to each other
+        """
 
-    def set_target_position(self, target, shortest_path=True):
+        return abs(pos1[0] - pos2[0]) <= accuracy and \
+               abs(pos1[1] - pos2[1]) <= accuracy
+
+    def set_target_position(self, target, shortest_path=True, vel=None, ts=None):
         """
         Set new target position
         """
 
-        self.log.debug("Rotating to %r", target)
+        # set target to the closest valid position instead of given target position
+        valid_position = self.rotator.closest_valid_position(*target)
+
+        self.log.debug(f"Currently at {[round(p, 2) for p in self.current_position]} - "
+                       f"Rotating to {[round(p, 2) for p in valid_position]} "
+                       f"(original {[round(p, 2) for p in target]})")
 
         # rotator function should not be called in here
         # should be done via check_state()
 
         # Update target variables
         self.old_target_position = self.target_position
-        self.target_position = target
+        self.target_position = valid_position
         self.shortest_path = shortest_path
+        self.target_velocity = vel or (0, 0)
+        self.target_timestamp = ts or time.time()
 
         self.target_valid = True
         # target was updated but movement command is not yet sent.
         self.moving_to_target = False
 
+        # cancel the sleep task so that the check_state is called immediately
+        self.loop_sleep_task.cancel()
 
     @rpc()
     @bind(exchange="rotator", routing_key="rpc.#", prefixed=True)
@@ -272,9 +369,9 @@ class Rotator(BaseModule):
 
                 try:
                     ########### Actual call of rotator command ###########
-                    self.rotator.stop()
+                    await self.rotator.stop()
 
-                except ControllerBoxError as e:
+                except RotatorError as e:
                     self.log.error(
                         "Failed to stop rotator: %s", str(e), exc_info=True)
                     return
@@ -293,18 +390,20 @@ class Rotator(BaseModule):
             """
 
             target = (float(request_data['az']), float(request_data['el']))
+            timestamp = request_data.get('timestamp', time.time())
 
             # Disable automatic tracking
             self.tracking_enabled = False
 
             try:
+                kwargs = {}
                 if "shortest" in request_data:
-                    self.set_target_position(target, request_data["shortest"])
+                    kwargs["shortest_path"] = request_data["shortest"]
+                if "velocity" in request_data:
+                    kwargs["vel"] = request_data["velocity"]
+                self.set_target_position(target, ts=timestamp, **kwargs)
 
-                else:
-                    self.set_target_position(target)
-
-            except ControllerBoxError as e:
+            except RotatorError as e:
                 self.log.error(
                     "Failed to update target position! %s",
                     str(e), exc_info=True)
@@ -318,131 +417,74 @@ class Rotator(BaseModule):
             self.tracking_enabled = False
 
             # Send stop command
-            self.rotator.stop()
+            self.target_valid = False
+            await self.rotator.stop()
 
-        elif request_name == "rpc.calibrate":
-            """
-                Calibrate rotator position. IS BLOCKING.
-            """
-            # Stoping rotators
-            self.tracking_enabled = False
+        elif request_name == "rpc.adjust":
+            d_az, d_el = float(request_data['d_az']), float(request_data['d_el'])
+            if abs(d_az) > 5 and abs(d_el) > 5:
+                raise RPCError("Too large adjustment, max adjustment is 5 degrees")
+            self.rotator.adjust(d_az, d_el)
+            az_off, el_off = self.rotator.total_adjustment()
+            return {"az_off": az_off, "el_off": el_off}
 
-            ########### Actual call of rotator command ###########
-            self.rotator.stop()
-
-            # If no value is given, assume calibration shall not be changed
-            if "az" not in request_data:
-                request_data["az"] = 0
-
-            if "el" not in request_data:
-                request_data["el"] = 0
-
+        elif request_name == "rpc.reset_position":
             target = float(request_data['az']), float(request_data['el'])
-
-            now = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
-            msg = "{0}: Az: {1} El: {2}".format(now, target[0], target[1])
-
-            # Allow movement outside bounds by changing bounds if force is true
-            if "force" in request_data and request_data["force"]:
-                (az_min, az_max, el_min, el_max) = self.rotator.get_position_range()
-
-                if target[0] < az_min:
-                    az_min = target[0] - 1
-                    self.rotator.set_position_range(
-                        az_min, az_max, el_min, el_max)
-                elif target[0] > az_max:
-                    az_max = target[0] + 1
-                    self.rotator.set_position_range(
-                        az_min, az_max, el_min, el_max)
-
-                if target[1] < el_min:
-                    el_min = target[1] - 1
-                    self.rotator.set_position_range(
-                        az_min, az_max, el_min, el_max)
-                elif target[1] > el_max:
-                    el_max = target[1] + 1
-                    self.rotator.set_position_range(
-                        az_min, az_max, el_min, el_max)
-            else:
-                self.rotator.set_position_range(-90, 450, 0, 90)
-
-            # Necessary to set calibration flag otherwise only movement
-            if "cal" in request_data and request_data["cal"]:
-                self.log.info("Calibration attempted! " + msg)
-                pass
-            else:
-                self.log.info("Only moving, no calibration! " + msg)
-                self.set_target_position(target, False)
-                return
-
-            # Move to new origin and set to (0, 0)
-            ########### Actual call of rotator command ###########
-            ret = self.rotator.calibrate(target[0], target[1])
-
-            if ret != (0, 0):
-                self.rotator.set_position_range(-90, 450, 0, 90)
-                raise RuntimeError("Calibration unsuccessful!")
-
-            # Reset limits of forced calib (TODO: remove hard coding of limits)
-            self.rotator.set_position_range(-90, 450, 0, 90)
-
             with open("cal_history.txt", "a+") as history_file:
-                history_file.write(msg + "\n")
-
-            try:
-                self.set_target_position(ret)
-            except ControllerBoxError as e:
-                self.log.error(
-                    "Failed to update target position! %s",
-                    e.args[0], exc_info=True)
-                return
-
-            self.refresh_rotator_position(force_update=True)
+                now = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
+                history_file.write(f"{now}: Az: {self.current_position[0]} El: {self.current_position[1]} "
+                                   f"=> Az: {target[0]} El: {target[1]}\n")
+            await self.rotator.reset_position(target[0], target[1])
+            return
 
         elif request_name == "rpc.get_position_target":
             ########### Actual call of rotator command ###########
-            ret = self.rotator.get_position_target()
+            ret = await self.rotator.get_position_target()
             return {"position_target": ret}
 
         elif request_name == "rpc.get_position_range":
             ########### Actual call of rotator command ###########
-            ret = self.rotator.get_position_range()
+            ret = await self.rotator.get_position_range()
             return {"position_range": ret}
 
         elif request_name == "rpc.set_position_range":
             ########### Actual call of rotator command ###########
-            ret = self.rotator.set_position_range(float(request_data["az_min"]),
-                                                  float(request_data["az_max"]),
-                                                  float(request_data["el_min"]),
-                                                  float(request_data["el_max"]))
+            ret = await self.rotator.set_position_range(float(request_data["az_min"]),
+                                                        float(request_data["az_max"]),
+                                                        float(request_data["el_min"]),
+                                                        float(request_data["el_max"]))
             return {"position_range": ret}
 
         elif request_name == "rpc.get_dutycycle_range":
             ########### Actual call of rotator command ###########
-            ret = self.rotator.get_dutycycle_range()
+            ret = await self.rotator.get_dutycycle_range()
             return {"dutycycle_range": ret}
 
         elif request_name == "rpc.set_dutycycle_range":
             ########### Actual call of rotator command ###########
-            self.rotator.set_dutycycle_range(int(request_data["az_min"]),
-                                             int(request_data["az_max"]),
-                                             int(request_data["el_min"]),
-                                             int(request_data["el_max"]))
+            await self.rotator.set_dutycycle_range(float(request_data["az_min"]),
+                                                   float(request_data["az_max"]),
+                                                   float(request_data["el_min"]),
+                                                   float(request_data["el_max"]))
+            self.rotator.default_dutycycle_range = await self.rotator.get_dutycycle_range()
 
-        elif request_name == "rpc.get_status":
+        elif request_name == "rpc.status":
             """
                 Get rotator status message
             """
             return self.get_status_msg()
 
+        else:
+            raise RPCError("No such command: %s" % request_name)
 
     @queue()
     @bind(exchange="event", routing_key="*")
     @bind(exchange="tracking", routing_key="target.position")
-    def tracking_event(self, message: aiormq.abc.DeliveredMessage):
+    async def tracking_event(self, message: aiormq.abc.DeliveredMessage):
         """
             Automatic events for tracking
         """
+        await asyncio.sleep(0)
 
         # Don't do anything automatic if the tracking is not enabled
         if not self.tracking_enabled:
@@ -452,7 +494,10 @@ class Rotator(BaseModule):
             event_body = json.loads(message.body)
         except ValueError as e:
             self.log.error('Failed to parse json: %s\n%s',
-                           e.args[0], message.body)
+                           e.args[0], message.body, exc_info=True)
+            return
+
+        if self.prefix not in event_body.get('rotators', []):
             return
 
         routing_key = message.delivery['routing_key']
@@ -462,16 +507,16 @@ class Rotator(BaseModule):
             """
                 Satellite position update during the pass
             """
+            self.pass_ongoing = True
 
             new_target = (float(event_body['az']) % 360,
                           float(event_body['el']))
-
-            if new_target[1] < self.threshold:
-                new_target = (new_target[0], self.threshold)
+            timestamp = event_body.get('timestamp', time.time())
+            velocity = (event_body.get('az_rate', 0), event_body.get('el_rate', 0))
 
             try:
-                self.set_target_position(new_target, shortest_path=True)
-            except ControllerBoxError as e:
+                self.set_target_position(new_target, shortest_path=True, vel=velocity, ts=timestamp)
+            except RotatorError as e:
                 self.log.error(
                     "Failed to update target position! %s",
                     e.args[0], exc_info=True)
@@ -480,14 +525,20 @@ class Rotator(BaseModule):
         elif routing_key == "preaos":
             """
                 At preAOS determine the optimal initial azimuth within the
-                full [-90:450] interval. Initial elevation is always threshold.
+                full [-90:450] interval. Initial elevation is always min_elevation.
             """
-            aos_el = self.threshold
+            if not self.preaos_sequence:
+                # PreAOS sequence might be handled elsewhere, e.g. at mission control system if need to do some
+                # automatic calibrations etc.
+                return
 
             # Make sure azimuths are in range [0, 360]
-            aos_az = event_body["az_aos"] % 360
-            max_az = event_body["az_max"] % 360
-            los_az = event_body["az_los"] % 360
+            aos_az, aos_el = event_body["az_aos"] % 360, event_body["el_aos"]
+            max_az, max_el = event_body["az_max"] % 360, event_body["el_max"]
+            los_az, los_el = event_body["az_los"] % 360, event_body["el_los"]
+
+            min_el = self.rotator.az_dependent_min_el(aos_az)
+            aos_el = max(aos_el, min_el) if min_el is not None else aos_el
 
             ### Might be needed to adapt this when using with different GS ###
             # Over the north-west to east or vice versa or
@@ -507,38 +558,40 @@ class Rotator(BaseModule):
             # Initial positioning of the rotator
             try:
                 # Speed up the azimuth rotation speed
-                self.log.info("DEBUG raise duty cycle up to 100")
-                self.rotator.set_dutycycle_range(az_duty_max=100)
+                self.log.debug("Raise AZ duty cycle up to 100")
+                await self.rotator.set_dutycycle_range(az_duty_max=100)
+                await self.rotator.preaos()
 
                 # Needs to go to position defined by full [-90, +450] angle
                 self.set_target_position(initial_target, shortest_path=False)
 
-            except ControllerBoxError as e:
-                self.log.error(
-                    "Failed to set initial target position! %s",
-                    str(e), exc_info=True)
+            except RotatorError as e:
+                self.log.error("Failed to set initial target position! %s", str(e), exc_info=True)
                 return
 
-            self.log.info("Rotator ready for the next pass (%s)",
-                          event_body.get("satellite", "-"))
+            self.log.info("Rotator ready for the next pass (%s)", event_body.get("satellite", "-"))
 
         elif routing_key == "aos":
             # Set to default rotation speed
-            self.log.info("DEBUG set duty cycle back to 60")
-            self.rotator.set_dutycycle_range(az_duty_max=60)
+            self.pass_ongoing = True
+            self.log.debug(f"Set AZ duty cycle back to {self.default_dutycycle_range[1]}")
+            await self.rotator.set_dutycycle_range(az_duty_max=self.default_dutycycle_range[1])
+            await self.rotator.aos()
 
         elif routing_key == "los":
             """
                 At LOS stop the rotator
             """
+            self.pass_ongoing = False
 
             try:
                 ########### Actual call of rotator command ###########
-                self.rotator.stop()
+                self.target_valid = False
+                await self.rotator.stop()
+                await self.rotator.los()
 
-            except ControllerBoxError as e:
-                self.log.error("Failed to reset target position! %s",
-                    e.args[0], exc_info=True)
+            except RotatorError as e:
+                self.log.error("Failed to reset target position! %s", e.args[0], exc_info=True)
                 return
 
 
