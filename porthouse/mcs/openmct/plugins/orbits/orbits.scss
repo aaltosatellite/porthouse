@@ -1,0 +1,135 @@
+
+.porthouse-orbits {
+
+	#drawing {
+		position: relative;
+	}
+
+	.orbitmap svg {
+
+		.grid {
+			stroke: #7f7f7f;
+			stroke-width: 0.3;
+			stroke-opacity: 60%;
+		}
+
+		.shadow {
+			stroke: gray;
+			stroke-width: 0;
+			fill: black;
+			fill-opacity: 50%;
+		}
+
+		.track {
+			stroke: red;
+			stroke-width: 0.3;
+			fill: none;
+		}
+
+		.footprint {
+			fill: white;
+			fill-opacity: 15%;
+			stroke: yellow;
+			stroke-width: 0.3;
+			stroke-opacity: 100%;
+		}
+
+		.marker {
+			fill: white;
+			filter: drop-shadow(0.8px 0.8px 0.5px rgb(0 0 0 / 0.4));
+		}
+
+		.marker_label {
+			font: 4px sans-serif;
+			fill: white;
+			filter: drop-shadow(0px 0px 0.2px rgb(0 0 0 / 0.4));
+		}
+
+		.groundstation {
+			fill: cyan;
+			filter: drop-shadow(0.8px 0.8px 0.5px rgb(0 0 0 / 0.4));
+		}
+
+		.groundstation_label {
+			/* font: 4px sans-serif; */
+			/* https://florian.ec/blog/responsive-svg-constant-font-size/ */
+			font-family: sans-serif;
+			font-size: 10px;
+
+			fill: cyan;
+			filter: drop-shadow(0px 0px 0.2px rgb(0 0 0 / 0.4));
+		}
+
+
+	}
+
+
+	.orbitmap .pass-info {
+		margin-top: 0px;
+		padding: 4px;
+		background-color: rgb(0 0 0 / 0.9);
+		border-radius: 6px;
+
+		font: 10px sans-serif;
+		color: white;
+		text-align: left;
+
+		position: absolute;
+		bottom: 6px;
+		left: 3px;
+	}
+
+	.pass-info th {
+		padding: 0px 6px;
+	}
+
+	.pass-info td {
+		padding: 0px 6px;
+	}
+
+	.skymap {
+		position: absolute;
+		bottom: 6px;
+		right: 3px;
+	}
+
+	.skymap .grid {
+		stroke: white;
+		fill: none;
+		color: white;
+		stroke-width: 1.8px;
+	}
+
+	.skymap text {
+		font: 14px sans-serif;
+		fill: #00bf00;
+	}
+
+	.skymap .satellite {
+		stroke: white;
+		fill: white;
+	}
+
+	.skymap .pointing {
+		stroke: red;
+		stroke-width: 1.8px;
+		fill: none;
+	}
+
+	svg {
+		text-rendering: geometricPrecision;
+
+		text {
+			stroke: none;
+		}
+	}
+
+	&__activity {
+		cursor: pointer;
+	}
+
+	canvas {
+		display: none;
+	}
+}
+
