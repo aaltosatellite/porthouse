@@ -67,10 +67,11 @@ class Rotator(BaseModule):
         # position (180,0) (debug)
         # current azimuth/elevation target coordinate
         min_elevation = position_range[2]
-        self.target_position = (0, min_elevation)
         self.old_target_position = (0, min_elevation)
-        self.target_velocity = (0, 0)
+        self.target_position = (0, min_elevation)
+        self.old_target_timestamp = time.time()
         self.target_timestamp = time.time()
+        self.target_velocity = (0, 0)
 
         # Move to target using the shortest path is default behaviour
         self.shortest_path = True
@@ -199,26 +200,34 @@ class Rotator(BaseModule):
         else:
             status = "tracking" if self.tracking_enabled else "manual"
 
+        az_err, el_err = [None] * 2
+        if (self.target_valid and self.moving_to_target and self.old_target_position
+                and self.current_position and self.target_position):
+            t0, tc, t1 = self.old_target_timestamp, self.position_timestamp, self.target_timestamp
+            w = min(1.0, max(0.0, (tc - t0) / max(0.001, t1 - t0)))
+            az_trg = self.old_target_position[0] + w * (self.target_position[0] - self.old_target_position[0])
+            el_trg = self.old_target_position[1] + w * (self.target_position[1] - self.old_target_position[1])
+            az_err = round(self.current_position[0] - az_trg, 6)
+            el_err = round(self.current_position[1] - el_trg, 6)
+
         status_message = {
-            "az": self.current_position[0],
-            "el": self.current_position[1],
-            "az_target": self.target_position[0],
-            "el_target": self.target_position[1],
-            "az_vel_trg": self.target_velocity[0],
-            "el_vel_trg": self.target_velocity[1],
+            "timestamp": self.position_timestamp,
+            "az": round(self.current_position[0], 6),
+            "el": round(self.current_position[1], 6),
+            "az_err": az_err,
+            "el_err": el_err,
             "az_off": self.rotator.total_adjustment()[0],
             "el_off": self.rotator.total_adjustment()[1],
-            "ts_target": self.target_timestamp,
             "tracking": status,
             "rotating": self.moving_to_target,
         }
 
         if self.rotator.min_sun_angle is not None:
             sun_angle, az_sun, el_sun = self.rotator.get_sun_angle(*self.current_position)
-            status_message["az_sun"] = round(az_sun, 2)
-            status_message["el_sun"] = round(el_sun, 2)
+            status_message["sun_az"] = round(az_sun, 2)
+            status_message["sun_el"] = round(el_sun, 2)
             status_message["sun_angle"] = round(sun_angle, 2)
-            status_message["min_sun_angle"] = self.rotator.min_sun_angle
+            status_message["sun_angle_min"] = self.rotator.min_sun_angle
 
         return status_message
 
@@ -324,6 +333,7 @@ class Rotator(BaseModule):
 
         # Update target variables
         self.old_target_position = self.target_position
+        self.old_target_timestamp = self.target_timestamp
         self.target_position = valid_position
         self.shortest_path = shortest_path
         self.target_velocity = vel or (0, 0)

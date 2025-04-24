@@ -99,8 +99,9 @@ class ControllerBox(RotatorController):
         await self._rpc(b"S")
 
     async def get_position(self, with_timestamp=False) -> Union[PositionType, Tuple[PositionType, float]]:
+        t0 = time.time()
         res = await self._rpc(b"P -s", True)
-        self.current_pos_ts = time.time()
+        self.current_pos_ts = (t0 + time.time()) / 2.0
         motor_pos = self._parse_position_output(res)
         self.current_position = self.rotator_model.to_real(*motor_pos)
         self.err_cnt = 0  # Reset error counter
