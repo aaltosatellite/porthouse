@@ -6,6 +6,7 @@ package-lock.json
 build
 *.egg-info
 
+
 # Editor files
 *.pydevproject
 *.swp
@@ -21,3 +22,6 @@ _build
 # No .idea from Pycharm
 .idea
 
+# OpenMCT files
+node_modules
+couchdb
