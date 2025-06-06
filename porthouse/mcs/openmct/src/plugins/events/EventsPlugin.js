@@ -43,7 +43,7 @@ export default function (connector, args=EventsDefaultArgs())
                 if (!subscribed) {
 
                     function subscriptionReturnCallback(callback, message){
-                        callback(message.subscription.events);
+                        callback(message.events);
                     };
 
                     connector.subscribe("events", "events", subscriptionReturnCallback.bind(null, callback));
@@ -64,11 +64,19 @@ export default function (connector, args=EventsDefaultArgs())
             request: function(domainObject, options) {
 
                 console.log("Request", domainObject.identifier.key);
-                console.log("strategy", options.strategy);
 
                 var key = domainObject.identifier.key;
 
-                return connector.remoteCall("events", "request", {"options" : options})
+                // Options was causing some issues, so we sanitize it to only include what is checked in the backend
+                const allowedKeys = ["domain", "start", "end"];
+                const sanitizedOptions = {};
+                allowedKeys.forEach(key => {
+                    if (options[key] !== undefined) {
+                        sanitizedOptions[key] = options[key];
+                    }
+                });
+
+                return connector.remoteCall("events", "request", { options: sanitizedOptions })
                 .then(msg => {
                     //console.log("message", msg.result.entries);
                     return msg.result.entries;
@@ -126,7 +134,7 @@ export default function (connector, args=EventsDefaultArgs())
                     telemetry: {
                         values: [
                             {
-                                key: "timestamp",
+                                key: "utc",
                                 source: "timestamp",
                                 name: "Timestamp",
                                 format: "utc",
@@ -135,6 +143,12 @@ export default function (connector, args=EventsDefaultArgs())
                             {
                                 key: "source",
                                 name: "Source",
+                                format: "string",
+                                hints: { range: 1 }
+                            },
+                            {
+                                key: "event_name",
+                                name: "Event",
                                 format: "string",
                                 hints: { range: 1 }
                             },

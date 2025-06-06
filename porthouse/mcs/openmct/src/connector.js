@@ -87,7 +87,7 @@ export default class Connector {
          * Try reconnecting
          */
         this.socket.addEventListener('open', function(event) {
-            console.info("CON: Connected to backed")
+            console.info("CON: Connected to backend")
 
 
             for (const rpc_call of this.pending)
@@ -126,7 +126,12 @@ export default class Connector {
     remoteCall(service, method, params) {
 
         let id = this.rpc_id++;
-
+        console.debug("CON: RPC call", service, method, params, id);
+        try {
+            console.debug("CON: params", params, JSON.stringify(params, null, 2));
+        } catch (e) {
+            console.error("CON: params could not be stringified", params, e);
+        }
         let rpc_call = {
             service: service,
             method: method,
@@ -134,13 +139,16 @@ export default class Connector {
             id: id,
         };
         rpc_call = JSON.stringify(rpc_call);
+        console.debug("CON: Remote call", service, method, params, rpc_call);
 
         return new Promise((resolve, reject) =>
         {
             if (this.socket.readyState == WebSocket.OPEN) {
+                console.debug("CON: Sending RPC call", rpc_call);
                 this.socket.send(rpc_call);
             }
             else {
+                console.debug("CON: Socket not open, queuing RPC call", rpc_call);
                 this.pending.push(rpc_call);
             }
 

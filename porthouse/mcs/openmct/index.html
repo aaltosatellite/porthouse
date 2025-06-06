@@ -5,6 +5,7 @@
     <meta content="utf-8" http-equiv="encoding">
 
     <title>OpenMCT porthouse</title>
+    <link rel="icon" href="/favicon.ico">
     <script src="node_modules/openmct/dist/openmct.js"></script>
     <script type="module" src="node_modules/porthouse/src/porthouse.js"></script>
 
@@ -56,7 +57,7 @@
             openmct.time.setTimeSystem('utc');
 
             // Connect to backend using WebSockets
-            let ws_url = "ws://"+document.location.host+"/openmct/ws";
+            let ws_url = "ws://" + document.location.hostname + ":7002/openmct/ws";
             let connector = new porthouse.Connector(ws_url);
 
             openmct.install(porthouse.plugins.Groundstation(connector));
@@ -91,7 +92,7 @@
 
 
             // Use either CouchDB (If installed and set up) or LocalStorageup
-            var couch_url = 'http://' + document.location.host + '/couch/openmct';
+            var couch_url = 'http://' + document.location.hostname + ':5984/openmct';
             openmct.install(openmct.plugins.CouchDB(couch_url))
             //openmct.install(openmct.plugins.LocalStorage());
 

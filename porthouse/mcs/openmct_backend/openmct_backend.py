@@ -150,7 +150,7 @@ class OpenMCTBackend(BaseModule):
 
 
     @queue()
-    @bind(exchange="events", routing_key="*.update")
+    @bind(exchange="events", routing_key="fs1p.store")
     @bind(exchange="log", routing_key="*")
     @bind(exchange="housekeeping", routing_key="*.update")
     async def handle_message(self, msg: aiormq.abc.DeliveredMessage) -> None:
@@ -170,6 +170,9 @@ class OpenMCTBackend(BaseModule):
         self.log.debug("update: %s, %s", msg.delivery.exchange, msg.delivery.routing_key)
         ret = None
         exchange = msg.delivery.exchange
+
+        print("Handle message: ", message, exchange)
+        print("Routing key:", msg.delivery.routing_key)
 
         if exchange == "events":
             ret = self.services["events"].handle_subscription(message)

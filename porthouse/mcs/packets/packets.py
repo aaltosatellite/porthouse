@@ -218,7 +218,7 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
         }
 
         msg = amqp.basic_message.Message(body=json.dumps(msg_dict))
-        channel.basic_publish(msg, exchange='housekeeping', routing_key='fs1.store')
+        channel.basic_publish(msg, exchange='housekeeping', routing_key='fs1p.store')
 
     else:
         parser.print_help()

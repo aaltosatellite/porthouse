@@ -15,6 +15,7 @@ class EventsService:
     async def rpc_command(self, client, method, params):
         """
         """
+        print("Got rpc command: ", method, params)
         if method == "subscribe":
             self.subscriptions[client] = True
 
@@ -33,7 +34,7 @@ class EventsService:
         """
 
         options = params["options"]
-        #print("request events with options: ",options)
+        print("request events with options: ",options)
 
         request_data = { }
         if "domain" in options and options["domain"] != "utc":
@@ -63,27 +64,21 @@ class EventsService:
     async def handle_subscription(self, message: dict):
         """
         """
-
         received = datetime.utcnow().isoformat()
         for ev in message["events"]:
-            msg = {
-                "subscription": {
-                    "exchange" : "events",
-                    "subsystem": "events",
-                    "events": {
-                        "id":  "events",
-                        "source":  message["source"],
-                        "severity": ev["severity"],
-                        "data": ev["info"],
-                        "received": received,
-                        "timestamp": iso_timestamp_to_millis(ev["timestamp"])
-                    }
-                }
-            }
-
-            awaits = []
             for client in self.subscriptions:
-                awaits.append( client.send_json(**msg) )
-
-            if len(awaits) > 0:
-                await asyncio.wait(awaits)
+                await client.send_json(
+                    subscription={
+                        "service": "events",
+                        "subsystem": "events",
+                        "events": {
+                            "id":  "events",
+                            "source":  message["source"],
+                            "severity": ev["severity"],
+                            "event_name": ev["name"],
+                            "data": ev["info"],
+                            "received": received,
+                            "utc": iso_timestamp_to_millis(ev["timestamp"])
+                        }
+                    }
+                )

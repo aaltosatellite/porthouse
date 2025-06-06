@@ -114,7 +114,6 @@ class HousekeepingService:
             # Check is the subsystem in the subscription list
             if subsystem not in client_subs:
                 return None
-            print(message["timestamp"])
             await client.send_json(
                 subscription={
                     "service": "housekeeping",

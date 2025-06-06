@@ -19,6 +19,15 @@ services:
     ports:
       - "5984:5984"
 
+  static_openmct:
+    image: node:18.20-alpine3.19
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: npx serve . -l 3000
+    ports:
+      - 3000:3000
+
   openmct_nginx:
     image: nginx:latest
     volumes:

@@ -11,13 +11,15 @@
   "main": "./src/porthouse.js",
   "scripts": {
     "clean": "rm -rf ./dist ./node_modules ./package-lock.json",
-    "build:dev": "webpack --config ./webpack.js"
+    "build:dev": "webpack --config ./webpack.js",
+    "serve": "npx serve ."
   },
   "author": "Aalto Satellites",
   "dependencies": {
     "dist": "^0.1.2",
     "openmct": "3.2.1",
     "porthouse": "file:",
+    "serve": "^14.2.4",
     "tle.js": "^4.0.12"
   },
   "devDependencies": {
