@@ -60,7 +60,7 @@ class OpenMCTBackend(BaseModule):
         self.services = { # TODO: Should be configurable outside of python code
             "housekeeping": HousekeepingService(self, db_url, "fs1p", hk_schema),
             "system": SystemService(self),
-            "events": EventsService(self),
+            "events": EventsService(self, db_url),
             "tracking": TrackingService(self)
         }
 
@@ -171,10 +171,8 @@ class OpenMCTBackend(BaseModule):
         ret = None
         exchange = msg.delivery.exchange
 
-        print("Handle message: ", message, exchange)
-        print("Routing key:", msg.delivery.routing_key)
-
         if exchange == "events":
+            await self.services["events"].push_event(message)
             ret = self.services["events"].handle_subscription(message)
         elif exchange == "logs":
             ret = self.services["system"].handle_subscription(message)

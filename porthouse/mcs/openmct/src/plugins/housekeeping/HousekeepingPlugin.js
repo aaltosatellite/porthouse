@@ -239,7 +239,7 @@ export default function (connector, args)
                         delete buffered_promises[req_ident];
 
                         console.debug("HK: Requesting history", subsKey, promises.map(promise => promise.field), options);
-
+                       
                         // Send RPC to backend
                         connector.remoteCall(
                             "housekeeping",
@@ -250,7 +250,7 @@ export default function (connector, args)
                                 "options": {
                                     start: new Date(options.start).toISOString(),
                                     end: new Date(options.end).toISOString(),
-                                    strategy: options.strategy,
+                                    // strategy: options.strategy, Just plot normally for now
                                     domain: options.domain,
                                     size: options.size,
                                 }
@@ -265,19 +265,19 @@ export default function (connector, args)
 
                                 let unrolled_housekeeping;
                                 let field_key = subsKey + "." + promise.field;
-                                if (options.strategy == "minmax") {
-                                    // Unroll housekeeping min/max values for OpenMCT
-                                    unrolled_housekeeping = hk.map(
-                                        data => {
-                                            return { // Object.assign({}, {
-                                                id: field_key,
-                                                timestamp: new Date(data.timestamp).getTime(),
-                                                value: data[promise.field].value
-                                            }; //, data[promise.field])
-                                        }
-                                    );
-                                }
-                                else {
+                                // if (options.strategy == "minmax") { Disabled until normal plotting is functional again.
+                                //     // Unroll housekeeping min/max values for OpenMCT
+                                //     unrolled_housekeeping = hk.map(
+                                //         data => {
+                                //             return { // Object.assign({}, {
+                                //                 id: field_key,
+                                //                 timestamp: new Date(data.timestamp).getTime(),
+                                //                 value: data[promise.field].value
+                                //             }; //, data[promise.field])
+                                //         }
+                                //     );
+                                // }
+                                // else {
                                     // Unroll housekeeping values for OpenMCT
                                     unrolled_housekeeping = hk.map(
                                         data => {
@@ -288,7 +288,7 @@ export default function (connector, args)
                                             };
                                         }
                                     );
-                                }
+                                // } // Disable minmax for now
 
                                 // Pass the values to OpenMCT
                                 //console.debug(promise.field, unrolled_housekeeping);

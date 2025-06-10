@@ -28,7 +28,7 @@ class HousekeepingBackend(BaseModule):
 
 
     @queue()
-    @bind(exchange='housekeeping', routing_key='store', prefixed=True)
+    @bind(exchange='housekeeping', routing_key='fs1p.store')
     async def housekeeping_store_callback(self, msg: aiormq.abc.DeliveredMessage):
         """
         Callback to store new data to database
@@ -74,7 +74,7 @@ class HousekeepingBackend(BaseModule):
             self.log.debug("Stored hk frame: %s", str(json_message)[:100])
 
         json_message["housekeeping"] = values
-        ## TODO: Chek limits
+        ## TODO: Check limits
         #for limit in elem.findall("limit"):
         #    pass
 
