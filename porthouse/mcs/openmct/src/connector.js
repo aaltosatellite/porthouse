@@ -146,7 +146,7 @@ export default class Connector {
 
             this.rpc_calls[id] = {
                 resolve: resolve, reject: reject,
-                timeout: setTimeout(reject, 500)
+                timeout: setTimeout(reject, 2000)
             };
             // resolve/reject called later on socket.onmessage
 
