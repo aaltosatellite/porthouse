@@ -1,4 +1,3 @@
-version: "3"
 services:
   openmct_npm:
     image: node:18.20-alpine3.19
