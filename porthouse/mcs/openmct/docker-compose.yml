@@ -24,7 +24,7 @@ services:
     working_dir: /app
     volumes:
       - .:/app
-    command: npx serve . -l 3000
+    command: sh -c "npm install && npx serve . -l 3000"
     ports:
       - 3000:3000
 
