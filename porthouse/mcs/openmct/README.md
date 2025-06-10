@@ -1,9 +1,21 @@
 
-# Local test installation
+# Quick start in container
+
+Install the OpenMCT telemetry interface and backend in a Docker container. 
+This is the recommended way to run OpenMCT telemetry interface.
 ```
 $ sudo docker compose up --detach
 $ sudo ./setup-couchdb.sh
 ```
+
+(To install ´docker´ on ubuntu https://docs.docker.com/engine/install/ubuntu/.)
+
+Run the OpenMCT telemetry interface in a browser:
+```
+$ firefox http://localhost:8080
+```
+
+Enjoy.
 
 # Client plugins:
 
