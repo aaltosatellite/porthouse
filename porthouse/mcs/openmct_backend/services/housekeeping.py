@@ -193,7 +193,7 @@ class HousekeepingService:
                 }
 
             housekeeping = dict((param, data[param]) for param in fields )
-            housekeeping["timestamp"] = data["timestamp"].isoformat()
+            housekeeping["timestamp"] = data["timestamp"].replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z')
 
             return {
                 "subsystem": params["subsystem"],
@@ -236,7 +236,7 @@ class HousekeepingService:
                         "maxValue": row[field + "_max"]
                     }) for field in fields
                 )
-                entry["timestamp"] = row["timestamp"].isoformat()
+                entry["timestamp"] = row["timestamp"].replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z')
                 print(entry["timestamp"])
                 housekeeping.append(entry)
 
@@ -267,7 +267,7 @@ class HousekeepingService:
 
             for row in data:
                 entry = dict((field, row[field]) for field in fields)
-                entry["timestamp"] = row["timestamp"].isoformat()
+                entry["timestamp"] = row["timestamp"].replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z')
                 housekeeping.append(entry)
 
             return {
