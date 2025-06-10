@@ -1,17 +1,9 @@
 
 # Local test installation
-
-```
-$ sudo ./docker-build.sh
-```
-This bakes out `node_modules` folder.
-
 ```
 $ sudo docker compose up --detach
-$ bash node_modules/openmct/src/plugins/persistence/couch/setup-couchdb.sh
+$ sudo ./setup-couchdb.sh
 ```
-
-
 
 # Client plugins:
 
@@ -23,10 +15,12 @@ $ bash node_modules/openmct/src/plugins/persistence/couch/setup-couchdb.sh
 
 
 # Building and running:
+Current version is a static site, just run in this directory:
 ```
-
-
+npm install
+npm serve . -l {DESIRED PORT}
 ```
+For it to run properly the backend must also be running using porthouse launch {launch script name}
 
 
 # file structure:

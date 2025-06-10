@@ -23,9 +23,9 @@ services:
     working_dir: /app
     volumes:
       - .:/app
-    command: sh -c "npm install && npx serve . -l 3000"
+    command: sh -c "npm install && npx serve . -l 8080"
     ports:
-      - 3000:3000
+      - 8080:8080
 
   openmct_nginx:
     image: nginx:latest
