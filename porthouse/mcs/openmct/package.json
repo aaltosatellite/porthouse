@@ -17,7 +17,7 @@
   "author": "Aalto Satellites",
   "dependencies": {
     "dist": "^0.1.2",
-    "openmct": "3.2.1",
+    "openmct": "4.1.0",
     "porthouse": "file:",
     "serve": "^14.2.4",
     "tle.js": "^4.0.12"

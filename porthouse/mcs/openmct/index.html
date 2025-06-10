@@ -21,7 +21,9 @@
         openmct.install(openmct.plugins.UTCTimeSystem());
         openmct.install(openmct.plugins.LADTable());
         openmct.install(openmct.plugins.SummaryWidget());
-        openmct.install(openmct.plugins.Espresso());
+        // openmct.install(openmct.plugins.Espresso()); // Uncomment for regular dark mode
+        // openmct.install(openmct.plugins.Snow()); // Uncomment to enable lightmode
+        openmct.install(openmct.plugins.DarkmatterTheme());
 
         openmct.install(openmct.plugins.DisplayLayout({
             showAsView: ['summary-widget']
