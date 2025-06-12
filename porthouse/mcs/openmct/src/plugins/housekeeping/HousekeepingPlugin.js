@@ -38,7 +38,7 @@ export default function (connector, args)
             dataPointName: 'porthouse Housekeeping Data Point',
             dataPointDesc: 'porthouse housekeeping data point',
             dataPointCssClass: 'icon-telemetry',
-            //limits: LIMITS
+            limits: LIMITS
         }
     }
 
@@ -338,6 +338,19 @@ export default function (connector, args)
             },
 
             getLimitEvaluator: function(domainObject) {
+                function evaluateCondition(condition, value) {
+                    const match = condition.match(/([<>]=?)\s*([\d.]+)/);
+                    if (!match) return false;
+                    const op = match[1];
+                    const limit = parseFloat(match[2]);
+                    switch (op) {
+                        case "<": return value < limit;
+                        case "<=": return value <= limit;
+                        case ">": return value > limit;
+                        case ">=": return value >= limit;
+                        default: return false;
+                    }
+                }
                 return {
                     evaluate: function (datum, valueMetadata) { // "LimitEvaluator"
 
@@ -352,14 +365,20 @@ export default function (connector, args)
                             return;
                         }
 
-                        let lower_limit = valueMetadata["limits"][0];
-                        let upper_limit = valueMetadata["limits"][1];
-
-                        //use styling if true
-                        if (datum.value < lower_limit) {
-                            return styling.limits.rl;
-                        } else if (datum.value > upper_limit) {
-                            return styling.limits.rh;
+                        const limits = valueMetadata["limits"];
+                        for (const limit of limits) {
+                            if (evaluateCondition(limit.condition, datum.value)) {
+                                // Return styling based on severity
+                                if (limit.severity === "warning low") {
+                                    return LIMITS.yl;
+                                } else if (limit.severity === "critical low") {
+                                    return LIMITS.rl;
+                                } else if (limit.severity === "warning high") {
+                                    return LIMITS.yh;
+                                } else if (limit.severity === "critical high") {
+                                    return LIMITS.rh;
+                                }
+                            }
                         }
                     }
 

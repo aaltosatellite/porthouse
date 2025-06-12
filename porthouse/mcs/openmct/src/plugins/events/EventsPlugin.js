@@ -78,7 +78,7 @@ export default function (connector, args=EventsDefaultArgs())
 
                 return connector.remoteCall("events", "request", { options: sanitizedOptions })
                 .then(msg => {
-                    //console.log("message", msg.result.entries);
+                    console.log("message", msg.result.entries);
                     return msg.result.entries;
                 }).catch(
                     e => {openmct.notifications.error("Events: "+e+" try shorter timespan");}
@@ -96,19 +96,18 @@ export default function (connector, args=EventsDefaultArgs())
             getLimitEvaluator: function(domainObject) {
                 return {
                     evaluate: function (datum, valueMetadata) {
-                        //console.log(datum);
-                        //use styling if true
+                        // Normal styling for nominal events
                         if (datum.severity == "low") {
                             return {
                                 cssClass: "is-limit--yellow  is-limit--upr",
                                 name: "BLUE High"
                             };
-                        }else if (datum.severity == "medium") {
+                        }else if (datum.severity == "Critical") {
                             return {
                                 cssClass: "is-limit--yellow",
                                 name: "Yellow High"
                             };
-                        }else if (datum.severity == "high") {
+                        }else if (datum.severity == "Error") {
                             return {
                                 cssClass: "is-limit--red",
                                 name: "Yellow High"

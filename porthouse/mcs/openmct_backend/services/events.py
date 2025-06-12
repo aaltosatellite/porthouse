@@ -36,15 +36,19 @@ class EventsService:
 
         options = params["options"]
 
-        request_data = { }
         if "domain" in options and options["domain"] != "utc":
             raise WebRPCError("Invalid domain!")
         
-        start = 0
-        end = 0
-
         start = datetime.utcnow().timestamp() - (24 * 3600)  # Default to last 24 hours
         end = datetime.utcnow().timestamp() + (3*3600)
+        
+    
+        if "start" in options:
+            start = options["start"] / 1000
+
+
+        if "end" in options:
+            end = options["end"] / 1000
 
 
         history = self.db.query(start=start,
@@ -76,6 +80,8 @@ class EventsService:
             if isinstance(event["received"], (int, float)):
                 event["received"] = datetime.fromtimestamp(ev["received"]).isoformat()
 
+            print("Inserting event:", ev)
+            print("With timestamp:", ev["timestamp"])
             # Insert each event into the database
             self.db.insert_event(
                 timestamp=ev["timestamp"],
