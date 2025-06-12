@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Dict, List, Optional, Union
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from porthouse.mcs.housekeeping.database import HousekeepingDatabase, DatabaseError
 from ..utils import WebRPCError
@@ -169,6 +169,30 @@ class HousekeepingService:
         print("request_data:", request_data)
 
         strategy = options.get("strategy", None)
+
+        if subsystem == "data":
+            # Get uplink/downlink per day:
+            start_date = request_data["start_date"]
+            end_date = request_data["end_date"]
+            # Drop hours, minutes and seconds
+            start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_date = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            days = []
+            # Insert all days between start and end date
+            current_date = start_date
+            while current_date <= end_date:
+                days.append(current_date)
+                current_date = current_date + timedelta(days=1)
+            
+            entries = self.db.query_link_per_day(days, fields)
+            print("entries:", entries)
+            return {
+                "subsystem": params["subsystem"],
+                "housekeeping": entries
+            }
+
+
+            
         if strategy == "latest":
             #
             # Latest strategy returns only the "latest" housekeeping values inside the time window

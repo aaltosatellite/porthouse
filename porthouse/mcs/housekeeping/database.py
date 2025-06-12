@@ -1,6 +1,6 @@
 import json
 import psycopg2
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 from typing import Any, Dict, Generator, List, Optional, Sequence, Union
 
@@ -303,6 +303,67 @@ class HousekeepingDatabase:
 
         except psycopg2.ProgrammingError as e:
             raise DatabaseError(str(e)) from e
+        
+    def query_link_per_day(self,
+                        days: list[datetime],
+                        fields: list[str],
+        ) -> List[HousekeepingEntry]:
+        """
+        Query uplink/downlink per day.
+        Args:
+            days: List of datetime objects representing the days to query
+            fields: A list of strings containing the names of housekeeping fields to query. (just uplink_per_day and downlink_per_day)
+        Returns:
+            A list of dictionaries containing the uplink/downlink data for each day.
+        """
+        if self.cursor is None:
+            raise HousekeepingError("No database connection!")
+        
+        entries = []
+
+        print(fields)
+        
+        for field in fields:
+            for day in days:
+                start = day
+                end = day + timedelta(days=1)
+                if field == "uplink": # Uplink (tc)
+                    # Use packets database for now since its already set up. Change later?
+                    stmt = f"""
+                    SELECT SUM(octet_length(data)) AS total_size
+                    FROM packets
+                    WHERE timestamp >= '{start.isoformat()}'
+                    AND timestamp < '{end.isoformat()}'
+                    AND type = 'tc';
+                    """
+                elif field == "downlink": # Downlink (tm)
+                    stmt = f"""
+                    SELECT SUM(octet_length(data)) AS total_size
+                    FROM packets
+                    WHERE timestamp >= '{start.isoformat()}'
+                    AND timestamp < '{end.isoformat()}'
+                    AND type = 'tm';
+                    """
+                else:
+                    raise HousekeepingError(f"Invalid field {field!r}. Only 'uplink' and 'downlink' are supported.")
+                try:
+                    self.cursor.execute(stmt)
+                    total_size = self.cursor.fetchone()[0] or 0
+                    # Convert total size to kB
+                    total_size = total_size / 1024
+                    # Set timestamp to middle of the day so it is clearer which day the data is for
+                    timestamp = start + timedelta(hours=12)  # Middle of the day
+                    timestamp = timestamp.replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z')
+                    entry = {
+                        "timestamp": timestamp,
+                        "source": "housekeeping",
+                        "metadata": None,
+                        field: total_size,
+                    }
+                    entries.append(entry)
+                except psycopg2.ProgrammingError as e:
+                    raise DatabaseError(f"Error querying {field} for {day.isoformat()}: {str(e)}") from e
+        return entries
 
 
     def query_binned(self,
