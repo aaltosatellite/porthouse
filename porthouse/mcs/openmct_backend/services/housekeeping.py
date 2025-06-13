@@ -174,9 +174,9 @@ class HousekeepingService:
             # Get uplink/downlink per day:
             start_date = request_data["start_date"]
             end_date = request_data["end_date"]
-            # Drop hours, minutes and seconds
-            start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_date = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            # Drop hours, minutes and seconds, add one day to both ends so plot is continuous after end points
+            start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+            end_date = end_date.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
             days = []
             # Insert all days between start and end date
             current_date = start_date

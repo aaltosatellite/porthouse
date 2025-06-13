@@ -138,11 +138,11 @@ export default function (connector, args)
              * Support subscribing only for Porthouse
              */
             supportsSubscribe: function (domainObject, callback, options) {
-                return domainObject.type === "porthouse.housekeeping";
+                return domainObject.type === "porthouse.housekeeping.field";
             },
 
             /*
-             * Callback to subscribe a Foreasail data point
+             * Callback to subscribe a Foresail data point
              */
             subscribe: function (domainObject, callback) {
                 console.debug("HK: subscribe housekeeping", domainObject.identifier.key);
@@ -201,7 +201,7 @@ export default function (connector, args)
              * Support history requests for housekeeping
              */
             supportsRequest: function (domainObject, options) {
-                return domainObject.type === "porthouse.housekeeping";
+                return domainObject.type === "porthouse.housekeeping.field";
             },
 
             /*
@@ -239,7 +239,9 @@ export default function (connector, args)
                         delete buffered_promises[req_ident];
 
                         console.debug("HK: Requesting history", subsKey, promises.map(promise => promise.field), options);
-                       
+                        if (options.strategy === "minmax"){
+                            options.strategy = undefined; // Disable minmax for now since it is not working properly
+                        }
                         // Send RPC to backend
                         connector.remoteCall(
                             "housekeeping",
@@ -250,7 +252,7 @@ export default function (connector, args)
                                 "options": {
                                     start: new Date(options.start).toISOString(),
                                     end: new Date(options.end).toISOString(),
-                                    // strategy: options.strategy, Just plot normally for now
+                                    strategy: options.strategy,
                                     domain: options.domain,
                                     size: options.size,
                                 }
@@ -279,6 +281,7 @@ export default function (connector, args)
                                 // }
                                 // else {
                                     // Unroll housekeeping values for OpenMCT
+                                    console.log("Strategy", options.strategy);
                                     unrolled_housekeeping = hk.map(
                                         data => {
                                             return {
@@ -377,6 +380,8 @@ export default function (connector, args)
                                     return LIMITS.yh;
                                 } else if (limit.severity === "critical high") {
                                     return LIMITS.rh;
+                                } else {
+                                    return;
                                 }
                             }
                         }
@@ -416,7 +421,7 @@ export default function (connector, args)
                         return { //} Promise.resolve({
                             identifier: identifier,
                             name: subsystem.name,
-                            type: "porthouse.housekeeping.frame",
+                            type: "folder",
                             location: "porthouse.housekeeping:" + rootKey
                         };
                     });
@@ -440,7 +445,7 @@ export default function (connector, args)
                         let def = {
                             identifier: identifier,
                             name: param.name,
-                            type: "porthouse.housekeeping",
+                            type: "porthouse.housekeeping.field",
                             location: "porthouse.housekeeping:"+rootKey+"." + keys[1],
                             telemetry: {
                                 values: [
@@ -567,9 +572,11 @@ export default function (connector, args)
          * Custom type identificator for telemetry points
          */
         openmct.types.addType("porthouse.housekeeping.field", {
-            name: styling.dataPointName,
+            name: "Porthouse Housekeeping Object",
             description: styling.dataPointDesc,
-            cssClass: styling.dataPointCssClass
+            cssClass: styling.dataPointCssClass,
+            creatable: true,
+            persistable: true
         });
 
     } // end of install()
