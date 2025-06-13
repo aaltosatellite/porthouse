@@ -321,7 +321,6 @@ class HousekeepingDatabase:
         
         entries = []
 
-        print(fields)
         
         for field in fields:
             for day in days:

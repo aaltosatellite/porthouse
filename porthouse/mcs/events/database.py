@@ -40,12 +40,13 @@ class EventsDatabase:
     def _create_table(self):
         fields = [
             "id SERIAL",
-            "timestamp TIMESTAMP UNIQUE NOT NULL",
+            "timestamp TIMESTAMP NOT NULL",
             "received TIMESTAMP NOT NULL",
             "severity VARCHAR(256) NOT NULL",
             "data VARCHAR(256) NOT NULL",
             "event_name VARCHAR(256) NOT NULL",
             "source VARCHAR(256) NOT NULL",
+            "UNIQUE (timestamp, event_name)"
         ]
         
         stmt = f"CREATE TABLE IF NOT EXISTS events (\n  " + ",\n  ".join(fields) + "\n);"
