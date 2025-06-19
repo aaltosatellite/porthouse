@@ -13,6 +13,7 @@ from .services.system import SystemService
 from .services.tracking import TrackingService
 from .services.events import EventsService
 from .services.housekeeping import HousekeepingService
+from .services.measurements import MeasurementsService
 
 
 class OpenMCTProtocol(websockets.WebSocketServerProtocol):
@@ -61,6 +62,7 @@ class OpenMCTBackend(BaseModule):
             "housekeeping": HousekeepingService(self, db_url, "fs1p", hk_schema),
             "system": SystemService(self),
             "events": EventsService(self, db_url),
+            "measurements": MeasurementsService(self, db_url, "fs1p"),
             "tracking": TrackingService(self)
         }
 
@@ -153,6 +155,7 @@ class OpenMCTBackend(BaseModule):
     @bind(exchange="events", routing_key="fs1p.store")
     @bind(exchange="log", routing_key="*")
     @bind(exchange="housekeeping", routing_key="*.update")
+    @bind(exchange="measurements", routing_key="fs1p.update.signaldata")
     async def handle_message(self, msg: aiormq.abc.DeliveredMessage) -> None:
         """
         Handle message from the AMQP
@@ -178,6 +181,8 @@ class OpenMCTBackend(BaseModule):
             ret = self.services["system"].handle_subscription(message)
         elif exchange  == "housekeeping":
             ret = self.services["housekeeping"].handle_subscription(message)
+        elif exchange == "measurements":
+            ret = self.services["measurements"].handle_subscription(message)
 
         if asyncio.iscoroutine(ret):
             await ret

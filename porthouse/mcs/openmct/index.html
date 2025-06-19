@@ -92,6 +92,22 @@
                 }
             }));
 
+            openmct.install(porthouse.plugins.Measurements(connector, {
+                rootKey: "fs1p",
+
+                styling: {
+                    rootFolderName: "Foresail-1p Measurements",
+                    dataPointText: "Foresail-1p Measurements",
+                    frameName: 'Porthouse Measurements Frame',
+                    frameCssClass: 'icon-info',
+                    frameDesc: 'porthouse measurements frame',
+                    dataPointName: 'porthouse Measurements Data Point',
+                    dataPointDesc: 'porthouse measurements data point',
+                    dataPointCssClass: 'icon-telemetry',
+                    //limits: LIMITS
+                }
+            }));
+
 
             // Use either CouchDB (If installed and set up) or LocalStorageup
             var couch_url = 'http://' + document.location.hostname + ':5984/openmct';
