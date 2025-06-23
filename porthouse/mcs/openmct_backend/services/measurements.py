@@ -66,6 +66,7 @@ class MeasurementsService:
             """
                 Return the schema for measurements
             """
+            # Specific to Foresail-1p for now, should be generalized later
             return {
             "key": "fs1p",
             "name": "Foresail-1p",

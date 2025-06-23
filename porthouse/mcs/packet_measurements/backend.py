@@ -21,7 +21,7 @@ class PacketMeasurementsBackend(BaseModule):
 
 
     @queue()
-    @bind(exchange='measurements', routing_key='fs1p.store.signaldata')
+    @bind(exchange='measurements', routing_key='store.signaldata', prefixed=True)
     async def measurements_store_callback(self, msg: aiormq.abc.DeliveredMessage):
         """
         Callback to store new data to database
@@ -58,9 +58,7 @@ class PacketMeasurementsBackend(BaseModule):
                 "pl": json_message["pl"]
             }
         }
-            
-
-        await self.publish(publish_message, exchange='measurements', routing_key='fs1p.update.signaldata')
+        await self.publish(publish_message, exchange='measurements', routing_key='update.signaldata', prefixed=True)
 
 
 

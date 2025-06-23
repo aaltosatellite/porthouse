@@ -152,10 +152,10 @@ class OpenMCTBackend(BaseModule):
 
 
     @queue()
-    @bind(exchange="events", routing_key="fs1p.store")
+    @bind(exchange="events", routing_key="*.store")
     @bind(exchange="log", routing_key="*")
     @bind(exchange="housekeeping", routing_key="*.update")
-    @bind(exchange="measurements", routing_key="fs1p.update.signaldata")
+    @bind(exchange="measurements", routing_key="*.update.signaldata")
     async def handle_message(self, msg: aiormq.abc.DeliveredMessage) -> None:
         """
         Handle message from the AMQP
