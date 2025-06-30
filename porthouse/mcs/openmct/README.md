@@ -30,7 +30,7 @@ Enjoy.
 Current version is a static site, just run in this directory:
 ```
 npm install
-npm serve . -l {DESIRED PORT}
+npx serve . -l {DESIRED PORT}
 ```
 For it to run properly the backend must also be running using porthouse launch {launch script name}
 
