@@ -33,7 +33,7 @@ class PacketMeasurementsBackend(BaseModule):
             self.log.warning("Error while parsing json msg:\n%s\n%s", msg.body, e.args[0])
             return
         
-        snr = 10 * math.log10(max(json_message["pl_power"] - json_message["noise_power"], 10e-5) / json_message["noise_power"]) if json_message["noise_power"] != 0.0 else None
+        snr = 10 * math.log10(max(json_message["pl_power"] - json_message["noise_power"], 10e-3*json_message["noise_power"]) / json_message["noise_power"]) if json_message["noise_power"] != 0.0 else None
         
         self.db.insert_packet_measurement(
             json_message["t_unix"],
