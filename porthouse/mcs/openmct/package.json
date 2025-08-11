@@ -1,0 +1,33 @@
+{
+  "name": "porthouse",
+  "version": "1.0.0",
+  "description": "Porthouse OpenMCT",
+  "exports": {
+    ".": {
+      "import": "./src/porthouse.js",
+      "require": "./src/porthouse.js"
+    }
+  },
+  "main": "./src/porthouse.js",
+  "scripts": {
+    "clean": "rm -rf ./dist ./node_modules ./package-lock.json",
+    "build:dev": "webpack --config ./webpack.js",
+    "serve": "npx serve ."
+  },
+  "author": "Aalto Satellites",
+  "dependencies": {
+    "openmct": "4.1.0",
+    "porthouse": "file:",
+    "serve": "^14.2.4",
+    "tle.js": "^4.0.12"
+  },
+  "devDependencies": {
+    "webpack": "^5.99.9",
+    "webpack-cli": "5.1.1",
+    "webpack-dev-server": "^5.2.2",
+    "webpack-merge": "5.10.0"
+  },
+  "engines": {
+    "node": ">=16.19.1 <20"
+  }
+}

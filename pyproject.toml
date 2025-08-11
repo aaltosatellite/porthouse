@@ -51,5 +51,4 @@ dependencies = [
 porthouse="porthouse.entry:main"
 
 [tool.setuptools]
-packages = ["porthouse", "porthouse.core", "porthouse.mcs", "porthouse.gs"]
-package-dir = {porthouse = "."}
+package-dir = {porthouse = "porthouse"}
