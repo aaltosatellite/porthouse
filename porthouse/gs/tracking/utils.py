@@ -281,7 +281,7 @@ class Satellite:
             if CelestialObject.EARTH is None:
                 CelestialObject.init_bodies()
 
-            accurate = sunlit is not None or sun_max_elevation is not None
+            accurate = sunlit is not None or sun_max_elevation is not None   # NOTE: should set to False?
             margin_s = 12 * 60 * 60 if accurate else 0
             t_event, events = find_events(CelestialObject.EARTH + self.gs, CelestialObject.EARTH + self.sc,
                                           start_time - timedelta(seconds=60), end_time + timedelta(seconds=60),
@@ -488,8 +488,8 @@ class SkyfieldModuleMixin:
         # calls the base module constructor
         super().__init__(*args, **kwargs)
 
-        self.satellites: dict[str, Satellite] = {}
-        self.celestional_objects: dict[str, CelestialObject] = {}
+        self._satellites: dict[Tuple[str, int], Satellite] = {}
+        self._celestional_objects: dict[Tuple[str, int], CelestialObject] = {}
         self.gs = GroundStation()
 
     async def get_satellite(self, target: str,
@@ -501,10 +501,11 @@ class SkyfieldModuleMixin:
                             sunlit: bool = None,
                             ) -> Optional[Satellite]:
         await asyncio.sleep(0)
-        sat = self.satellites.get(target, None)
         pass_calc_kwargs = dict(start_time=start_time, end_time=end_time, min_elevation=min_elevation,
                                 min_max_elevation=min_max_elevation, sun_max_elevation=sun_max_elevation,
                                 sunlit=sunlit)
+        kwarg_hash = hash(tuple([x[1] for x in sorted(pass_calc_kwargs.items(), key=lambda x: x[0])]))
+        sat = self._satellites.get((target, kwarg_hash), None)
 
         # Ensure recent TLEs used
         if sat is None or sat.tle_age_days > 1:
@@ -520,7 +521,7 @@ class SkyfieldModuleMixin:
             self.log.debug(f"Calculating passes for {target}: {pass_calc_kwargs}")
             sat.calculate_passes(**pass_calc_kwargs)
 
-            self.satellites[target] = sat
+            self._satellites[(target, kwarg_hash)] = sat
 
         # Ensure enough passes are available
         elif not sat.passes_contain(start_time, end_time):
@@ -544,10 +545,11 @@ class SkyfieldModuleMixin:
                                    partial_last_pass: bool = False,
                                    ) -> Optional[CelestialObject]:
 
-        obj = self.celestional_objects.get(target, None)
         pass_calc_kwargs = dict(start_time=start_time, end_time=end_time, min_elevation=min_elevation,
                                 min_max_elevation=min_max_elevation, sun_max_elevation=sun_max_elevation,
                                 sunlit=sunlit, partial_last_pass=partial_last_pass)
+        kwarg_hash = hash(tuple([x[1] for x in sorted(pass_calc_kwargs.items(), key=lambda x: x[0])]))
+        obj = self._celestional_objects.get((target, kwarg_hash), None)
 
         if obj is None:
             try:
@@ -560,7 +562,7 @@ class SkyfieldModuleMixin:
                     await asyncio.get_running_loop().run_in_executor(executor,
                                                                      lambda: obj.calculate_passes(**pass_calc_kwargs))
 
-                self.celestional_objects[target] = obj
+                self._celestional_objects[(target, kwarg_hash)] = obj
             except Exception as e:
                 self.log.error(f"Failed to initialize celestial object \"{target}\": {e}", exc_info=True)
                 return None
