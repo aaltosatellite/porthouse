@@ -594,6 +594,7 @@ def parse_time(t: Union[None, str, datetime, skyfield.Time]) -> skyfield.Time:
     else:
         raise ValueError("Invalid time type")
 
+    dt = dt.replace(microsecond=0)
     return ts.utc(dt)
 
 
