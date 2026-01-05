@@ -17,3 +17,10 @@ or
 
 Go to docs/ and read README.md to compile and open the documentation in browser.
 
+For quick installation of suitable conda environment, run:
+
+```bash
+$ mamba create -n porthouse python=3.11 aiormq amqp argcomplete httpx numpy quaternion pandas prompt_toolkit ptpython \
+                            pyserial pyserial-asyncio pyYAML pyzmq requests skyfield sortedcontainers tqdm
+$ mamba activate porthouse
+```
