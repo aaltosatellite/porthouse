@@ -444,7 +444,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         await self.publish(task.get_task_data(), exchange="scheduler", routing_key="task.end")
 
     def export_schedule(self, process_name=None, target=None, rotators=None, status=None, limit=None):
-        if not isinstance(status, TaskStatus):
+        if not isinstance(status, (type(None), TaskStatus)):
             try:
                 status = TaskStatus(int(status))
             except ValueError:

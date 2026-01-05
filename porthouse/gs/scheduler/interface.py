@@ -24,7 +24,15 @@ class SchedulerInterface:
         data = {k: v for k, v in locals().items() if k in ("process_name", "target", "rotators", "status", "limit")}
         schedule = await send_rpc_request("scheduler", "rpc.get_schedule", data)
         if verbose:
-            print(schedule)
+            keys = {"task_name": str,
+                    "start_time": lambda x: x[:19].replace("T", " "),
+                    "end_time": lambda x: x[:19].replace("T", " "),
+                    "rotators": lambda x: "+".join(x),
+                    "status": str}
+            titles = ["Task Name", "Start Time", "End Time", "Rotators", "Status"]
+            for tn, st, et, rots, stat in [titles] + [[f(v[k]) for k, f in keys.items()] for v in schedule]:
+                print(f"{tn:19s} | {st:19s} | {et:19s} | {rots:10s} | {stat:10s}")
+            return None
         else:
             return schedule
 
