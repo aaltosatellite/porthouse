@@ -172,10 +172,13 @@ class Task:
 
             if hole_end_time >= self.end_time:
                 # if a hole ends after the end of the remaining task, we have reached the end, adjust remaining task
-                # end time to the start of the hole, make a copy of it
+                # end time to the start of the hole
                 self.end_time = hole_start_time - timedelta(seconds=1)
-                tasks.append(self.copy())
                 break
+
+        if self.start_time <= self.end_time:
+            # if remaining task is valid, add it
+            tasks.append(self.copy())
 
         # update task names if ended up with multiple tasks
         if len(tasks) > 1:
