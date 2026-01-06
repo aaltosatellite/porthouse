@@ -249,7 +249,7 @@ class Satellite:
     def calculate_passes(self, start_time: Union[None, str, datetime, skyfield.Time] = None,
                          end_time: Union[None, str, datetime, skyfield.Time] = None, period: float = 24,
                          min_elevation: float = 0, min_max_elevation: float = 0, sun_max_elevation: float = None,
-                         sunlit: bool = None) -> list[Pass]:
+                         sunlit: bool = None, partial_last_pass=False) -> list[Pass]:
         """
         Calculate passes for the satellite.
 
@@ -261,15 +261,11 @@ class Satellite:
             min_max_elevation:  horizon to use for the calculation, defaults to 0
             sun_max_elevation:  maximum elevation of the sun for the pass to be considered valid, default=None
             sunlit:             if True, only calculate passes when the satellite is sunlit, default=None
+            partial_last_pass:  Default is False, if True, the last pass is allowed to be partial
         """
         # start time for pass calculation
         start_time = parse_time(start_time)
         end_time = parse_time(end_time) if end_time is not None else start_time + timedelta(hours=period)
-
-        # Check if the satellite is already at the sky
-        el, _, _ = self.pos_at(start_time).altaz()
-        if el.degrees > min_elevation:
-            start_time -= timedelta(minutes=30)
 
         if False and sunlit is None and sun_max_elevation is None:
             # Find all the events for the satellite, as before
@@ -288,7 +284,7 @@ class Satellite:
                                           min_elevation, min_max_elevation, ephem=CelestialObject.BODIES,
                                           max_sun_elevation=sun_max_elevation, sunlit=sunlit, accurate=accurate,
                                           orbits_per_day=self.sc.model.no_kozai / np.pi / 2 * 60 * 24,
-                                          margin_s=margin_s, partial_last_pass=False, debug=False)
+                                          margin_s=margin_s, partial_last_pass=partial_last_pass, debug=False)
 
         self.passes = events_to_passes(self.name, lambda t: (self.sc - self.gs).at(t).altaz(),
                                        t_event, events, min_max_elevation)
@@ -499,11 +495,12 @@ class SkyfieldModuleMixin:
                             min_max_elevation: float = 0,
                             sun_max_elevation: float = None,
                             sunlit: bool = None,
+                            partial_last_pass: bool = False,
                             ) -> Optional[Satellite]:
         await asyncio.sleep(0)
         pass_calc_kwargs = dict(start_time=start_time, end_time=end_time, min_elevation=min_elevation,
                                 min_max_elevation=min_max_elevation, sun_max_elevation=sun_max_elevation,
-                                sunlit=sunlit)
+                                sunlit=sunlit, partial_last_pass=partial_last_pass)
         kwarg_hash = hash(tuple([x[1] for x in sorted(pass_calc_kwargs.items(), key=lambda x: x[0])]))
         sat = self._satellites.get((target, kwarg_hash), None)
 
