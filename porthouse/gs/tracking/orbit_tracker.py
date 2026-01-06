@@ -172,7 +172,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             target = await self.get_satellite(target_name, start_time=start_time, end_time=end_time,
                                               min_elevation=min_elevation, min_max_elevation=min_max_elevation,
                                               sun_max_elevation=sun_max_elevation, sunlit=sunlit,
-                                              partial_last_pass=True)
+                                              extra_margin=True)
 
         if target is None:
             self.log.error(f"add_target: Could not find target {target_name}")
