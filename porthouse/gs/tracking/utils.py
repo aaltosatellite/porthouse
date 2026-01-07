@@ -496,11 +496,12 @@ class SkyfieldModuleMixin:
                             min_max_elevation: float = 0,
                             sun_max_elevation: float = None,
                             sunlit: bool = None,
+                            extra_margin: bool = False,
                             ) -> Optional[Satellite]:
         await asyncio.sleep(0)
         pass_calc_kwargs = dict(start_time=start_time, end_time=end_time, min_elevation=min_elevation,
                                 min_max_elevation=min_max_elevation, sun_max_elevation=sun_max_elevation,
-                                sunlit=sunlit)
+                                sunlit=sunlit, extra_margin=extra_margin)
         kwarg_hash = hash(tuple([x[1] for x in sorted(pass_calc_kwargs.items(), key=lambda x: x[0])]))
         sat = self._satellites.get((target, kwarg_hash), None)
 
