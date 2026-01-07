@@ -174,6 +174,7 @@ class BaseModule:
             self.log.info("Module %r started!", self.module_name)
         else:
             self.amqp_log_handler.channel = self.channel
+            await self.__autocreate_queues()
             self.log.info("Module %r reconnected!", self.module_name)
 
 
