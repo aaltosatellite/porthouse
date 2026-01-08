@@ -173,6 +173,7 @@ class BaseModule:
             # Init done
             self.log.info("Module %r started!", self.module_name)
         else:
+            self.rpc_response_queue = None
             self.amqp_log_handler.channel = self.channel
             await self.__autocreate_queues()
             self.log.info("Module %r reconnected!", self.module_name)
@@ -385,7 +386,7 @@ class BaseModule:
         except ValueError as exc:
             raise RPCRequestError("Failed to parse JSON RPC response!") from exc
 
-        except AsyncIOTimeoutError as exc:
+        except (AsyncIOTimeoutError, TimeoutError) as exc:
             raise RPCRequestTimeout() from exc
 
         finally:
