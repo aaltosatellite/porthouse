@@ -216,7 +216,7 @@ class TLEServer(BaseModule):
             auth_cookies = r.cookies
 
         # Request latest TLE entry for given NORAD ID
-        URL = "https://www.space-track.org/basicspacedata/query/class/tle_latest/" \
+        URL = "https://www.space-track.org/basicspacedata/query/class/gp/" \
               "NORAD_CAT_ID/{id}/orderby/EPOCH%20desc/limit/1/format/tle"
 
         try:
