@@ -175,7 +175,10 @@ class OpenMCTBackend(BaseModule):
         exchange = msg.delivery.exchange
 
         if exchange == "events":
-            await self.services["events"].push_event(message)
+            try:
+                await self.services["events"].push_event(message)
+            except:
+                self.log.debug("Failed to push event. Most likely same event received twice within the same second.", exc_info=True)
             ret = self.services["events"].handle_subscription(message)
         elif exchange == "logs":
             ret = self.services["system"].handle_subscription(message)
