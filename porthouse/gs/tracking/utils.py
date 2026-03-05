@@ -613,11 +613,14 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
         "Sun and Earth positions required through the ephem param for sunlit=True"
 
     if not accurate:
-        # for close objects such as low Earth orbit satellites, ignores e.g. light travel time
+        # sidereal time advances faster than solar time, gast_coef should be close to 1.002737379
+        gast012 = ts.linspace(t0, t0 + 2 / 24, 3).gast
+        gast_coef = min(gast012[1] - gast012[0], gast012[2] - gast012[1])  # in case wraps around 0
+        estimate_gast = lambda t: (gast012[0] + (t.tt - t0.tt) * 24 * gast_coef) % 24
+
         def cheat(t):
-            # still valid for our purposes?
-            t.gast = t.tt * 0.0
-            t.M = t.MT = np.identity(3)
+            t.gast = estimate_gast(t)        # use estimated gast to speed up calculations
+            times.M, times.MT = t0.M, t0.MT  # also cheat by using the same nutation related rotation for all times
 
         def elevation(t):
             cheat(t)
