@@ -620,7 +620,7 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
 
         def cheat(t):
             t.gast = estimate_gast(t)        # use estimated gast to speed up calculations
-            times.M, times.MT = t0.M, t0.MT  # also cheat by using the same nutation related rotation for all times
+            t.M, t.MT = t0.M, t0.MT  # also cheat by using the same nutation related rotation for all times
 
         def elevation(t):
             cheat(t)
