@@ -263,6 +263,12 @@ class RotatorController(abc.ABC):
             `RotatorError` - in case the controller encountered an error.
         """
 
+    async def get_backlash(self) -> Tuple[float, float]:
+        pass
+
+    async def set_backlash(self, az_backlash: float = None, el_backlash: float = None) -> Tuple[float, float]:
+        pass
+
     async def preaos(self) -> None:
         pass
 

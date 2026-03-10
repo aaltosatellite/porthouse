@@ -195,7 +195,7 @@ class ControllerBox(RotatorController):
 
     async def reset_position(self,
                        az: float,
-                       el: float) -> None:
+                       el: float) -> Tuple[float, float]:
 
         self.rotator_model.az_off = 0
         self.rotator_model.el_off = 0
@@ -208,7 +208,7 @@ class ControllerBox(RotatorController):
         self.target_position = (az, el)
 
         # update current_position, also move to valid position if currently invalid
-        await self.get_position()
+        return await self.get_position()
 
     async def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
         res = await self._rpc(b"D+ -s", True)
@@ -236,6 +236,22 @@ class ControllerBox(RotatorController):
 
         if el_duty_max is not None:
             await self._rpc(f"D+ -e {el_duty_max:.2f}".encode("ascii"))
+
+    async def get_backlash(self) -> Tuple[float, float]:
+        # Note that max backlash given to controller as half of the full dead zone as it is applied in both directions
+        assert self.control_sw_version >= 4, "Backlash parameters only supported in control software version 4 or higher"
+        res = await self._rpc(b"BL -s", True)
+        bl = ControllerBox._parse_position_output(res)
+        return float(bl[0]) * 2, float(bl[1]) * 2
+
+    async def set_backlash(self, az_backlash: float = None, el_backlash: float = None) -> Tuple[float, float]:
+        # Note that max backlash given to controller as half of the full dead zone as it is applied in both directions
+        assert self.control_sw_version >= 4, "Backlash parameters only supported in control software version 4 or higher"
+        if az_backlash is not None:
+            await self._rpc(f"BL -a {az_backlash/2:.3f}".encode("ascii"))
+        if el_backlash is not None:
+            await self._rpc(f"BL -e {el_backlash/2:.3f}".encode("ascii"))
+        return await self.get_backlash()
 
     async def preaos(self) -> None:
         self.epoch = time.time_ns()

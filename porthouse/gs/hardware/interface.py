@@ -122,3 +122,18 @@ class RotatorInterface:
             "el_min": el_min,
             "el_max": el_max,
         }, timeout=5)
+
+    async def get_backlash(self):
+        """
+        Get backlash values for azimuth and elevation in degrees.
+        """
+        return await send_rpc_request("rotator", f"{self.prefix}.rpc.get_backlash")
+
+    async def set_backlash(self, az_backlash: float, el_backlash: float):
+        """
+        Set backlash values for azimuth and elevation in degrees.
+        """
+        return await send_rpc_request("rotator", f"{self.prefix}.rpc.set_backlash", {
+            "az_backlash": az_backlash,
+            "el_backlash": el_backlash,
+        }, timeout=5)

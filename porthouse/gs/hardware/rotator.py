@@ -444,8 +444,8 @@ class Rotator(BaseModule):
                 now = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
                 history_file.write(f"{now}: Az: {self.current_position[0]} El: {self.current_position[1]} "
                                    f"=> Az: {target[0]} El: {target[1]}\n")
-            await self.rotator.reset_position(target[0], target[1])
-            return
+            new_pos = await self.rotator.reset_position(target[0], target[1])
+            return {"position": new_pos}
 
         elif request_name == "rpc.get_position_target":
             ########### Actual call of rotator command ###########
@@ -476,7 +476,17 @@ class Rotator(BaseModule):
                                                    float(request_data["az_max"]),
                                                    float(request_data["el_min"]),
                                                    float(request_data["el_max"]))
-            self.rotator.default_dutycycle_range = await self.rotator.get_dutycycle_range()
+            self.default_dutycycle_range = await self.rotator.get_dutycycle_range()
+            return {"dutycycle_range": self.default_dutycycle_range}
+
+        elif request_name == "rpc.get_backlash":
+            backlash = await self.rotator.get_backlash()
+            return {"backlash": backlash}
+
+        elif request_name == "rpc.set_backlash":
+            backlash = await self.rotator.set_backlash(float(request_data["az_backlash"]),
+                                                       float(request_data["el_backlash"]))
+            return {"backlash": backlash}
 
         elif request_name == "rpc.status":
             """
