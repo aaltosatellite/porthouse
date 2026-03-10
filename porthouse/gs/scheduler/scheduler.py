@@ -344,22 +344,24 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             except Exception as e:
                 self.log.error(f"Failed to write schedule file {file}: {e}", exc_info=True)
 
-    def add_task(self, task_dict, deny_main=True, mode='strict'):
+    def add_ext_tasks(self, task_dicts: List[Dict], storage=Task.STORAGE_MISC, deny_main=True, mode='strict'):
         """
         Add task to the schedule
         """
-        storage = task_dict.get("storage", Task.STORAGE_MISC)
-        task = Task.from_dict(task_dict, storage=storage)
-        if task.task_name in self.schedule.tasks:
-            raise SchedulerError(f"Task {task.task_name} already exists")
-        if task.process_name not in self.processes:
-            raise SchedulerError(f"Process referred to ({task.process_name}) in task {task.task_name} does not exist")
-        if deny_main and self.processes[task.process_name].storage == Process.STORAGE_MAIN:
-            raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, adding tasks to it "
-                                 f"through the API is currently not allowed.")
+        tasks = []
+        for task_dict in task_dicts:
+            task = Task.from_dict(task_dict, storage=storage)
+            if task.task_name in self.schedule.tasks:
+                raise SchedulerError(f"Task {task.task_name} already exists")
+            if task.process_name not in self.processes:
+                raise SchedulerError(f"Process referred to ({task.process_name}) in task {task.task_name} does not exist")
+            if deny_main and self.processes[task.process_name].storage == Process.STORAGE_MAIN:
+                raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, adding tasks to it "
+                                     f"through the API is currently not allowed.")
+            tasks.append(task)
 
         with self.schedule_lock:
-            self.add_tasks(task, mode=mode)
+            self.add_tasks(tasks, mode=mode)
             self.write_schedule()
         return True
 
@@ -518,7 +520,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             mode: 'strict': Raise SchedulerError if new task overlaps with existing task (default)
                   'force':  Force adding tasks to the schedule even if they overlap with existing tasks,
                             shorten, split, or cancel existing tasks if necessary
-                  'procrustean': If True, force tasks to fit into the schedule
+                  'procrustean': Force tasks to fit into the schedule
         """
 
         if isinstance(tasks, Task):
@@ -649,14 +651,15 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             #
             return self.export_schedule(**request_data)
 
-        elif request_name == "rpc.add_task":
+        elif request_name == "rpc.add_tasks":
             #
             # Add a new task. Request data must be a dict understood by the Task.from_dict constructor.
             # The process which the task refers to must be of storage type MISC.
             #
             deny_main = request_data.pop("deny_main", True)
             mode = request_data.pop("mode", "strict")
-            ok = self.add_task(request_data, deny_main=deny_main, mode=mode)
+            storage = request_data.get("storage", Task.STORAGE_MISC)
+            ok = self.add_ext_tasks(request_data["tasks"], storage=storage, deny_main=deny_main, mode=mode)
             return {"success": ok}
 
         elif request_name == "rpc.update_task":
@@ -804,13 +807,15 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         holes = [(t.start_time, t.end_time) for t in overlapping]
         exchange, routing_key = process.tracker[len(Scheduler.MISC_TRACKER_PREFIX):].split(":")
 
-        # NOTE: these tasks override the process settings, such as tracker, target, etc.
+        # NOTE: These tasks override the process settings, such as tracker, target, etc.
+        #       Also, if external schedule creation takes more than 10s, better return zero tasks now and later call
+        #       rpc.add_tasks with the created tasks
         tasks = await self.send_rpc_request(exchange, routing_key, {
             "process": process.to_dict(),
             "start_time": start_time,
             "end_time": end_time,
             "holes": holes,
-        }, timeout=30)
+        }, timeout=10)
 
         tasks = [Task.from_dict(task, storage=Task.STORAGE_MISC) for task in tasks]
         return tasks

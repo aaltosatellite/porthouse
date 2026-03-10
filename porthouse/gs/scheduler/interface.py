@@ -62,15 +62,19 @@ class SchedulerInterface:
         return res
 
     async def add_task(self, task_name, process_name, start_time, end_time, rotators, status="SCHEDULED",
-                       process_overrides=None, deny_main=False, mode="strict"):
+                       process_overrides=None, deny_main=False, mode="strict", storage=Task.STORAGE_MAIN):
         """
         Add a task to the schedule.
         """
         process_overrides = process_overrides or {}
-        data = {k: v for k, v in locals().items() if k in ("task_name", "process_name", "start_time", "end_time",
-                                                           "rotators", "status", "process_overrides", "deny_main",
-                                                           "mode")}
-        res = await send_rpc_request("scheduler", "rpc.add_task", data)
+        task_data = {k: v for k, v in locals().items() if k in ("task_name", "process_name", "start_time", "end_time",
+                                                                "rotators", "status", "process_overrides")}
+        res = await send_rpc_request("scheduler", "rpc.add_tasks", {
+            "mode": mode,
+            "deny_main": deny_main,
+            "storage": storage,
+            "tasks": [task_data],
+        })
         return res
 
     async def remove_task(self, task_name, deny_main=False):
