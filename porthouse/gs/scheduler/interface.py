@@ -62,7 +62,7 @@ class SchedulerInterface:
         return res
 
     async def add_task(self, task_name, process_name, start_time, end_time, rotators, status="SCHEDULED",
-                       process_overrides=None, deny_main=False, mode="strict", storage=Task.STORAGE_MAIN):
+                       process_overrides=None, deny_main=False, mode="strict", storage=0):
         """
         Add a task to the schedule.
         """

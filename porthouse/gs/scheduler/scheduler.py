@@ -4,7 +4,7 @@
 
 import asyncio
 from collections import OrderedDict
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Dict
 import yaml
 
 from datetime import datetime, timedelta, timezone
@@ -804,7 +804,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
     async def _create_tasks_misc(self, process: 'Process', start_time: datetime, end_time: datetime):
         overlapping = self.schedule.get_overlapping(start_time, end_time, process.rotators)
-        holes = [(t.start_time, t.end_time) for t in overlapping]
+        holes = [(t.start_time.isoformat(), t.end_time.isoformat()) for t in overlapping]
         exchange, routing_key = process.tracker[len(Scheduler.MISC_TRACKER_PREFIX):].split(":")
 
         # NOTE: These tasks override the process settings, such as tracker, target, etc.
@@ -812,8 +812,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         #       rpc.add_tasks with the created tasks
         tasks = await self.send_rpc_request(exchange, routing_key, {
             "process": process.to_dict(),
-            "start_time": start_time,
-            "end_time": end_time,
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat(),
             "holes": holes,
         }, timeout=10)
 
