@@ -6,11 +6,12 @@ import asyncio
 from collections import OrderedDict
 from typing import List, Union, Optional, Dict
 import yaml
+import json
 
 from datetime import datetime, timedelta, timezone
 
 from porthouse.core.config import cfg_path
-from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, bind, RPCRequestTimeout
+from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, bind, RPCRequestTimeout, RPCRequestError
 from porthouse.gs.scheduler.model import Schedule, TaskStatus, Process, Task
 from porthouse.gs.tracking.gnss_tracker import PointTracker
 from porthouse.gs.tracking.orbit_tracker import OrbitTracker
@@ -810,14 +811,25 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         # NOTE: These tasks override the process settings, such as tracker, target, etc.
         #       Also, if external schedule creation takes more than 10s, better return zero tasks now and later call
         #       rpc.add_tasks with the created tasks
-        tasks = await self.send_rpc_request(exchange, routing_key, {
-            "process": process.to_dict(),
-            "start_time": start_time.isoformat(),
-            "end_time": end_time.isoformat(),
-            "holes": holes,
-        }, timeout=10)
+        try:
+            tasks = await self.send_rpc_request(exchange, routing_key, {
+                "process": process.to_dict(),
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "holes": holes,
+            }, timeout=10)
+        except Exception as e:
+            self.log.error(
+                f"Failed to get tasks from external schedule creator for process {process.process_name}: {e}")
+            tasks = []
 
-        tasks = [Task.from_dict(task, storage=Task.STORAGE_MISC) for task in tasks]
+        try:
+            tasks = [Task.from_dict(task, storage=Task.STORAGE_MISC) for task in tasks]
+        except Exception as e:
+            self.log.error(f"Failed to parse tasks (raw: {tasks}) from external schedule creator for "
+                           f"process {process.process_name}: {e}")
+            tasks = []
+
         return tasks
 
     async def _create_tasks_fixed(self, process: 'Process', start_time: datetime, end_time: datetime):
