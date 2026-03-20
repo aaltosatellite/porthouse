@@ -345,7 +345,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             except Exception as e:
                 self.log.error(f"Failed to write schedule file {file}: {e}", exc_info=True)
 
-    def add_ext_tasks(self, task_dicts: List[Dict], storage=Task.STORAGE_MISC, deny_main=True, mode='strict'):
+    async def add_ext_tasks(self, task_dicts: List[Dict], storage=Task.STORAGE_MISC, deny_main=True, mode='strict'):
         """
         Add task to the schedule
         """
@@ -361,12 +361,14 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                                      f"through the API is currently not allowed.")
             tasks.append(task)
 
-        with self.schedule_lock:
-            self.add_tasks(tasks, mode=mode)
+        async with self.schedule_lock:
+            count = self.add_tasks(tasks, mode=mode)
             self.write_schedule()
+
+        self.log.info(f"Added {count} of {len(tasks)} tasks")
         return True
 
-    def update_task(self, task_dict, deny_main=True, mode='strict'):
+    async def update_task(self, task_dict, deny_main=True, mode='strict'):
         """
         Update task in the schedule
         """
@@ -381,7 +383,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 or self.processes[task.process_name].storage == Process.STORAGE_MAIN):
             raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, changing tasks related "
                                  f"to it through the API is currently not allowed.")
-        with self.schedule_lock:
+        async with self.schedule_lock:
             old_task = self.schedule.tasks[task.task_name]
             if old_task.status not in (TaskStatus.NOT_SCHEDULED, TaskStatus.SCHEDULED):
                 raise SchedulerError(f"{task.task_name} is in status {task.status}. "
@@ -660,7 +662,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             deny_main = request_data.pop("deny_main", True)
             mode = request_data.pop("mode", "strict")
             storage = request_data.get("storage", Task.STORAGE_MISC)
-            ok = self.add_ext_tasks(request_data["tasks"], storage=storage, deny_main=deny_main, mode=mode)
+            ok = await self.add_ext_tasks(request_data["tasks"], storage=storage, deny_main=deny_main, mode=mode)
             return {"success": ok}
 
         elif request_name == "rpc.update_task":
@@ -670,7 +672,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             #
             deny_main = request_data.pop("deny_main", True)
             mode = request_data.pop("mode", "strict")
-            ok = self.update_task(request_data, deny_main=deny_main, mode=mode)
+            ok = await self.update_task(request_data, deny_main=deny_main, mode=mode)
             return {"success": ok}
 
         elif request_name == "rpc.remove_task":
