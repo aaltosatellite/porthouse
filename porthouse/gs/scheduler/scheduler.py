@@ -345,7 +345,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             except Exception as e:
                 self.log.error(f"Failed to write schedule file {file}: {e}", exc_info=True)
 
-    async def add_ext_tasks(self, task_dicts: List[Dict], storage=Task.STORAGE_MISC, deny_main=True, mode='strict'):
+    async def add_ext_tasks(self, task_dicts: List[Dict], storage=Task.STORAGE_MISC, deny_main=True,
+                            mode='strict', apply_limits=True):
         """
         Add task to the schedule
         """
@@ -362,7 +363,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             tasks.append(task)
 
         async with self.schedule_lock:
-            count = self.add_tasks(tasks, mode=mode)
+            count = self.add_tasks(tasks, mode=mode, apply_limits=apply_limits)
             self.write_schedule()
 
         self.log.info(f"Added {count} of {len(tasks)} tasks")
@@ -514,7 +515,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                       f"{start_time.isoformat()} and {end_time.isoformat()}.")
         self._create_schedule_task = None
 
-    def add_tasks(self, tasks: Union[List['Task'], 'Task'], mode='strict'):
+    def add_tasks(self, tasks: Union[List['Task'], 'Task'], mode='strict', apply_limits=True):
         """
         Add tasks to the schedule
 
@@ -524,6 +525,11 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                   'force':  Force adding tasks to the schedule even if they overlap with existing tasks,
                             shorten, split, or cancel existing tasks if necessary
                   'procrustean': Force tasks to fit into the schedule
+            apply_limits: Whether to apply process limits when adding tasks. If False, tasks are added to the schedule
+                          even if they violate process limits. This can be used if adding tasks that were created
+                          with limits already applied, this can happen with e.g. manually or externally created tasks.
+        Returns:
+            Number of tasks actually added to the schedule
         """
 
         if isinstance(tasks, Task):
@@ -537,20 +543,20 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
             if mode == 'strict':
                 try:
-                    added_count += self.schedule.add(task, apply_limits=True)
+                    added_count += self.schedule.add(task, apply_limits=apply_limits)
                 except ValueError:
                     raise SchedulerError("New task overlaps with existing task")
 
             elif mode == 'force':
-                added_count += self.make_room_in_schedule(task)
+                added_count += self.make_room_in_schedule(task, apply_limits=apply_limits)
 
             else:
                 assert mode == 'procrustean', f"Unknown mode: {mode}"
-                added_count += self.fit_to_schedule(task)
+                added_count += self.fit_to_schedule(task, apply_limits=apply_limits)
 
         return added_count
 
-    def make_room_in_schedule(self, new_task: 'Task'):
+    def make_room_in_schedule(self, new_task: 'Task', apply_limits=True):
         """
         Checks whether new task overlaps with already scheduled tasks, if yes,
         modifies those tasks so that new task fits into the schedule.
@@ -576,11 +582,11 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 subtasks = sched_task.split([(new_task.start_time, new_task.end_time)])
                 self.schedule.remove(sched_task)
                 for task in subtasks:
-                    self.schedule.add(task, apply_limits=True)
+                    self.schedule.add(task, apply_limits=apply_limits)
 
-        return self.schedule.add(new_task, apply_limits=True)
+        return self.schedule.add(new_task, apply_limits=apply_limits)
 
-    def fit_to_schedule(self, new_task: 'Task'):
+    def fit_to_schedule(self, new_task: 'Task', apply_limits=True):
         """
         Checks whether new task overlaps with already scheduled tasks, if yes,
         modifies the new task (trim, split, or discard) so that it fits into the schedule.
@@ -600,7 +606,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
         added_count = 0
         for new_task in new_tasks:
-            added_count += self.schedule.add(new_task, apply_limits=True)
+            added_count += self.schedule.add(new_task, apply_limits=apply_limits)
 
         return added_count
 
@@ -661,8 +667,10 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             #
             deny_main = request_data.pop("deny_main", True)
             mode = request_data.pop("mode", "strict")
+            apply_limits = request_data.pop("apply_limits", True)
             storage = request_data.get("storage", Task.STORAGE_MISC)
-            ok = await self.add_ext_tasks(request_data["tasks"], storage=storage, deny_main=deny_main, mode=mode)
+            ok = await self.add_ext_tasks(request_data["tasks"], storage=storage, deny_main=deny_main,
+                                          mode=mode, apply_limits=apply_limits)
             return {"success": ok}
 
         elif request_name == "rpc.update_task":
