@@ -710,7 +710,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
                 async with self.schedule_lock:
                     tbr = [task for task in self.schedule
-                           if task.status in affected_statuses and task.auto_scheduled
+                           if task.status in affected_statuses  # and task.auto_scheduled
                               and (start_time is None or task.start_time >= start_time)
                               and (end_time is None or task.end_time <= end_time)
                               and (process_name is None or task.process_name == process_name)]
