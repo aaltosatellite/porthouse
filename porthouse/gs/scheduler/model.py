@@ -79,6 +79,19 @@ class Task:
     def apply_limits(self, process: 'Process', time_used_s: int = 0):
         process_data = self.get_task_data(process)
 
+        if process_data['daily_windows'] is not None and len(process_data['daily_windows']) > 0:
+            limits = [w.split("|") for w in process_data['daily_windows'] if "|" in w]
+            for start, end in limits:
+                t_start = datetime.strptime(start, "%H:%M:%S")
+                t_end = datetime.strptime(end, "%H:%M:%S")
+                dt_start = self.start_time.replace(hour=t_start.hour, minute=t_start.minute, second=t_start.second)
+                dt_end = self.start_time.replace(hour=t_end.hour, minute=t_end.minute, second=t_end.second)
+                if t_start > t_end:
+                    # e.g. 23:50 to 00:10
+                    dt_end = dt_end + timedelta(days=1)
+                self.start_time = min(max(dt_start, self.start_time), dt_end)
+                self.end_time = min(max(dt_start, self.end_time), dt_end)
+
         if process_data['duration'] is not None and isinstance(process_data['duration'], str) and \
                 process_data['duration'].strip():
             limits = process_data['duration'].split("|")    # min|Optional[max]
@@ -98,18 +111,6 @@ class Task:
                 min_duration = int(process_data['duration'])
             if min_duration is not None:
                 valid &= self.end_time - self.start_time >= timedelta(seconds=min_duration)
-
-        if valid and process_data['daily_windows'] is not None and len(process_data['daily_windows']) > 0:
-            # TODO: limit duration instead of filter, possibly split into multiple tasks
-            limits = [w.split("|") for w in process_data['daily_windows'] if "|" in w]
-            within_limits = False
-            for start, end in limits:
-                start = datetime.strptime(start, "%H:%M:%S")
-                end = datetime.strptime(end, "%H:%M:%S")
-                if start.time() <= self.start_time.time() <= end.time() \
-                        and start.time() <= self.end_time.time() <= end.time():
-                    within_limits = True
-            valid &= within_limits
 
         if valid and process_data['date_ranges'] is not None and len(process_data['date_ranges']) > 0:
             # TODO: limit duration instead of filter, possibly split into multiple tasks
