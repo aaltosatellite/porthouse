@@ -408,7 +408,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             task = self.schedule.tasks[task_name]
             cancel, tracker = task.status == TaskStatus.ONGOING, None
             if cancel:
-                tracker = self.processes[task.get_process_name()].tracker
+                tracker = task.get_task_data(self.processes[task.get_process_name()])["tracker"]
             self.schedule.remove(task)
             self.write_schedule()
             return task, cancel, tracker
