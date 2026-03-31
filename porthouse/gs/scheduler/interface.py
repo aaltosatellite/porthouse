@@ -62,7 +62,7 @@ class SchedulerInterface:
         return res
 
     async def add_task(self, task_name, process_name, start_time, end_time, rotators, status="SCHEDULED",
-                       process_overrides=None, deny_main=False, mode="strict", storage=0):
+                       process_overrides=None, deny_main=False, mode="strict", storage=0, apply_limits=False):
         """
         Add a task to the schedule.
         """
@@ -73,8 +73,9 @@ class SchedulerInterface:
             "mode": mode,
             "deny_main": deny_main,
             "storage": storage,
+            "apply_limits": apply_limits,
             "tasks": [task_data],
-        })
+        }, timeout=5)
         return res
 
     async def remove_task(self, task_name, deny_main=False):
