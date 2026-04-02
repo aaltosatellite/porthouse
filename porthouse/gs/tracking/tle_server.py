@@ -156,12 +156,13 @@ class TLEServer(BaseModule):
 
                 if tle is None and norad_id is not None:
                     tle, _ = await self.query_spacetrack(norad_id=norad_id)
-                    self.uncached_tles.append({
-                        "name": request_data["satellite"],
-                        "norad_id": norad_id,
-                        "tle1": tle[0],
-                        "tle2": tle[1],
-                    })
+                    if tle is not None:
+                        self.uncached_tles.append({
+                            "name": request_data["satellite"],
+                            "norad_id": norad_id,
+                            "tle1": tle[0],
+                            "tle2": tle[1],
+                        })
 
                 if tle is not None:
                     return {
@@ -174,7 +175,8 @@ class TLEServer(BaseModule):
                 if norad_id is None:
                     raise RPCError("Could not find satellite '%s' in  %s" % (
                         request_data["satellite"], [t['name'] for t in self.tle_data]))
-                raise RPCError(f"Could not find satellite with NORAD ID {norad_id}")
+
+                raise RPCError(f"Could not find TLE for satellite with NORAD ID {norad_id}")
 
             # Return all TLE lines
             return {
@@ -224,20 +226,20 @@ class TLEServer(BaseModule):
                 r = await client.get(URL.format(id=norad_id),
                                      cookies=auth_cookies, timeout=5)
         except httpx.RequestError as e:
-            self.log.error("Failed to query TLE from space-track.org: %r", e)
+            self.log.error(f"Failed to query TLE for NID={norad_id} from space-track.org: %r", e)
             return None, auth_cookies
 
         if r.status_code == 200:
             tle = r.text.split("\n")
         else:
-            self.log.error("space-track.org responded HTTP error %d: %r",
+            self.log.error(f"While querying TLE for NID={norad_id}, space-track.org responded with HTTP error %d: %r",
                            r.status_code, r.text)
             return None, auth_cookies
 
         if validate_tle(tle[0], tle[1]):
             return tle, auth_cookies
         else:
-            self.log.error("Could not validate TLE: %s" % (tle,)),
+            self.log.error("Could not validate TLE for NID={norad_id}: %s" % (tle,)),
             return None, auth_cookies
 
     async def update_tles(self) -> None:
