@@ -96,7 +96,8 @@ class Task:
                 process_data['duration'].strip():
             limits = process_data['duration'].split("|")    # min|Optional[max]
             if len(limits) > 1 and limits[1].strip():
-                self.end_time = self.start_time + timedelta(seconds=int(limits[1])) - timedelta(seconds=int(time_used_s))
+                secs = int(limits[1].strip()) - int(time_used_s) + process_data['preaos_time']
+                self.end_time = self.start_time + timedelta(seconds=secs)
 
     def is_valid(self, process: 'Process'):
         process_data = self.get_task_data(process)
@@ -110,7 +111,8 @@ class Task:
             elif isinstance(process_data['duration'], (int, float)):
                 min_duration = int(process_data['duration'])
             if min_duration is not None:
-                valid &= self.end_time - self.start_time >= timedelta(seconds=min_duration)
+                valid &= self.end_time - self.start_time >= timedelta(seconds=min_duration +
+                                                                              process_data['preaos_time'])
 
         if valid and process_data['date_ranges'] is not None and len(process_data['date_ranges']) > 0:
             # TODO: limit duration instead of filter, possibly split into multiple tasks
@@ -329,7 +331,7 @@ class Schedule:
             tmp = task.start_time.replace(hour=12, minute=0, second=0, microsecond=0)
             prev_noon = tmp - timedelta(days=1) if task.start_time < tmp else tmp
             next_noon = prev_noon + timedelta(days=1)
-            time_used_s = sum((t.end_time - t.start_time).total_seconds()
+            time_used_s = sum(max(0, (t.end_time - t.start_time).total_seconds() - process.preaos_time)
                               for t in list(self.tasks.values())
                                        + [d for d in self.deleted_tasks if d.status == TaskStatus.EXECUTED]
                               if t.process_name == task.process_name and prev_noon < t.start_time < next_noon)
