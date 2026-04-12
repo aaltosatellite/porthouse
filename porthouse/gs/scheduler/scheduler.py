@@ -579,7 +579,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                     self.schedule.remove(sched_task)
 
             elif sched_task.is_encompassing(new_task):
-                subtasks = sched_task.split([(new_task.start_time, new_task.end_time)])
+                process = self.processes.get(sched_task.process_name, None)
+                subtasks = sched_task.split([(new_task.start_time, new_task.end_time)], process)
                 self.schedule.remove(sched_task)
                 for task in subtasks:
                     self.schedule.add(task, apply_limits=apply_limits)
@@ -602,7 +603,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             if not sched_task.is_outside(new_task):
                 holes.append((sched_task.start_time, sched_task.end_time))
 
-        new_tasks = new_task.split(holes)
+        process = self.schedule.scheduler.processes.get(new_task.process_name, None)
+        new_tasks = new_task.split(holes, process)
 
         added_count = 0
         for new_task in new_tasks:

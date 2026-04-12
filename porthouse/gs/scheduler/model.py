@@ -146,7 +146,7 @@ class Task:
         task.storage = self.storage
         return task
 
-    def split(self, holes):
+    def split(self, holes, process):
         """ Splits task into multiple tasks by holes. """
         if len(holes) == 0:
             return [self]
@@ -179,9 +179,11 @@ class Task:
                 self.end_time = hole_start_time - timedelta(seconds=1)
                 break
 
-        if self.start_time <= self.end_time:
-            # if remaining task is valid, add it
-            tasks.append(self.copy())
+        # add remaining task
+        tasks.append(self.copy())
+
+        # only keep valid tasks
+        tasks = [t for t in tasks if t.is_valid(process)]
 
         # update task names if ended up with multiple tasks
         if len(tasks) > 1:
