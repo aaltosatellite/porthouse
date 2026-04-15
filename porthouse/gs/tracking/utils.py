@@ -509,7 +509,7 @@ class SkyfieldModuleMixin:
         if sat is None or sat.tle_age_days > 1:
             try:
                 self.log.debug("Requesting TLE for %s", target)
-                ret = await self.send_rpc_request("tracking", "tle.rpc.get_tle", {"satellite": target}, timeout=6)
+                ret = await self.send_rpc_request("tracking", "tle.rpc.get_tle", {"satellite": target}, timeout=10)
             except RPCRequestError as e:
                 self.log.error("Failed to request TLE: %s", e.args[0], exc_info=True)
                 return
