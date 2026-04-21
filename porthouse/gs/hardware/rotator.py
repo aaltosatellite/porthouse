@@ -344,7 +344,8 @@ class Rotator(BaseModule):
         self.moving_to_target = False
 
         # cancel the sleep task so that the check_state is called immediately
-        self.loop_sleep_task.cancel()
+        if self.loop_sleep_task is not None:
+            self.loop_sleep_task.cancel()
 
     @rpc()
     @bind(exchange="rotator", routing_key="rpc.#", prefixed=True)
