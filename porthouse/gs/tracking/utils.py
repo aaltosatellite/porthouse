@@ -287,8 +287,11 @@ class Satellite:
                                           orbits_per_day=self.sc.model.no_kozai / np.pi / 2 * 60 * 24,
                                           margin_s=margin_s, partial_last_pass=extra_margin, debug=False)
 
+        tight_times = (end_time - start_time) < 1/24
         self.passes = events_to_passes(self.name, lambda t: (self.sc - self.gs).at(t).altaz(),
-                                       t_event, events, min_max_elevation)
+                                       t_event, events, min_max_elevation,
+                                       start_time if tight_times else padded_start_time,
+                                       end_time if tight_times else padded_end_time)
         self.passes_start_time = start_time.utc_datetime()
         self.passes_end_time = end_time.utc_datetime()
         if len(self.passes) == 0:
@@ -463,7 +466,7 @@ class CelestialObject:
                                       accurate=True, orbits_per_day=1.0, margin_s=12 * 60 * 60,
                                       partial_last_pass=partial_last_pass, debug=False)
         self.passes = events_to_passes(self.name, lambda t: gs.at(t).observe(self.obj).apparent().altaz(),
-                                       t_event, events, min_max_elevation)
+                                       t_event, events, min_max_elevation, t0, t1)
         self.passes_start_time = t0.utc_datetime()
         self.passes_end_time = t1.utc_datetime()
         return self.passes
@@ -736,23 +739,24 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
 
 
 def events_to_passes(obj_name: str, altaz_fn: Callable, t_event: list, events: list,
-                     min_max_elevation: float) -> list[Pass]:
+                     min_max_elevation: float, start_time: skyfield.Time, end_time: skyfield.Time) -> list[Pass]:
     passes = []
+    start_time, end_time = start_time.utc_datetime(), end_time.utc_datetime()
     t_aos, t_max, az_max, el_max, t_los = [None] * 5
 
     # Format the event list to a pass list
     for t, event in zip(t_event, events):
         if event == 0:  # AOS
-            t_aos = t
+            t_aos = ts.from_datetime(max(t.utc_datetime(), start_time))
         elif event == 1:  # Max
             # there can be extra max events between AOS and LOS due to start and end time limits,
             # we keep the highest one
-            _t_max = t
+            _t_max = ts.from_datetime(min(max(t.utc_datetime(), start_time), end_time))
             _el_max, _az_max, _ = altaz_fn(_t_max)
             if el_max is None or _el_max.degrees > el_max.degrees:
                 t_max, az_max, el_max = _t_max, _az_max, _el_max
         elif event == 2:  # LOS
-            t_los = t
+            t_los = ts.from_datetime(min(t.utc_datetime(), end_time))
 
             # Make sure we have all details
             if t_aos is not None and t_max is not None:
