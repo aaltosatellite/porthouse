@@ -253,6 +253,22 @@ class ControllerBox(RotatorController):
             await self._rpc(f"BL -e {el_backlash/2:.3f}".encode("ascii"))
         return await self.get_backlash()
 
+    async def get_pid_coef(self, coef: str) -> Tuple[float, float]:
+        assert self.control_sw_version >= 3, "PID controller only supported in control software version 3 or higher"
+        assert coef in ("P", "I", "D"), "Coefficient must be one of P, I or D"
+        res = await self._rpc(f"G{coef} -s".encode("ascii"), True)
+        res = ControllerBox._parse_position_output(res)
+        return float(res[0]), float(res[1])
+
+    async def set_pid_coef(self, coef: str, az_coef: float = None, el_coef: float = None) -> Tuple[float, float]:
+        assert self.control_sw_version >= 3, "PID controller only supported in control software version 3 or higher"
+        assert coef in ("P", "I", "D"), "Coefficient must be one of P, I or D"
+        if az_coef is not None:
+            await self._rpc(f"G{coef} -a {az_coef:.3f}".encode("ascii"))
+        if el_coef is not None:
+            await self._rpc(f"G{coef} -e {el_coef:.3f}".encode("ascii"))
+        return await self.get_pid_coef(coef)
+
     async def preaos(self) -> None:
         self.epoch = time.time_ns()
 

@@ -489,6 +489,16 @@ class Rotator(BaseModule):
                                                        float(request_data["el_backlash"]))
             return {"backlash": backlash}
 
+        elif request_name == "rpc.get_pid_coef":
+            pid_coef = await self.rotator.get_pid_coef(request_data["coef"].upper())
+            return {"pid_coef": pid_coef}
+
+        elif request_name == "rpc.set_pid_coef":
+            pid_coef = await self.rotator.set_pid_coef(request_data["coef"].upper(),
+                                                       float(request_data["az_coef"]),
+                                                       float(request_data["el_coef"]))
+            return {"pid_coef": pid_coef}
+
         elif request_name == "rpc.status":
             """
                 Get rotator status message

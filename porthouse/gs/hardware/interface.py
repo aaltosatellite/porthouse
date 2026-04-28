@@ -137,3 +137,27 @@ class RotatorInterface:
             "az_backlash": az_backlash,
             "el_backlash": el_backlash,
         }, timeout=5)
+
+    async def get_pid_coef(self, coef: str):
+        """
+        Get PID controller coefficients for azimuth and elevation.
+        Args:
+            coef: PID controller coefficients to get, either P, I, or D.
+        """
+        return await send_rpc_request("rotator", f"{self.prefix}.rpc.get_pid_coef", {
+            "coef": coef
+        })
+
+    async def set_pid_coef(self, coef: str, az_coef: float, el_coef: float):
+        """
+        Set PID controller coefficients for azimuth and elevation.
+        Args:
+            coef: PID controller coefficients to set, either P, I, or D.
+            az_coef: coefficient for azimuth
+            el_coef: coefficient for elevation
+        """
+        return await send_rpc_request("rotator", f"{self.prefix}.rpc.set_pid_coef", {
+            "coef": coef,
+            "az_coef": az_coef,
+            "el_coef": el_coef,
+        }, timeout=5)

@@ -269,6 +269,12 @@ class RotatorController(abc.ABC):
     async def set_backlash(self, az_backlash: float = None, el_backlash: float = None) -> Tuple[float, float]:
         pass
 
+    async def get_pid_coef(self, coef: str) -> Tuple[float, float]:
+        pass
+
+    async def set_pid_coef(self, coef: str, az_coef: float = None, el_coef: float = None) -> Tuple[float, float]:
+        pass
+
     async def preaos(self) -> None:
         pass
 
