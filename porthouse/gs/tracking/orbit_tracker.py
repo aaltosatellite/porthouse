@@ -402,7 +402,7 @@ class TargetTracker:
                 self.module.log.debug(f"LOS for {self.target.target_name} {self.rotators} in {m:.0f}min "
                                       f"{s:.0f}s, az={az.degrees:.1f} el={el.degrees:.1f} r={range.km:.1f} "
                                       f"azr={az_rate.degrees.per_second:.3f} elr={el_rate.degrees.per_second:.3f} "
-                                      f"rr={range_rate.m_per_s:.1f}")
+                                      f"rr={range_rate.m_per_s:.1f} acc={self.high_accuracy}")
 
             # Broadcast spacecraft position
             await self.module.broadcast_pointing(self.task_name, self.target, self.rotators,
