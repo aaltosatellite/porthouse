@@ -419,7 +419,8 @@ class ControllerBox(RotatorController):
         try:
             str_output = output.decode("ascii").strip()
             parsed_output = str_output.split()
-            return float(parsed_output[1]), float(parsed_output[4])
+            n = len(parsed_output)
+            return float(parsed_output[1]), float(parsed_output[4 if n > 4 else 3])
 
         except Exception as e:
             raise ControllerBoxError(f"Failed to parse output format: {output}") from e
