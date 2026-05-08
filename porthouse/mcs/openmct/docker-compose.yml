@@ -1,0 +1,43 @@
+services:
+  openmct_npm:
+    image: node:18.20-alpine3.19
+    volumes:
+      - .:/app
+    profiles:
+      - donotstart
+
+  openmct_couch:
+#    restart: always
+    image: couchdb:3.3
+    environment:
+      COUCHDB_USER: admin
+      COUCHDB_PASSWORD: password
+    volumes:
+      - ./couchdb:/opt/couchdb/data
+#      - ./couch.ini:/opt/couchdb/etc/local.ini:ro
+    ports:
+      - "5984:5984"
+
+  static_openmct:
+    image: node:18.20-alpine3.19
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: sh -c "npm install && npx serve . -l 8080"
+    ports:
+      - 8080:8080
+
+  openmct_nginx:
+    image: nginx:latest
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - .:/www:ro
+    ports:
+      - 8080:80
+#      - 7002:7002
+    links:
+      - openmct_couch
+    profiles:
+      - donotstart
+volumes:
+  couchdb:

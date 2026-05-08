@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+    <meta content="utf-8" http-equiv="encoding">
+
+    <title>OpenMCT porthouse</title>
+    <link rel="icon" href="/favicon.ico">
+    <script src="node_modules/openmct/dist/openmct.js"></script>
+    <script type="module" src="node_modules/porthouse/src/porthouse.js"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+
+        const FIVE_MINUTES = 5 * 60 * 1000;
+        const THIRTY_MINUTES = 30 * 60 * 1000;
+
+        openmct.setAssetPath('node_modules/openmct/dist');
+
+        openmct.install(openmct.plugins.MyItems());
+        openmct.install(openmct.plugins.UTCTimeSystem());
+        openmct.install(openmct.plugins.LADTable());
+        openmct.install(openmct.plugins.SummaryWidget());
+        // openmct.install(openmct.plugins.Espresso()); // Uncomment for regular dark mode
+        // openmct.install(openmct.plugins.Snow()); // Uncomment to enable lightmode
+        openmct.install(openmct.plugins.DarkmatterTheme());
+
+        openmct.install(openmct.plugins.DisplayLayout({
+            showAsView: ['summary-widget']
+        }));
+        openmct.install(openmct.plugins.AutoflowView({
+            type: "telemetry.panel"
+        }));
+
+        openmct.install(openmct.plugins.Conductor({
+            menuOptions: [
+                {
+                    name: "Fixed",
+                    timeSystem: 'utc',
+                    bounds: {
+                        start: Date.now() - THIRTY_MINUTES,
+                        end: Date.now()
+                    }
+                },
+                {
+                    name: "Realtime",
+                    timeSystem: 'utc',
+                    clock: 'local',
+                    clockOffsets: {
+                        start: - THIRTY_MINUTES,
+                        end: FIVE_MINUTES
+                    }
+                }
+            ]
+            }));
+
+
+            openmct.time.setClock('local', {start: -15 * 60 * 1000, end: 0});
+            openmct.time.setTimeSystem('utc');
+
+            // Connect to backend using WebSockets
+            let ws_url = "ws://" + document.location.hostname + ":7002/openmct/ws";
+            let connector = new porthouse.Connector(ws_url);
+
+            openmct.install(porthouse.plugins.Groundstation(connector));
+
+            openmct.install(porthouse.plugins.Housekeeping(connector, {
+                rootKey: "fs1p",
+
+                styling: {
+                    rootFolderName: "Foresail-1p Housekeeping",
+                    dataPointText: "Foresail-1p Housekeeping",
+                    frameName: 'Porthouse Housekeeping Frame',
+                    frameCssClass: 'icon-info',
+                    frameDesc: 'porthouse housekeeping frame',
+                    dataPointName: 'porthouse Housekeeping Data Point',
+                    dataPointDesc: 'porthouse housekeeping data point',
+                    dataPointCssClass: 'icon-telemetry',
+                    //limits: LIMITS
+                }
+            }));
+
+            openmct.install(porthouse.plugins.Events(connector, {
+                rootKey: "fs1p",
+
+                styling: {
+                    rootFolderName: "Foresail-1p Events",
+                    EventText: "Porthouse Raw events",
+                    EventName: 'Porthouse Housekeeping Events',
+                    EventDesc: 'Porthouse housekeeping events',
+                    EventCssClass: 'icon-box-with-dashed-lines',
+                }
+            }));
+
+            openmct.install(porthouse.plugins.Measurements(connector, {
+                rootKey: "fs1p",
+
+                styling: {
+                    rootFolderName: "Foresail-1p Measurements",
+                    dataPointText: "Foresail-1p Measurements",
+                    frameName: 'Porthouse Measurements Frame',
+                    frameCssClass: 'icon-info',
+                    frameDesc: 'porthouse measurements frame',
+                    dataPointName: 'porthouse Measurements Data Point',
+                    dataPointDesc: 'porthouse measurements data point',
+                    dataPointCssClass: 'icon-telemetry',
+                    //limits: LIMITS
+                }
+            }));
+
+
+            // Use either CouchDB (If installed and set up) or LocalStorageup
+            var couch_url = 'http://' + document.location.hostname + ':5984/openmct';
+            openmct.install(openmct.plugins.CouchDB(couch_url))
+            //openmct.install(openmct.plugins.LocalStorage());
+
+            openmct.start();
+        });
+    </script>
+</head>
+<body>
+</body>
+</html>
