@@ -218,6 +218,8 @@ class Rotator(BaseModule):
             "el_err": el_err,
             "az_off": self.rotator.total_adjustment()[0],
             "el_off": self.rotator.total_adjustment()[1],
+            "az_motor": round(self.current_motor_pos[0], 6),
+            "el_motor": round(self.current_motor_pos[1], 6),
             "tracking": status,
             "rotating": self.moving_to_target,
         }

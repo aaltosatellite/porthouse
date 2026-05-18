@@ -22,6 +22,7 @@ PositionType = Tuple[float, float]
 
 class RotatorController(abc.ABC):
     address: str
+    current_motor_pos: PositionType
     current_position: PositionType
     current_pos_ts: float
     target_position: PositionType

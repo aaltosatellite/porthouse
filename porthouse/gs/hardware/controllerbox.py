@@ -102,8 +102,8 @@ class ControllerBox(RotatorController):
         t0 = time.time()
         res = await self._rpc(b"P -s", True)
         self.current_pos_ts = (t0 + time.time()) / 2.0
-        motor_pos = self._parse_position_output(res)
-        self.current_position = self.rotator_model.to_real(*motor_pos)
+        self.current_motor_pos = self._parse_position_output(res)
+        self.current_position = self.rotator_model.to_real(*self.current_motor_pos)
         self.err_cnt = 0  # Reset error counter
 
         await self.maybe_enforce_limits()
