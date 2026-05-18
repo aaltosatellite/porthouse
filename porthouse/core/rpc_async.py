@@ -33,13 +33,16 @@ async def amqp_connect(
     Returns:
         AMQP connection and channel objects.
     """
-    global connection, channel
+    global connection, channel, rpc_futures, rpc_response_queue
 
     if amqp_url is None:
         amqp_url = load_globals()["amqp_url"]
 
     connection = await aiormq.connect(amqp_url)
     channel = await connection.channel()
+    rpc_futures = {}
+    rpc_response_queue = None
+
     return connection, channel
 
 def __rpc_response(

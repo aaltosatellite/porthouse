@@ -381,7 +381,6 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         help='Modules to be excluded from the configuration')
 
 
-
 def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     Launcher(
         cfg_file=args.cfg,
@@ -389,3 +388,9 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
         declare_exchanges=args.declare_exchanges,
         debug=args.debug
     )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='porthouse launcher script')
+    setup_parser(parser)
+    main(parser, parser.parse_args())

@@ -249,7 +249,7 @@ class Satellite:
     def calculate_passes(self, start_time: Union[None, str, datetime, skyfield.Time] = None,
                          end_time: Union[None, str, datetime, skyfield.Time] = None, period: float = 24,
                          min_elevation: float = 0, min_max_elevation: float = 0, sun_max_elevation: float = None,
-                         sunlit: bool = None) -> list[Pass]:
+                         sunlit: bool = None, extra_margin=False) -> list[Pass]:
         """
         Calculate passes for the satellite.
 
@@ -261,42 +261,42 @@ class Satellite:
             min_max_elevation:  horizon to use for the calculation, defaults to 0
             sun_max_elevation:  maximum elevation of the sun for the pass to be considered valid, default=None
             sunlit:             if True, only calculate passes when the satellite is sunlit, default=None
+            extra_margin:       Default is False, if True, add 15 min to both start and end times for event search
         """
         # start time for pass calculation
         start_time = parse_time(start_time)
         end_time = parse_time(end_time) if end_time is not None else start_time + timedelta(hours=period)
-
-        # Check if the satellite is already at the sky
-        el, _, _ = self.pos_at(start_time).altaz()
-        if el.degrees > min_elevation:
-            start_time -= timedelta(minutes=30)
+        padded_start_time = start_time - timedelta(seconds=60 * (15 if extra_margin else 1))
+        padded_end_time = end_time + timedelta(seconds=60 * (15 if extra_margin else 1))
 
         if False and sunlit is None and sun_max_elevation is None:
             # Find all the events for the satellite, as before
             # TODO: could be removed as it's not used anymore (see False in if statement)
-            t_event, events = self.sc.find_events(self.gs, start_time - timedelta(seconds=60),
-                                                  end_time + timedelta(seconds=60), min_elevation)
+            t_event, events = self.sc.find_events(self.gs, padded_start_time, padded_end_time, min_elevation)
         else:
             # Use own version of find_events that takes into account sunlit and sun_max_elevation params
             if CelestialObject.EARTH is None:
                 CelestialObject.init_bodies()
 
-            accurate = sunlit is not None or sun_max_elevation is not None
+            accurate = sunlit is not None or sun_max_elevation is not None   # NOTE: should set to False?
             margin_s = 12 * 60 * 60 if accurate else 0
             t_event, events = find_events(CelestialObject.EARTH + self.gs, CelestialObject.EARTH + self.sc,
-                                          start_time - timedelta(seconds=60), end_time + timedelta(seconds=60),
+                                          padded_start_time, padded_end_time,
                                           min_elevation, min_max_elevation, ephem=CelestialObject.BODIES,
                                           max_sun_elevation=sun_max_elevation, sunlit=sunlit, accurate=accurate,
                                           orbits_per_day=self.sc.model.no_kozai / np.pi / 2 * 60 * 24,
-                                          margin_s=margin_s, partial_last_pass=False, debug=False)
+                                          margin_s=margin_s, partial_last_pass=extra_margin, debug=False)
 
+        tight_times = (end_time - start_time) < 1/24
         self.passes = events_to_passes(self.name, lambda t: (self.sc - self.gs).at(t).altaz(),
-                                       t_event, events, min_max_elevation)
+                                       t_event, events, min_max_elevation,
+                                       start_time if tight_times else padded_start_time,
+                                       end_time if tight_times else padded_end_time)
         self.passes_start_time = start_time.utc_datetime()
         self.passes_end_time = end_time.utc_datetime()
         if len(self.passes) == 0:
             print("No passes found, debug info: "
-                  f"{t_event.utc_iso()} | {events} | {start_time - timedelta(seconds=60)} | {end_time + timedelta(seconds=60)} | "
+                  f"{t_event.utc_iso()} | {events} | {padded_start_time} | {padded_end_time} | "
                   f"{min_elevation} | {min_max_elevation} | {sun_max_elevation} | {sunlit}")
 
         # sanity check
@@ -304,7 +304,7 @@ class Satellite:
         for p in self.passes:
             if (p.t_los - p.t_aos).total_seconds() > secs_per_half_orbit:
                 print(f"Pass too long, half orbit [s]: {secs_per_half_orbit}): {p}, debug info: "
-                      f"{t_event.utc_iso()} | {events} | {start_time - timedelta(seconds=60)} | {end_time + timedelta(seconds=60)} | "
+                      f"{t_event.utc_iso()} | {events} | {padded_start_time} | {padded_end_time} | "
                       f"{min_elevation} | {min_max_elevation} | {sun_max_elevation} | {sunlit}")
 
         return self.passes
@@ -466,7 +466,7 @@ class CelestialObject:
                                       accurate=True, orbits_per_day=1.0, margin_s=12 * 60 * 60,
                                       partial_last_pass=partial_last_pass, debug=False)
         self.passes = events_to_passes(self.name, lambda t: gs.at(t).observe(self.obj).apparent().altaz(),
-                                       t_event, events, min_max_elevation)
+                                       t_event, events, min_max_elevation, t0, t1)
         self.passes_start_time = t0.utc_datetime()
         self.passes_end_time = t1.utc_datetime()
         return self.passes
@@ -488,8 +488,8 @@ class SkyfieldModuleMixin:
         # calls the base module constructor
         super().__init__(*args, **kwargs)
 
-        self.satellites: dict[str, Satellite] = {}
-        self.celestional_objects: dict[str, CelestialObject] = {}
+        self._satellites: dict[Tuple[str, int], Satellite] = {}
+        self._celestional_objects: dict[Tuple[str, int], CelestialObject] = {}
         self.gs = GroundStation()
 
     async def get_satellite(self, target: str,
@@ -499,18 +499,20 @@ class SkyfieldModuleMixin:
                             min_max_elevation: float = 0,
                             sun_max_elevation: float = None,
                             sunlit: bool = None,
+                            extra_margin: bool = False,
                             ) -> Optional[Satellite]:
         await asyncio.sleep(0)
-        sat = self.satellites.get(target, None)
         pass_calc_kwargs = dict(start_time=start_time, end_time=end_time, min_elevation=min_elevation,
                                 min_max_elevation=min_max_elevation, sun_max_elevation=sun_max_elevation,
-                                sunlit=sunlit)
+                                sunlit=sunlit, extra_margin=extra_margin)
+        kwarg_hash = hash(tuple([x[1] for x in sorted(pass_calc_kwargs.items(), key=lambda x: x[0])]))
+        sat = self._satellites.get((target, kwarg_hash), None)
 
         # Ensure recent TLEs used
         if sat is None or sat.tle_age_days > 1:
             try:
                 self.log.debug("Requesting TLE for %s", target)
-                ret = await self.send_rpc_request("tracking", "tle.rpc.get_tle", {"satellite": target}, timeout=6)
+                ret = await self.send_rpc_request("tracking", "tle.rpc.get_tle", {"satellite": target}, timeout=10)
             except RPCRequestError as e:
                 self.log.error("Failed to request TLE: %s", e.args[0], exc_info=True)
                 return
@@ -520,7 +522,7 @@ class SkyfieldModuleMixin:
             self.log.debug(f"Calculating passes for {target}: {pass_calc_kwargs}")
             sat.calculate_passes(**pass_calc_kwargs)
 
-            self.satellites[target] = sat
+            self._satellites[(target, kwarg_hash)] = sat
 
         # Ensure enough passes are available
         elif not sat.passes_contain(start_time, end_time):
@@ -544,10 +546,11 @@ class SkyfieldModuleMixin:
                                    partial_last_pass: bool = False,
                                    ) -> Optional[CelestialObject]:
 
-        obj = self.celestional_objects.get(target, None)
         pass_calc_kwargs = dict(start_time=start_time, end_time=end_time, min_elevation=min_elevation,
                                 min_max_elevation=min_max_elevation, sun_max_elevation=sun_max_elevation,
                                 sunlit=sunlit, partial_last_pass=partial_last_pass)
+        kwarg_hash = hash(tuple([x[1] for x in sorted(pass_calc_kwargs.items(), key=lambda x: x[0])]))
+        obj = self._celestional_objects.get((target, kwarg_hash), None)
 
         if obj is None:
             try:
@@ -560,7 +563,7 @@ class SkyfieldModuleMixin:
                     await asyncio.get_running_loop().run_in_executor(executor,
                                                                      lambda: obj.calculate_passes(**pass_calc_kwargs))
 
-                self.celestional_objects[target] = obj
+                self._celestional_objects[(target, kwarg_hash)] = obj
             except Exception as e:
                 self.log.error(f"Failed to initialize celestial object \"{target}\": {e}", exc_info=True)
                 return None
@@ -592,6 +595,7 @@ def parse_time(t: Union[None, str, datetime, skyfield.Time]) -> skyfield.Time:
     else:
         raise ValueError("Invalid time type")
 
+    dt = dt.replace(microsecond=0)
     return ts.utc(dt)
 
 
@@ -612,11 +616,14 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
         "Sun and Earth positions required through the ephem param for sunlit=True"
 
     if not accurate:
-        # for close objects such as low Earth orbit satellites, ignores e.g. light travel time
+        # sidereal time advances faster than solar time, gast_coef should be close to 1.002737379
+        gast012 = ts.linspace(t0, t0 + 2 / 24, 3).gast
+        gast_coef = min(gast012[1] - gast012[0], gast012[2] - gast012[1])  # in case wraps around 0
+        estimate_gast = lambda t: (gast012[0] + (t.tt - t0.tt) * 24 * gast_coef) % 24
+
         def cheat(t):
-            # still valid for our purposes?
-            t.gast = t.tt * 0.0
-            t.M = t.MT = np.identity(3)
+            t.gast = estimate_gast(t)        # use estimated gast to speed up calculations
+            t.M, t.MT = t0.M, t0.MT  # also cheat by using the same nutation related rotation for all times
 
         def elevation(t):
             cheat(t)
@@ -732,23 +739,24 @@ def find_events(gs: vectorlib.VectorFunction, obj: vectorlib.VectorFunction, t0:
 
 
 def events_to_passes(obj_name: str, altaz_fn: Callable, t_event: list, events: list,
-                     min_max_elevation: float) -> list[Pass]:
+                     min_max_elevation: float, start_time: skyfield.Time, end_time: skyfield.Time) -> list[Pass]:
     passes = []
+    start_time, end_time = start_time.utc_datetime(), end_time.utc_datetime()
     t_aos, t_max, az_max, el_max, t_los = [None] * 5
 
     # Format the event list to a pass list
     for t, event in zip(t_event, events):
         if event == 0:  # AOS
-            t_aos = t
+            t_aos = ts.from_datetime(max(t.utc_datetime(), start_time))
         elif event == 1:  # Max
             # there can be extra max events between AOS and LOS due to start and end time limits,
             # we keep the highest one
-            _t_max = t
+            _t_max = ts.from_datetime(min(max(t.utc_datetime(), start_time), end_time))
             _el_max, _az_max, _ = altaz_fn(_t_max)
             if el_max is None or _el_max.degrees > el_max.degrees:
                 t_max, az_max, el_max = _t_max, _az_max, _el_max
         elif event == 2:  # LOS
-            t_los = t
+            t_los = ts.from_datetime(min(t.utc_datetime(), end_time))
 
             # Make sure we have all details
             if t_aos is not None and t_max is not None:

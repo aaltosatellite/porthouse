@@ -79,11 +79,25 @@ class Task:
     def apply_limits(self, process: 'Process', time_used_s: int = 0):
         process_data = self.get_task_data(process)
 
+        if process_data['daily_windows'] is not None and len(process_data['daily_windows']) > 0:
+            limits = [w.split("|") for w in process_data['daily_windows'] if "|" in w]
+            for start, end in limits:
+                t_start = datetime.strptime(start, "%H:%M:%S")
+                t_end = datetime.strptime(end, "%H:%M:%S")
+                dt_start = self.start_time.replace(hour=t_start.hour, minute=t_start.minute, second=t_start.second)
+                dt_end = self.start_time.replace(hour=t_end.hour, minute=t_end.minute, second=t_end.second)
+                if t_start > t_end:
+                    # e.g. 23:50 to 00:10
+                    dt_end = dt_end + timedelta(days=1)
+                self.start_time = min(max(dt_start, self.start_time), dt_end)
+                self.end_time = min(max(dt_start, self.end_time), dt_end)
+
         if process_data['duration'] is not None and isinstance(process_data['duration'], str) and \
                 process_data['duration'].strip():
             limits = process_data['duration'].split("|")    # min|Optional[max]
             if len(limits) > 1 and limits[1].strip():
-                self.end_time = self.start_time + timedelta(seconds=int(limits[1])) - timedelta(seconds=int(time_used_s))
+                secs = int(limits[1].strip()) - int(time_used_s) + process_data['preaos_time']
+                self.end_time = self.start_time + timedelta(seconds=secs)
 
     def is_valid(self, process: 'Process'):
         process_data = self.get_task_data(process)
@@ -97,19 +111,8 @@ class Task:
             elif isinstance(process_data['duration'], (int, float)):
                 min_duration = int(process_data['duration'])
             if min_duration is not None:
-                valid &= self.end_time - self.start_time >= timedelta(seconds=min_duration)
-
-        if valid and process_data['daily_windows'] is not None and len(process_data['daily_windows']) > 0:
-            # TODO: limit duration instead of filter, possibly split into multiple tasks
-            limits = [w.split("|") for w in process_data['daily_windows'] if "|" in w]
-            within_limits = False
-            for start, end in limits:
-                start = datetime.strptime(start, "%H:%M:%S")
-                end = datetime.strptime(end, "%H:%M:%S")
-                if start.time() <= self.start_time.time() <= end.time() \
-                        and start.time() <= self.end_time.time() <= end.time():
-                    within_limits = True
-            valid &= within_limits
+                valid &= self.end_time - self.start_time >= timedelta(seconds=min_duration +
+                                                                              process_data['preaos_time'])
 
         if valid and process_data['date_ranges'] is not None and len(process_data['date_ranges']) > 0:
             # TODO: limit duration instead of filter, possibly split into multiple tasks
@@ -143,7 +146,7 @@ class Task:
         task.storage = self.storage
         return task
 
-    def split(self, holes):
+    def split(self, holes, process):
         """ Splits task into multiple tasks by holes. """
         if len(holes) == 0:
             return [self]
@@ -172,10 +175,15 @@ class Task:
 
             if hole_end_time >= self.end_time:
                 # if a hole ends after the end of the remaining task, we have reached the end, adjust remaining task
-                # end time to the start of the hole, make a copy of it
+                # end time to the start of the hole
                 self.end_time = hole_start_time - timedelta(seconds=1)
-                tasks.append(self.copy())
                 break
+
+        # add remaining task
+        tasks.append(self.copy())
+
+        # only keep valid tasks
+        tasks = [t for t in tasks if t.is_valid(process)]
 
         # update task names if ended up with multiple tasks
         if len(tasks) > 1:
@@ -325,7 +333,7 @@ class Schedule:
             tmp = task.start_time.replace(hour=12, minute=0, second=0, microsecond=0)
             prev_noon = tmp - timedelta(days=1) if task.start_time < tmp else tmp
             next_noon = prev_noon + timedelta(days=1)
-            time_used_s = sum((t.end_time - t.start_time).total_seconds()
+            time_used_s = sum(max(0, (t.end_time - t.start_time).total_seconds() - process.preaos_time)
                               for t in list(self.tasks.values())
                                        + [d for d in self.deleted_tasks if d.status == TaskStatus.EXECUTED]
                               if t.process_name == task.process_name and prev_noon < t.start_time < next_noon)

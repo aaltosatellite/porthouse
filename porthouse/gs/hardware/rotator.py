@@ -218,6 +218,8 @@ class Rotator(BaseModule):
             "el_err": el_err,
             "az_off": self.rotator.total_adjustment()[0],
             "el_off": self.rotator.total_adjustment()[1],
+            "az_motor": round(self.current_motor_pos[0], 6),
+            "el_motor": round(self.current_motor_pos[1], 6),
             "tracking": status,
             "rotating": self.moving_to_target,
         }
@@ -344,7 +346,8 @@ class Rotator(BaseModule):
         self.moving_to_target = False
 
         # cancel the sleep task so that the check_state is called immediately
-        self.loop_sleep_task.cancel()
+        if self.loop_sleep_task is not None:
+            self.loop_sleep_task.cancel()
 
     @rpc()
     @bind(exchange="rotator", routing_key="rpc.#", prefixed=True)
@@ -444,8 +447,8 @@ class Rotator(BaseModule):
                 now = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
                 history_file.write(f"{now}: Az: {self.current_position[0]} El: {self.current_position[1]} "
                                    f"=> Az: {target[0]} El: {target[1]}\n")
-            await self.rotator.reset_position(target[0], target[1])
-            return
+            new_pos = await self.rotator.reset_position(target[0], target[1])
+            return {"position": new_pos}
 
         elif request_name == "rpc.get_position_target":
             ########### Actual call of rotator command ###########
@@ -476,7 +479,27 @@ class Rotator(BaseModule):
                                                    float(request_data["az_max"]),
                                                    float(request_data["el_min"]),
                                                    float(request_data["el_max"]))
-            self.rotator.default_dutycycle_range = await self.rotator.get_dutycycle_range()
+            self.default_dutycycle_range = await self.rotator.get_dutycycle_range()
+            return {"dutycycle_range": self.default_dutycycle_range}
+
+        elif request_name == "rpc.get_backlash":
+            backlash = await self.rotator.get_backlash()
+            return {"backlash": backlash}
+
+        elif request_name == "rpc.set_backlash":
+            backlash = await self.rotator.set_backlash(float(request_data["az_backlash"]),
+                                                       float(request_data["el_backlash"]))
+            return {"backlash": backlash}
+
+        elif request_name == "rpc.get_pid_coef":
+            pid_coef = await self.rotator.get_pid_coef(request_data["coef"].upper())
+            return {"pid_coef": pid_coef}
+
+        elif request_name == "rpc.set_pid_coef":
+            pid_coef = await self.rotator.set_pid_coef(request_data["coef"].upper(),
+                                                       float(request_data["az_coef"]),
+                                                       float(request_data["el_coef"]))
+            return {"pid_coef": pid_coef}
 
         elif request_name == "rpc.status":
             """

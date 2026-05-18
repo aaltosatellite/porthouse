@@ -4,7 +4,7 @@
 
 import json
 import asyncio
-import datetime
+from datetime import datetime, timedelta, timezone
 import time
 from enum import IntEnum
 from typing import Optional, NoReturn, List, Union
@@ -14,7 +14,7 @@ import skyfield
 
 from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, queue, bind
 
-from .utils import Satellite, CelestialObject, Pass, SkyfieldModuleMixin
+from .utils import Satellite, CelestialObject, Pass, SkyfieldModuleMixin, parse_time
 
 ts = skyfield.api.load.timescale()
 
@@ -124,8 +124,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             raise RPCError(f"No such command: {request_name}")
 
     async def add_target(self, task_name: str, target_name: str, rotators: List[str],
-                         start_time: Union[None, str, datetime.datetime, skyfield.api.Time] = None,
-                         end_time: Union[None, str, datetime.datetime, skyfield.api.Time] = None,
+                         start_time: Union[None, str, datetime, skyfield.api.Time] = None,
+                         end_time: Union[None, str, datetime, skyfield.api.Time] = None,
                          min_elevation: float = 0,
                          min_max_elevation: float = 0,
                          sun_max_elevation: float = None,
@@ -171,7 +171,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         else:
             target = await self.get_satellite(target_name, start_time=start_time, end_time=end_time,
                                               min_elevation=min_elevation, min_max_elevation=min_max_elevation,
-                                              sun_max_elevation=sun_max_elevation, sunlit=sunlit)
+                                              sun_max_elevation=sun_max_elevation, sunlit=sunlit,
+                                              extra_margin=True)
 
         if target is None:
             self.log.error(f"add_target: Could not find target {target_name}")
@@ -187,9 +188,10 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
 
         if high_accuracy is None:
             high_accuracy = isinstance(target, CelestialObject) or sunlit is not None or sun_max_elevation is not None
-        target_tracker = TargetTracker(self, task_name, target, rotators, tracking_interval=self.tracking_interval,
-                                       tracking_delay=self.tracking_delay,
-                                       preaos_time=preaos_time, high_accuracy=high_accuracy)
+        target_tracker = TargetTracker(self, task_name, target, rotators,
+                                       task_start_time=start_time, task_end_time=end_time, preaos_time=preaos_time,
+                                       tracking_interval=self.tracking_interval, tracking_delay=self.tracking_delay,
+                                       high_accuracy=high_accuracy)
         self.target_trackers.append(target_tracker)
         await target_tracker.start()
 
@@ -280,14 +282,17 @@ class TrackerStatus(IntEnum):
 class TargetTracker:
 
     def __init__(self, module: OrbitTracker, task_name: str, target: Union[Satellite, CelestialObject],
-                 rotators: List[str], preaos_time=OrbitTracker.DEFAULT_PREAOS_TIME,
-                 tracking_interval=2.0, tracking_delay=2.0,
+                 rotators: List[str], task_start_time: Union[None, str, datetime, skyfield.api.Time],
+                 task_end_time: Union[None, str, datetime, skyfield.api.Time],
+                 preaos_time: float, tracking_interval=2.0, tracking_delay=2.0,
                  status=TrackerStatus.WAITING, high_accuracy=None):
         self.module = module
         self.task_name = task_name
         self.target = target
         self.rotators = rotators
-        self.preaos_time = datetime.timedelta(seconds=preaos_time)
+        self.preaos_at = parse_time(task_start_time).utc_datetime()
+        self.aos_at = self.preaos_at + timedelta(seconds=preaos_time)
+        self.los_at = parse_time(task_end_time).utc_datetime()
         self.tracking_interval = tracking_interval
         self.tracking_delay = tracking_delay
         self.status = status
@@ -337,7 +342,7 @@ class TargetTracker:
             return
 
         # Update current prediction
-        now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+        now = datetime.utcnow().replace(tzinfo=timezone.utc)
 
         next_pass = self.target.get_next_pass()
         if next_pass is None:
@@ -348,7 +353,7 @@ class TargetTracker:
         if self.status == TrackerStatus.WAITING:
 
             if self.module.debug:
-                s = (next_pass.t_aos - now).total_seconds()
+                s = (self.aos_at - now).total_seconds()
                 m, s = divmod(s, 60)
                 h, m = divmod(m, 60)
 
@@ -360,13 +365,13 @@ class TargetTracker:
                                           f" in {m:.0f} minutes and {s:.0f} seconds")
 
             # Check if a pass is already going on
-            if now >= next_pass.t_aos:
+            if now >= self.aos_at:
                 await self.module.send_event("aos", task_name=self.task_name, target=self.target,
                                              rotators=self.rotators)
                 self.status = TrackerStatus.TRACKING
 
             # Is AOS about to happen?
-            elif now >= next_pass.t_aos - self.preaos_time:
+            elif now >= self.preaos_at:
                 await self.module.send_event("preaos", task_name=self.task_name, target=self.target,
                                              rotators=self.rotators,
                                              **next_pass.to_dict())
@@ -375,29 +380,29 @@ class TargetTracker:
         elif self.status == TrackerStatus.AOS:
 
             # Did AOS happen?
-            if now >= next_pass.t_aos:
+            if now >= self.aos_at:
                 await self.module.send_event("aos", task_name=self.task_name, target=self.target,
                                              rotators=self.rotators)
                 self.status = TrackerStatus.TRACKING
 
             elif self.module.debug:
-                sec = (next_pass.t_aos - now).total_seconds()
+                sec = (self.aos_at - now).total_seconds()
                 self.module.log.debug(f"AOS for {self.target.target_name} {self.rotators} in {sec:.0f} seconds")
 
         elif self.status == TrackerStatus.TRACKING:
             # Calculate the position tracking_delay seconds in the future
-            t = now + datetime.timedelta(seconds=self.tracking_delay)
+            t = now + timedelta(seconds=self.tracking_delay)
             pos = self.target.pos_at(t, accurate=self.high_accuracy)
             el, az, range, el_rate, az_rate, range_rate = pos.frame_latlon_and_rates(self.module.gs.pos)
             if self.high_accuracy:
                 el, az, _ = pos.altaz('standard')  # include effect from atmospheric refraction
 
             if self.module.debug:
-                m, s = divmod((next_pass.t_los - now).total_seconds(), 60)
+                m, s = divmod((self.los_at - now).total_seconds(), 60)
                 self.module.log.debug(f"LOS for {self.target.target_name} {self.rotators} in {m:.0f}min "
                                       f"{s:.0f}s, az={az.degrees:.1f} el={el.degrees:.1f} r={range.km:.1f} "
                                       f"azr={az_rate.degrees.per_second:.3f} elr={el_rate.degrees.per_second:.3f} "
-                                      f"rr={range_rate.m_per_s:.1f}")
+                                      f"rr={range_rate.m_per_s:.1f} acc={self.high_accuracy}")
 
             # Broadcast spacecraft position
             await self.module.broadcast_pointing(self.task_name, self.target, self.rotators,
@@ -407,7 +412,7 @@ class TargetTracker:
                                                  timestamp=t.timestamp())
 
             # Did LOS happen?
-            if now >= next_pass.t_los:
+            if now >= self.los_at:
                 await self.module.send_event("los", task_name=self.task_name, target=self.target,
                                              rotators=self.rotators)
                 self.status = TrackerStatus.LOS
