@@ -77,6 +77,7 @@ class RotatorController(abc.ABC):
         self.el_max = el_max
         self.debug = debug
         self.enforce_limits = True
+        self.current_motor_pos = (0.0, 0.0)
         self.current_position = (0.0, 0.0)
         self.current_pos_ts = 0.0
         self.target_position = (0.0, 0.0)
