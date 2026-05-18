@@ -94,6 +94,9 @@ class TLEServer(BaseModule):
                 "password": tle_cfg["space-track_credentials"]["password"],
             }
 
+        self.external_tle_cache_url = None
+        if "external-tle-cache" in tle_cfg:
+            self.external_tle_cache_url = tle_cfg["external_tle_cache_url"]
 
         # Create TLE updater task
         task = asyncio.get_event_loop().create_task(self.updater_task(), name="tle_server.updater_task")
@@ -155,13 +158,21 @@ class TLEServer(BaseModule):
                         tle = [row["tle1"], row["tle2"]]
 
                 if tle is None and norad_id is not None:
-                    tle, _ = await self.query_spacetrack(norad_id=norad_id)
-                    self.uncached_tles.append({
-                        "name": request_data["satellite"],
-                        "norad_id": norad_id,
-                        "tle1": tle[0],
-                        "tle2": tle[1],
-                    })
+                    if self.external_tle_cache_url is not None:
+                        tle = await self.query_external_tle_cache(norad_id=norad_id)
+                        self.log.info(f"Successfully fetched TLE for {norad_id} from external TLE cache"
+                                      if tle is not None else
+                                      f"Failed to fetch TLE for {norad_id} from external TLE cache, "
+                                      f"trying space-track.org next")
+                    if tle is None:
+                        tle, _ = await self.query_spacetrack(norad_id=norad_id)
+                    if tle is not None:
+                        self.uncached_tles.append({
+                            "name": request_data["satellite"],
+                            "norad_id": norad_id,
+                            "tle1": tle[0],
+                            "tle2": tle[1],
+                        })
 
                 if tle is not None:
                     return {
@@ -174,7 +185,8 @@ class TLEServer(BaseModule):
                 if norad_id is None:
                     raise RPCError("Could not find satellite '%s' in  %s" % (
                         request_data["satellite"], [t['name'] for t in self.tle_data]))
-                raise RPCError(f"Could not find satellite with NORAD ID {norad_id}")
+
+                raise RPCError(f"Could not find TLE for satellite with NORAD ID {norad_id}")
 
             # Return all TLE lines
             return {
@@ -208,37 +220,64 @@ class TLEServer(BaseModule):
             return None, auth_cookies
 
         if auth_cookies is None:
-            # Login to space-track.org
-            async with httpx.AsyncClient() as client:
-                r = await client.post("https://www.space-track.org/ajaxauth/login",
-                                      data=self.credentials,
-                                      timeout=5)
-            auth_cookies = r.cookies
+            try:
+                # Login to space-track.org
+                async with httpx.AsyncClient() as client:
+                    r = await client.post("https://www.space-track.org/ajaxauth/login",
+                                          data=self.credentials,
+                                          timeout=10)
+                auth_cookies = r.cookies
+            except (httpx.RequestError, httpx.ConnectTimeout) as e:
+                self.log.error(f"Login failed to space-track.org while attempting to query "
+                               f"TLE for NID={norad_id}: %r", e)
+                return None, None
 
         # Request latest TLE entry for given NORAD ID
-        URL = "https://www.space-track.org/basicspacedata/query/class/tle_latest/" \
-              "NORAD_CAT_ID/{id}/orderby/EPOCH%20desc/limit/1/format/tle"
+        url = "https://www.space-track.org/basicspacedata/query/class/gp/" \
+              "NORAD_CAT_ID/{id}/EPOCH/%3Enow-10/orderby/EPOCH%20desc/limit/1/format/tle"
 
         try:
             async with httpx.AsyncClient() as client:
-                r = await client.get(URL.format(id=norad_id),
-                                     cookies=auth_cookies, timeout=5)
-        except httpx.RequestError as e:
-            self.log.error("Failed to query TLE from space-track.org: %r", e)
+                r = await client.get(url.format(id=norad_id),
+                                     cookies=auth_cookies, timeout=10)
+        except (httpx.RequestError, httpx.ConnectTimeout) as e:
+            self.log.error(f"Failed to query TLE for NID={norad_id} from space-track.org: %r", e)
             return None, auth_cookies
 
         if r.status_code == 200:
             tle = r.text.split("\n")
         else:
-            self.log.error("space-track.org responded HTTP error %d: %r",
+            self.log.error(f"While querying TLE for NID={norad_id}, space-track.org responded with HTTP error %d: %r",
                            r.status_code, r.text)
             return None, auth_cookies
 
         if validate_tle(tle[0], tle[1]):
             return tle, auth_cookies
         else:
-            self.log.error("Could not validate TLE: %s" % (tle,)),
+            self.log.error(f"Could not validate TLE for NID={norad_id}: %s" % (tle,)),
             return None, auth_cookies
+
+    async def query_external_tle_cache(self, norad_id):
+        query_external_tle_cache_url + str(norad_id)
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(query_external_tle_cache_url, timeout=5)
+        except (httpx.RequestError, httpx.ConnectTimeout) as e:
+            self.log.error(f"Failed to query TLE for NID={norad_id} using {query_external_tle_cache_url}: %r", e)
+            return None
+
+        if r.status_code == 200:
+            tle = r.text.split("\n")
+        else:
+            self.log.error(f"While querying TLE for NID={norad_id}, {query_external_tle_cache_url} responded with"
+                           f" HTTP error %d: %r", r.status_code, r.text)
+            return None
+
+        if validate_tle(tle[0], tle[1]):
+            return tle
+        else:
+            self.log.error(f"Could not validate TLE for NID={norad_id}: %s" % (tle,)),
+            return None
 
     async def update_tles(self) -> None:
         """

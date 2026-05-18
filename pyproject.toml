@@ -41,7 +41,8 @@ dependencies = [
     "pyserial-asyncio",     # rotator serial interface
     "quaternion",           # rotator geometry model
     "pandas",               # scheduler hipparcos catalogue import
-    "prompt_toolkit"        # command line interface
+    "prompt_toolkit",       # command line interface
+    "tqdm"                  # progress bars
 ]
 
 [project.urls]

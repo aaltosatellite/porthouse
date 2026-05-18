@@ -4,13 +4,14 @@
 
 import asyncio
 from collections import OrderedDict
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Dict
 import yaml
+import json
 
 from datetime import datetime, timedelta, timezone
 
 from porthouse.core.config import cfg_path
-from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, bind, RPCRequestTimeout
+from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, bind, RPCRequestTimeout, RPCRequestError
 from porthouse.gs.scheduler.model import Schedule, TaskStatus, Process, Task
 from porthouse.gs.tracking.gnss_tracker import PointTracker
 from porthouse.gs.tracking.orbit_tracker import OrbitTracker
@@ -344,26 +345,31 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             except Exception as e:
                 self.log.error(f"Failed to write schedule file {file}: {e}", exc_info=True)
 
-    def add_task(self, task_dict, deny_main=True, mode='strict'):
+    async def add_ext_tasks(self, task_dicts: List[Dict], storage=Task.STORAGE_MISC, deny_main=True,
+                            mode='strict', apply_limits=True):
         """
         Add task to the schedule
         """
-        storage = task_dict.get("storage", Task.STORAGE_MISC)
-        task = Task.from_dict(task_dict, storage=storage)
-        if task.task_name in self.schedule.tasks:
-            raise SchedulerError(f"Task {task.task_name} already exists")
-        if task.process_name not in self.processes:
-            raise SchedulerError(f"Process referred to ({task.process_name}) in task {task.task_name} does not exist")
-        if deny_main and self.processes[task.process_name].storage == Process.STORAGE_MAIN:
-            raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, adding tasks to it "
-                                 f"through the API is currently not allowed.")
+        tasks = []
+        for task_dict in task_dicts:
+            task = Task.from_dict(task_dict, storage=storage)
+            if task.task_name in self.schedule.tasks:
+                raise SchedulerError(f"Task {task.task_name} already exists")
+            if task.process_name not in self.processes:
+                raise SchedulerError(f"Process referred to ({task.process_name}) in task {task.task_name} does not exist")
+            if deny_main and self.processes[task.process_name].storage == Process.STORAGE_MAIN:
+                raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, adding tasks to it "
+                                     f"through the API is currently not allowed.")
+            tasks.append(task)
 
-        with self.schedule_lock:
-            self.add_tasks(task, mode=mode)
+        async with self.schedule_lock:
+            count = self.add_tasks(tasks, mode=mode, apply_limits=apply_limits)
             self.write_schedule()
+
+        self.log.info(f"Added {count} of {len(tasks)} tasks")
         return True
 
-    def update_task(self, task_dict, deny_main=True, mode='strict'):
+    async def update_task(self, task_dict, deny_main=True, mode='strict'):
         """
         Update task in the schedule
         """
@@ -378,7 +384,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 or self.processes[task.process_name].storage == Process.STORAGE_MAIN):
             raise SchedulerError(f"Process {task.process_name} is a MAIN-storage process, changing tasks related "
                                  f"to it through the API is currently not allowed.")
-        with self.schedule_lock:
+        async with self.schedule_lock:
             old_task = self.schedule.tasks[task.task_name]
             if old_task.status not in (TaskStatus.NOT_SCHEDULED, TaskStatus.SCHEDULED):
                 raise SchedulerError(f"{task.task_name} is in status {task.status}. "
@@ -402,7 +408,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             task = self.schedule.tasks[task_name]
             cancel, tracker = task.status == TaskStatus.ONGOING, None
             if cancel:
-                tracker = self.processes[task.get_process_name()].tracker
+                tracker = task.get_task_data(self.processes[task.get_process_name()])["tracker"]
             self.schedule.remove(task)
             self.write_schedule()
             return task, cancel, tracker
@@ -444,6 +450,12 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         await self.publish(task.get_task_data(), exchange="scheduler", routing_key="task.end")
 
     def export_schedule(self, process_name=None, target=None, rotators=None, status=None, limit=None):
+        if not isinstance(status, (type(None), TaskStatus)):
+            try:
+                status = TaskStatus(int(status))
+            except ValueError:
+                status = TaskStatus[status]
+
         def filter_task(task):
             if process_name is not None and task.get_process_name() != process_name:
                 return False
@@ -503,7 +515,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                       f"{start_time.isoformat()} and {end_time.isoformat()}.")
         self._create_schedule_task = None
 
-    def add_tasks(self, tasks: Union[List['Task'], 'Task'], mode='strict'):
+    def add_tasks(self, tasks: Union[List['Task'], 'Task'], mode='strict', apply_limits=True):
         """
         Add tasks to the schedule
 
@@ -512,7 +524,12 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             mode: 'strict': Raise SchedulerError if new task overlaps with existing task (default)
                   'force':  Force adding tasks to the schedule even if they overlap with existing tasks,
                             shorten, split, or cancel existing tasks if necessary
-                  'procrustean': If True, force tasks to fit into the schedule
+                  'procrustean': Force tasks to fit into the schedule
+            apply_limits: Whether to apply process limits when adding tasks. If False, tasks are added to the schedule
+                          even if they violate process limits. This can be used if adding tasks that were created
+                          with limits already applied, this can happen with e.g. manually or externally created tasks.
+        Returns:
+            Number of tasks actually added to the schedule
         """
 
         if isinstance(tasks, Task):
@@ -526,20 +543,20 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
             if mode == 'strict':
                 try:
-                    added_count += self.schedule.add(task, apply_limits=True)
+                    added_count += self.schedule.add(task, apply_limits=apply_limits)
                 except ValueError:
                     raise SchedulerError("New task overlaps with existing task")
 
             elif mode == 'force':
-                added_count += self.make_room_in_schedule(task)
+                added_count += self.make_room_in_schedule(task, apply_limits=apply_limits)
 
             else:
                 assert mode == 'procrustean', f"Unknown mode: {mode}"
-                added_count += self.fit_to_schedule(task)
+                added_count += self.fit_to_schedule(task, apply_limits=apply_limits)
 
         return added_count
 
-    def make_room_in_schedule(self, new_task: 'Task'):
+    def make_room_in_schedule(self, new_task: 'Task', apply_limits=True):
         """
         Checks whether new task overlaps with already scheduled tasks, if yes,
         modifies those tasks so that new task fits into the schedule.
@@ -562,14 +579,15 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                     self.schedule.remove(sched_task)
 
             elif sched_task.is_encompassing(new_task):
-                subtasks = sched_task.split([(new_task.start_time, new_task.end_time)])
+                process = self.processes.get(sched_task.process_name, None)
+                subtasks = sched_task.split([(new_task.start_time, new_task.end_time)], process)
                 self.schedule.remove(sched_task)
                 for task in subtasks:
-                    self.schedule.add(task, apply_limits=True)
+                    self.schedule.add(task, apply_limits=apply_limits)
 
-        return self.schedule.add(new_task, apply_limits=True)
+        return self.schedule.add(new_task, apply_limits=apply_limits)
 
-    def fit_to_schedule(self, new_task: 'Task'):
+    def fit_to_schedule(self, new_task: 'Task', apply_limits=True):
         """
         Checks whether new task overlaps with already scheduled tasks, if yes,
         modifies the new task (trim, split, or discard) so that it fits into the schedule.
@@ -585,11 +603,12 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             if not sched_task.is_outside(new_task):
                 holes.append((sched_task.start_time, sched_task.end_time))
 
-        new_tasks = new_task.split(holes)
+        process = self.schedule.scheduler.processes.get(new_task.process_name, None)
+        new_tasks = new_task.split(holes, process)
 
         added_count = 0
         for new_task in new_tasks:
-            added_count += self.schedule.add(new_task, apply_limits=True)
+            added_count += self.schedule.add(new_task, apply_limits=apply_limits)
 
         return added_count
 
@@ -643,14 +662,17 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             #
             return self.export_schedule(**request_data)
 
-        elif request_name == "rpc.add_task":
+        elif request_name == "rpc.add_tasks":
             #
             # Add a new task. Request data must be a dict understood by the Task.from_dict constructor.
             # The process which the task refers to must be of storage type MISC.
             #
             deny_main = request_data.pop("deny_main", True)
             mode = request_data.pop("mode", "strict")
-            ok = self.add_task(request_data, deny_main=deny_main, mode=mode)
+            apply_limits = request_data.pop("apply_limits", True)
+            storage = request_data.get("storage", Task.STORAGE_MISC)
+            ok = await self.add_ext_tasks(request_data["tasks"], storage=storage, deny_main=deny_main,
+                                          mode=mode, apply_limits=apply_limits)
             return {"success": ok}
 
         elif request_name == "rpc.update_task":
@@ -660,7 +682,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             #
             deny_main = request_data.pop("deny_main", True)
             mode = request_data.pop("mode", "strict")
-            ok = self.update_task(request_data, deny_main=deny_main, mode=mode)
+            ok = await self.update_task(request_data, deny_main=deny_main, mode=mode)
             return {"success": ok}
 
         elif request_name == "rpc.remove_task":
@@ -690,7 +712,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
                 async with self.schedule_lock:
                     tbr = [task for task in self.schedule
-                           if task.status in affected_statuses and task.auto_scheduled
+                           if task.status in affected_statuses  # and task.auto_scheduled
                               and (start_time is None or task.start_time >= start_time)
                               and (end_time is None or task.end_time <= end_time)
                               and (process_name is None or task.process_name == process_name)]
@@ -795,18 +817,31 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
 
     async def _create_tasks_misc(self, process: 'Process', start_time: datetime, end_time: datetime):
         overlapping = self.schedule.get_overlapping(start_time, end_time, process.rotators)
-        holes = [(t.start_time, t.end_time) for t in overlapping]
+        holes = [(t.start_time.isoformat(), t.end_time.isoformat()) for t in overlapping]
         exchange, routing_key = process.tracker[len(Scheduler.MISC_TRACKER_PREFIX):].split(":")
 
-        # NOTE: these tasks override the process settings, such as tracker, target, etc.
-        tasks = await self.send_rpc_request(exchange, routing_key, {
-            "process": process.to_dict(),
-            "start_time": start_time,
-            "end_time": end_time,
-            "holes": holes,
-        }, timeout=30)
+        # NOTE: These tasks override the process settings, such as tracker, target, etc.
+        #       Also, if external schedule creation takes more than 10s, better return zero tasks now and later call
+        #       rpc.add_tasks with the created tasks
+        try:
+            tasks = await self.send_rpc_request(exchange, routing_key, {
+                "process": process.to_dict(),
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "holes": holes,
+            }, timeout=10)
+        except Exception as e:
+            self.log.error(
+                f"Failed to get tasks from external schedule creator for process {process.process_name}: {e}")
+            tasks = []
 
-        tasks = [Task.from_dict(task, storage=Task.STORAGE_MISC) for task in tasks]
+        try:
+            tasks = [Task.from_dict(task, storage=Task.STORAGE_MISC) for task in tasks]
+        except Exception as e:
+            self.log.error(f"Failed to parse tasks (raw: {tasks}) from external schedule creator for "
+                           f"process {process.process_name}: {e}")
+            tasks = []
+
         return tasks
 
     async def _create_tasks_fixed(self, process: 'Process', start_time: datetime, end_time: datetime):

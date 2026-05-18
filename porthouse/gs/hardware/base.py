@@ -22,6 +22,7 @@ PositionType = Tuple[float, float]
 
 class RotatorController(abc.ABC):
     address: str
+    current_motor_pos: PositionType
     current_position: PositionType
     current_pos_ts: float
     target_position: PositionType
@@ -263,6 +264,18 @@ class RotatorController(abc.ABC):
             `RotatorError` - in case the controller encountered an error.
         """
 
+    async def get_backlash(self) -> Tuple[float, float]:
+        pass
+
+    async def set_backlash(self, az_backlash: float = None, el_backlash: float = None) -> Tuple[float, float]:
+        pass
+
+    async def get_pid_coef(self, coef: str) -> Tuple[float, float]:
+        pass
+
+    async def set_pid_coef(self, coef: str, az_coef: float = None, el_coef: float = None) -> Tuple[float, float]:
+        pass
+
     async def preaos(self) -> None:
         pass
 
@@ -361,19 +374,20 @@ class RotatorController(abc.ABC):
 
         return sun_angle, sun_az, sun_el
 
-    def closest_valid_position(self, az: float, el: float) -> PositionType:
+    def closest_valid_position(self, az: float, el: float, margin: float = 1.0) -> PositionType:
         """
         Find the closest allowed position to the given position.
 
         Args:
             az: Azimuth angle
             el: Elevation angle
+            margin: Margin to move away from the closest invalid position
 
         Returns:
             Tuple of closest allowed azimuth and elevation angles
         """
         # TODO: come up with some more efficient algorithm to avoid the sun
-        # oaz, oel = az, el
+        oaz, oel = az, el
 
         # use horizon map if set to get the min elevation for the given azimuth
         el_min = self.az_dependent_min_el(az)
@@ -397,5 +411,6 @@ class RotatorController(abc.ABC):
                 # print(f"{oaz:.2f}, {oel:.2f} -> {az:.2f}, {el:.2f} -> sun_angle={sun_angle:.2f}")
                 az, el = self.closest_valid_position(az + (2 if az > sun_az else -2),
                                                      el + (2 if el > sun_el else -2))
-
+        az += np.sign(az - oaz) * margin
+        el += np.sign(el - oel) * margin
         return az, el

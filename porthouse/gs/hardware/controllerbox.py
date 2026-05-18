@@ -102,8 +102,8 @@ class ControllerBox(RotatorController):
         t0 = time.time()
         res = await self._rpc(b"P -s", True)
         self.current_pos_ts = (t0 + time.time()) / 2.0
-        motor_pos = self._parse_position_output(res)
-        self.current_position = self.rotator_model.to_real(*motor_pos)
+        self.current_motor_pos = self._parse_position_output(res)
+        self.current_position = self.rotator_model.to_real(*self.current_motor_pos)
         self.err_cnt = 0  # Reset error counter
 
         await self.maybe_enforce_limits()
@@ -142,7 +142,7 @@ class ControllerBox(RotatorController):
             else:
                 await self._rpc(f"M -a {maz:.2f}".encode("ascii"))
                 await self._rpc(f"M -e {mel:.2f}".encode("ascii"))
-            await self.get_position_target()
+            # await self.get_position_target()
 
     async def get_position_target(self, get_vel=False) -> PositionType | Tuple[PositionType, PositionType]:
         res = await self._rpc(b"M -s", True)
@@ -195,7 +195,7 @@ class ControllerBox(RotatorController):
 
     async def reset_position(self,
                        az: float,
-                       el: float) -> None:
+                       el: float) -> Tuple[float, float]:
 
         self.rotator_model.az_off = 0
         self.rotator_model.el_off = 0
@@ -208,7 +208,7 @@ class ControllerBox(RotatorController):
         self.target_position = (az, el)
 
         # update current_position, also move to valid position if currently invalid
-        await self.get_position()
+        return await self.get_position()
 
     async def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
         res = await self._rpc(b"D+ -s", True)
@@ -236,6 +236,38 @@ class ControllerBox(RotatorController):
 
         if el_duty_max is not None:
             await self._rpc(f"D+ -e {el_duty_max:.2f}".encode("ascii"))
+
+    async def get_backlash(self) -> Tuple[float, float]:
+        # Note that max backlash given to controller as half of the full dead zone as it is applied in both directions
+        assert self.control_sw_version >= 4, "Backlash parameters only supported in control software version 4 or higher"
+        res = await self._rpc(b"BL -s", True)
+        bl = ControllerBox._parse_position_output(res)
+        return float(bl[0]) * 2, float(bl[1]) * 2
+
+    async def set_backlash(self, az_backlash: float = None, el_backlash: float = None) -> Tuple[float, float]:
+        # Note that max backlash given to controller as half of the full dead zone as it is applied in both directions
+        assert self.control_sw_version >= 4, "Backlash parameters only supported in control software version 4 or higher"
+        if az_backlash is not None:
+            await self._rpc(f"BL -a {az_backlash/2:.3f}".encode("ascii"))
+        if el_backlash is not None:
+            await self._rpc(f"BL -e {el_backlash/2:.3f}".encode("ascii"))
+        return await self.get_backlash()
+
+    async def get_pid_coef(self, coef: str) -> Tuple[float, float]:
+        assert self.control_sw_version >= 3, "PID controller only supported in control software version 3 or higher"
+        assert coef in ("P", "I", "D"), "Coefficient must be one of P, I or D"
+        res = await self._rpc(f"G{coef} -s".encode("ascii"), True)
+        res = ControllerBox._parse_position_output(res)
+        return float(res[0]), float(res[1])
+
+    async def set_pid_coef(self, coef: str, az_coef: float = None, el_coef: float = None) -> Tuple[float, float]:
+        assert self.control_sw_version >= 3, "PID controller only supported in control software version 3 or higher"
+        assert coef in ("P", "I", "D"), "Coefficient must be one of P, I or D"
+        if az_coef is not None:
+            await self._rpc(f"G{coef} -a {az_coef:.3f}".encode("ascii"))
+        if el_coef is not None:
+            await self._rpc(f"G{coef} -e {el_coef:.3f}".encode("ascii"))
+        return await self.get_pid_coef(coef)
 
     async def preaos(self) -> None:
         self.epoch = time.time_ns()
@@ -387,7 +419,8 @@ class ControllerBox(RotatorController):
         try:
             str_output = output.decode("ascii").strip()
             parsed_output = str_output.split()
-            return float(parsed_output[1]), float(parsed_output[4])
+            n = len(parsed_output)
+            return float(parsed_output[1]), float(parsed_output[4 if n > 4 else 3])
 
         except Exception as e:
             raise ControllerBoxError(f"Failed to parse output format: {output}") from e

@@ -24,7 +24,15 @@ class SchedulerInterface:
         data = {k: v for k, v in locals().items() if k in ("process_name", "target", "rotators", "status", "limit")}
         schedule = await send_rpc_request("scheduler", "rpc.get_schedule", data)
         if verbose:
-            print(schedule)
+            keys = {"task_name": str,
+                    "start_time": lambda x: x[:19].replace("T", " "),
+                    "end_time": lambda x: x[:19].replace("T", " "),
+                    "rotators": lambda x: "+".join(x),
+                    "status": str}
+            titles = ["Task Name", "Start Time", "End Time", "Rotators", "Status"]
+            for tn, st, et, rots, stat in [titles] + [[f(v[k]) for k, f in keys.items()] for v in schedule]:
+                print(f"{tn:19s} | {st:19s} | {et:19s} | {rots:10s} | {stat:10s}")
+            return None
         else:
             return schedule
 
@@ -54,15 +62,20 @@ class SchedulerInterface:
         return res
 
     async def add_task(self, task_name, process_name, start_time, end_time, rotators, status="SCHEDULED",
-                       process_overrides=None, deny_main=False, mode="strict"):
+                       process_overrides=None, deny_main=False, mode="strict", storage=0, apply_limits=False):
         """
         Add a task to the schedule.
         """
         process_overrides = process_overrides or {}
-        data = {k: v for k, v in locals().items() if k in ("task_name", "process_name", "start_time", "end_time",
-                                                           "rotators", "status", "process_overrides", "deny_main",
-                                                           "mode")}
-        res = await send_rpc_request("scheduler", "rpc.add_task", data)
+        task_data = {k: v for k, v in locals().items() if k in ("task_name", "process_name", "start_time", "end_time",
+                                                                "rotators", "status", "process_overrides")}
+        res = await send_rpc_request("scheduler", "rpc.add_tasks", {
+            "mode": mode,
+            "deny_main": deny_main,
+            "storage": storage,
+            "apply_limits": apply_limits,
+            "tasks": [task_data],
+        }, timeout=5)
         return res
 
     async def remove_task(self, task_name, deny_main=False):

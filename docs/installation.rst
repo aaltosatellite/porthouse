@@ -12,6 +12,7 @@ Main Dependencies:
 - Main python dependencies:
     - aiormq
     - amqp
+    - argcomplete
     - httpx
     - numpy
     - quaternion
@@ -19,11 +20,13 @@ Main Dependencies:
     - prompt_toolkit
     - ptpython
     - pyserial
+    - pyserial-asyncio
     - pyYAML
     - pyzmq
     - requests
     - skyfield
     - sortedcontainers
+    - tqdm
 
 
 
