@@ -377,7 +377,9 @@ class ControllerBox(RotatorController):
 
             # Raise error if the line starts with "Error"
             if rsp.startswith(b"Error: "):
-                if b"position cannot be sensed" in rsp:
+                if (b"position cannot be sensed" in rsp
+                    or b"position changed in wrong direction" in rsp):
+
                     if self.log is not None:
                         self.log.warning(rsp[7:].decode("ascii").strip())
                     continue
