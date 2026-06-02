@@ -67,7 +67,7 @@ class Calibrator:
             sched = await SchedulerInterface.get_schedule(verbose=False)
             
             query_result = await self.check_schedule(sched)
-            if (query_result[0]) and (query_result[1] != last_ran_index:)
+            if (query_result[0]) and (query_result[1] != last_ran_index):
                 #don't run calibration multiple times in a row between the same 2 passes
                 last_ran_index = query_result[1]
                 self.log.debug("Calibration: Open window detected, starting automatic antenna calibration")
