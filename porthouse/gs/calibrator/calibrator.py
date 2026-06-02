@@ -27,6 +27,9 @@ class Calibrator:
         
         #sliding window for averaging last 5 measurements to counterract wind
         self.el_window = []
+        self.az_window = []
+        
+        self.window_length = 5
         
         #index of the last task after which the calibration was ran
         self.last_ran_index = 0
@@ -74,8 +77,8 @@ class Calibrator:
             
     
     async def get_data(self):
-        #gather 50 samples of data from the last 10 seconds
-        while len(self.el_window<50):
+        #gather 5 samples of data from the last 10 seconds
+        while len(self.el_window<self.window_length):
             try:
                 data, addr = sock.recvfrom(65536)
                 
@@ -83,8 +86,9 @@ class Calibrator:
                 parsed_data = json.loads(data.decode())
                 
                 self.el_window.append(parsed_data[app_el])
+                self.az_window.append(parsed_data[app_az])
                 
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(2)
                 
             except KeyboardInterrupt:
                 print("Keyboardinterrupt")
@@ -95,22 +99,51 @@ class Calibrator:
                 print(traceback.format_exc())
     
     async def calibrate(self):
-        # go to 90, 0 and calibrate that angle as 0
+        #go to 90, 0 and calibrate that angle as 0
         try:
             self.log.debug("Calibration: Pointing antenna to east...")
             await RotatorInterface.move(90,0,False)
-            asyncio.sleep(45) #sleep 45 secs to verify that the movement is done
+            moving = True
+            while moving: #Check if movement is done
+                asyncio.sleep(5)
+                status = RotatorInterface.status(verbose=False)
+                if round(status["az"]) == 90 && round(status["el"]) == 0:
+                    moving = False
+                else:
+                    self.log.debug("Calibration: Movement not finished yet...")
+            
             self.log.debug("Calibration: Gathering data...")
             await get_data() #gather data from antenna sensors
             
-            average_el = sum(self.el_window)/50 #get average from the 10 second window
+            average_el = sum(self.el_window)/self.window_length #get average from the 10 second window
             
-            self.log.debug("Calibration: calibrating...")
-            await RotatorInterface.reset(90,average_el)
+            self.log.debug("Calibration: calibrating elevation...")
+            await RotatorInterface.reset_position(90,average_el)
+            
+            #move back to 90,0 for azimuth calib
             await RotatorInterface.move(90,0,False)
-            await RotatorInterface.set_tracking(True) #go back to tracking afterwards
+            moving = True
+            while moving: 
+                asyncio.sleep(5)
+                status = RotatorInterface.status(verbose=False)
+                if round(status["az"]) == 90 && round(status["el"]) == 0:
+                    moving = False
+                else:
+                    self.log.debug("Calibration: Movement not finished yet...")
+            
+            
+            self.log.debug("Calibration: Gathering data...")
+            await get_data()
+            
+            average_az = sum(self.az_window)/self.window_length
+            
+            self.log.debug("Calibration: calibrating azimuth...")
+            await RotatorInterface.reset_position(average_az,0)
+            
             self.log.debug("Calibration completed successfully!")
+        except:
+            self.log.error("Calibration issue!")
         finally:
-            await RotatorInterface.set_tracking(True)
-            self.log.debug("Calibration issue")
+            self.log.debug("Enabling tracking...")
+            await RotatorInterface.set_tracking(True) #go back to tracking afterwards
         pass
