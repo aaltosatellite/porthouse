@@ -11,7 +11,6 @@ class SchedulerInterface:
         List all processes.
         """
         data = {k: v for k, v in locals().items() if k in ("process_name", "target", "rotators", "enabled", "limit")}
-        print(data)
         processes = await send_rpc_request("scheduler", "rpc.get_processes", data)
         if verbose:
             print(processes)
@@ -23,6 +22,7 @@ class SchedulerInterface:
         Get all scheduled tasks.
         """
         data = {k: v for k, v in locals().items() if k in ("process_name", "target", "rotators", "status", "limit")}
+        print(data)
         schedule = await send_rpc_request("scheduler", "rpc.get_schedule", data)
         if verbose:
             keys = {"task_name": str,
