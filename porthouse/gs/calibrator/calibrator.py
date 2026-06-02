@@ -45,7 +45,7 @@ class Calibrator:
         
         #get first task that is with the status "SCHEDULED"
         for task in sched:
-            if task["status"] = "SCHEDULED":
+            if task["status"] == "SCHEDULED":
                 next_task = task
                 previous_index = scheduled_index-1
                 prev_task = sched[previous_index]
