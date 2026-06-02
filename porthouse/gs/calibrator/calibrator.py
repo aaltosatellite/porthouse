@@ -1,6 +1,9 @@
-from porthouse.gs.scheduler.interface import SchedulerInterface
-from porthouse.gs.hardware.interface import RotatorInterface
+#from porthouse.gs.scheduler.interface import SchedulerInterface
+#from porthouse.gs.hardware.interface import RotatorInterface
 from porthouse.gs.tracking.utils import parse_time
+
+from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, queue, bind
+from porthouse.core.rpc_async import send_rpc_request
 
 from datetime import datetime, timedelta
 
@@ -15,10 +18,7 @@ SchedulerInterface.get_schedule()
 
 class Calibrator:
     """Antenna calibration"""
-    def __init__(self):
-        self.el_angle = 0
-        self.az_angle = 90
-        
+    def __init__(self):        
         #setup of multicast receiver socket for data
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.sock.bind(("",6969))
@@ -32,17 +32,25 @@ class Calibrator:
         self.window_length = 5
         
         #index of the last task after which the calibration was ran
-        self.last_ran_index = 0
+        self.last_ran_task = ""
         
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(self.calibrator_task(), name="calibrator.calibrator_task")
+        #loop = asyncio.get_event_loop()
+        #task = loop.create_task(self.calibrator_task(), name="calibrator.calibrator_task")
     
+    
+    
+    @queue()
+    #will automatically run this if there's a LOS event
+    @bind(exchange="event", routing_key="los")
     async def check_schedule(self, sched):
+        processes = await send_rpc_request("scheduler", "rpc.get_processes", data)
         previous_index = 0
         scheduled_index = 0
         prev_task = {}
         next_task = {}
         
+        #TODO check which rotator it is supposed to be
+        #TODO maybe just subscribe to task_end with some decorator
         #get first task that is with the status "SCHEDULED"
         for task in sched:
             if task["status"] == "SCHEDULED":
@@ -62,6 +70,12 @@ class Calibrator:
         return (False, -1)
                 
     
+    @rpc()
+    @bind(exchange="calibrator", routing_key="rpc.#", prefixed=True)
+    async def rpc_handler(self, request_name, request_data):
+        print("calibracion would do something here nprobably")
+    
+    
     async def calibrator_task(self):
         while True:
             sched = await SchedulerInterface.get_schedule(verbose=False)
@@ -75,7 +89,7 @@ class Calibrator:
                 await calibrate()
             else:
                 await asyncio.sleep(10)
-            
+    
     
     async def get_data(self):
         #gather 5 samples of data from the last 10 seconds
