@@ -15,14 +15,17 @@ import asyncio
 
 class Calibrator:
     """Antenna calibration"""
-    def __init__(self):
+    def __init__(self, 
+            calibration_enabled = False,
+            max_calibration_cycles = 15):
+        
         #setup of all basic module stuff
         BaseModule.__init__(self, **kwargs)
     
         #setup of multicast receiver socket for data
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.sock.bind(("",6969))
-        self.sock.settimeout(1.0)
+        self.sock.settimeout(2.0)
         self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, struct.pack("4sl", socket.inet_aton("224.0.0.1"), socket.INADDR_ANY))
         
         #sliding window for averaging last 5 measurements to counterract wind
@@ -30,7 +33,9 @@ class Calibrator:
         self.az_window = []
         
         self.window_length = 5
-        self.calibration_enabled = True
+        
+        self.max_calibration_cycles = max_calibration_cycles
+        self.calibration_enabled = calibration_enabled
         
         #index of the last task after which the calibration was ran (not needed as we use LOS events now so if there's no LOS event then no calibration occurs)
         #self.last_ran_task = "" 
@@ -45,7 +50,7 @@ class Calibrator:
     @rpc()
     @bind(exchange="calibrator", routing_key="rpc.#", prefixed=True)
     async def rpc_handler(self, request_name, request_data):
-         if request_name == "rpc.calibration":
+        if request_name == "rpc.calibration":
             """
                 Enable/disable calibration
             """
@@ -58,6 +63,17 @@ class Calibrator:
             
             self.calibration_enabled = enabled
             self.log.info("Automatic calibration is now "+ "enabled" if enabled else "disabled")
+        elif request_name = "rpc.cycle_count":
+            try:
+                cycle_count = request_data["cycle_count"]
+            except:
+                raise RPCError("Invalid or missing mode parameter 'cycle_count'")
+            
+            if cycle_count < 1:
+                raise RPCError("Cycle count must be higher than 0")
+            else:
+                self.max_calibration_cycles = cycle_count
+                
 
 
 
@@ -188,8 +204,8 @@ class Calibrator:
                     self.log.debug(f"Elevation offset: {el_offset}")
                     
                     #check how many cycles
-                    if cycle_count>15:
-                        self.log.error("15 calibration retries exceeded!")
+                    if cycle_count>self.max_calibration_cycles:
+                        self.log.error(f"{self.max_calibration_cycles} calibration retries exceeded!")
                         raise TimeoutError
 
                     #check that it's not already time for the next task:
