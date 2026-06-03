@@ -18,6 +18,6 @@ class CalibratorInterface:
         Args:
             enabled: If true automatic calibration is enabled.
         """
-        await send_rpc_request("calibrator", f"{self.prefix}.rpc.calibration", {
+        await send_rpc_request("calibrator", f"rpc.calibration", {
             "enabled": enabled
         })

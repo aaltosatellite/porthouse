@@ -1,5 +1,3 @@
-#from porthouse.gs.scheduler.interface import SchedulerInterface
-#from porthouse.gs.hardware.interface import RotatorInterface
 from porthouse.gs.tracking.utils import parse_time
 
 from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, queue, bind
@@ -14,11 +12,13 @@ import sys
 import traceback
 import asyncio
 
-SchedulerInterface.get_schedule()
 
 class Calibrator:
     """Antenna calibration"""
-    def __init__(self):        
+    def __init__(self):
+        #setup of all basic module stuff
+        BaseModule.__init__(self, **kwargs)
+    
         #setup of multicast receiver socket for data
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.sock.bind(("",6969))
@@ -30,72 +30,45 @@ class Calibrator:
         self.az_window = []
         
         self.window_length = 5
+        self.calibration_enabled = True
         
-        #index of the last task after which the calibration was ran
-        self.last_ran_task = ""
+        #index of the last task after which the calibration was ran (not needed as we use LOS events now so if there's no LOS event then no calibration occurs)
+        #self.last_ran_task = "" 
         
         #loop = asyncio.get_event_loop()
         #task = loop.create_task(self.calibrator_task(), name="calibrator.calibrator_task")
     
     
     
-    @queue()
-    #will automatically run this if there's a LOS event
-    @bind(exchange="event", routing_key="los")
-    async def check_schedule(self, sched):
-        processes = await send_rpc_request("scheduler", "rpc.get_processes", data)
-        previous_index = 0
-        scheduled_index = 0
-        prev_task = {}
-        next_task = {}
-        
-        #TODO check which rotator it is supposed to be
-        #TODO maybe just subscribe to task_end with some decorator
-        #get first task that is with the status "SCHEDULED"
-        for task in sched:
-            if task["status"] == "SCHEDULED":
-                next_task = task
-                previous_index = scheduled_index-1
-                prev_task = sched[previous_index]
-            else:
-                scheduled_index+=1
-        
-        #check if next task is more than 10 minutes away
-        next_starting = parse_time(next_task["start_time"]).utc_datetime()
-        if next_starting-datetime.utcnow() > timedelta(minutes=10):
-            #check that we are at least 5 mins away from last flyby
-            prev_ending = parse_time(prev_task["end_time"]).utc_datetime()
-            if datetime.utcnow()-prev_ending > timedelta(minutes=5):
-                return (True, previous_index)
-        return (False, -1)
-                
-    
+
+#-----------------------Command handling-----------------
     @rpc()
     @bind(exchange="calibrator", routing_key="rpc.#", prefixed=True)
     async def rpc_handler(self, request_name, request_data):
-        print("calibracion would do something here nprobably")
-    
-    
-    async def calibrator_task(self):
-        while True:
-            sched = await SchedulerInterface.get_schedule(verbose=False)
-            
-            query_result = await self.check_schedule(sched)
+         if request_name == "rpc.calibration":
+            """
+                Enable/disable calibration
+            """
 
-            if (query_result[0]) and (query_result[1] != last_ran_index):
-                #don't run calibration multiple times in a row between the same 2 passes
-                last_ran_index = query_result[1]
-                self.log.debug("Calibration: Open window detected, starting automatic antenna calibration")
-                await calibrate()
-            else:
-                await asyncio.sleep(10)
-    
-    
+            # Parse parameters
+            try:
+                enabled = request_data["enabled"]
+            except (KeyError, ValueError):
+                raise RPCError("Invalid or missing mode parameter 'enabled'")
+            
+            self.calibration_enabled = enabled
+            self.log.info("Automatic calibration is now "+ "enabled" if enabled else "disabled")
+
+
+
+
+
+#-----------------------Helper funcs---------------------
     async def get_data(self):
         #gather 5 samples of data from the last 10 seconds
         while len(self.el_window<self.window_length):
             try:
-                data, addr = sock.recvfrom(65536)
+                data, addr = self.sock.recvfrom(65536)
                 
                 #load JSON
                 parsed_data = json.loads(data.decode())
@@ -112,53 +85,135 @@ class Calibrator:
                 pass
             except:
                 print(traceback.format_exc())
-    
+
+
+
+    async def are_we_there_yet(self,az,el):
+        moving = True
+        while moving: 
+            asyncio.sleep(5)
+            status = await send_rpc_request("rotator", f"uhf.rpc.status")
+            if (round(status["az"])) == az and (round(status["el"]) == el):
+                moving = False
+            else:
+                self.log.debug("Calibration: Movement not finished yet...")
+
+
+
+
+#-----------------------Rotator logic--------------------------------
+    @queue()
+    #will automatically run this if there's a LOS event
+    @bind(exchange="event", routing_key="los")
+    async def check_schedule(self):
+        asyncio.sleep(5) #Wait for things to settle down
+        
+        if not self.calibration_enabled():
+            return
+        
+        next_task = []
+        data = {"process_name": None, "target": None, "rotators": ["uhf"], "status": None, "limit": None}
+        schedule = await send_rpc_request("scheduler", "rpc.get_schedule", data)
+        
+        
+        #get first task that is with the status "SCHEDULED"
+        for task in schedule:
+            if task["status"] == "ONGOING": #ongoing task, abort
+                return
+            if task["status"] == "SCHEDULED":
+                next_task = task
+        
+        
+        #check if next task is more than 10 minutes away
+        next_starting = parse_time(next_task["start_time"]).utc_datetime()
+        if next_starting-datetime.utcnow() > timedelta(minutes=10):
+            self.log.debug("Calibration: Open window detected, starting automatic antenna calibration")
+            await calibrate()
+
+
+
     async def calibrate(self):
         #go to 90, 0 and calibrate that angle as 0
         try:
-            self.log.debug("Calibration: Pointing antenna to east...")
-            await RotatorInterface.move(90,0,False)
-            moving = True
-            while moving: #Check if movement is done
-                asyncio.sleep(5)
-                status = RotatorInterface.status(verbose=False)
-                if (round(status["az"]) == 90) and (round(status["el"]) == 0):
-                    moving = False
+            calibrating = True
+            cycle_count = 0
+            while calibrating:
+                self.log.debug("Calibration: Pointing antenna to east...")
+                await send_rpc_request("rotator", f"uhf.rpc.rotate", {
+                    "az": 90, "el": 0, "shortest": False
+                })
+                await are_we_there_yet(90,0)
+                
+                
+                #-------------Elevation------------------
+                self.log.debug("Calibration: Gathering data...")
+                await get_data() #gather data from antenna sensors
+                
+                average_el = sum(self.el_window)/self.window_length #get average from the 10 second window
+                
+                self.log.debug("Calibration: calibrating elevation...")
+                await send_rpc_request("rotator", f"uhf.rpc.reset_position", {
+                    "az": 90, "el": average_el
+                }, timeout=5)
+                
+                #wait to move back to 90,0 for azimuth calib
+                await are_we_there_yet(90,0)
+                
+                
+                #-------------Azimuth-------------------
+                self.log.debug("Calibration: Gathering data...")
+                await get_data()
+                
+                average_az = sum(self.az_window)/self.window_length
+                
+                self.log.debug("Calibration: calibrating azimuth...")
+                await send_rpc_request("rotator", f"uhf.rpc.reset_position", {
+                    "az": average_az, "el": 0
+                }, timeout=5)
+                
+                await are_we_there_yet(90,0)
+                
+                
+                #-------------Verification--------------
+                await get_data()
+                
+                az_offset = abs(90-sum(self.az_window)/self.window_length)
+                el_offset = abs( 0-sum(self.el_window)/self.window_length)
+                cycle_count+=1
+                if az_offset < 2 and el_offset < 1):
+                   calibrating=False
                 else:
-                    self.log.debug("Calibration: Movement not finished yet...")
-            
-            self.log.debug("Calibration: Gathering data...")
-            await get_data() #gather data from antenna sensors
-            
-            average_el = sum(self.el_window)/self.window_length #get average from the 10 second window
-            
-            self.log.debug("Calibration: calibrating elevation...")
-            await RotatorInterface.reset_position(90,average_el)
-            
-            #move back to 90,0 for azimuth calib
-            await RotatorInterface.move(90,0,False)
-            moving = True
-            while moving: 
-                asyncio.sleep(5)
-                status = RotatorInterface.status(verbose=False)
-                if (round(status["az"])) == 90 and (round(status["el"]) == 0):
-                    moving = False
-                else:
-                    self.log.debug("Calibration: Movement not finished yet...")
-            
-            
-            self.log.debug("Calibration: Gathering data...")
-            await get_data()
-            
-            average_az = sum(self.az_window)/self.window_length
-            
-            self.log.debug("Calibration: calibrating azimuth...")
-            await RotatorInterface.reset_position(average_az,0)
-            
+                    self.log.debug("Calibration results not satisfactory:")
+                    self.log.debug(f"Azimuth offset:   {az_offset}")
+                    self.log.debug(f"Elevation offset: {el_offset}")
+                    
+                    #check how many cycles
+                    if cycle_count>15:
+                        self.log.error("15 calibration retries exceeded!")
+                        raise TimeoutError
+
+                    #check that it's not already time for the next task:
+                    data = {"process_name": None, "target": None, "rotators": ["uhf"], "status": None, "limit": None}
+                    schedule = await send_rpc_request("scheduler", "rpc.get_schedule", data)
+                    for task in schedule:
+                        if task["status"] == "ONGOING": #ongoing task!!!!!!!
+                            self.log.error("Next task already running!!!")
+                            raise TimeoutError
+                        if task["status"] == "SCHEDULED":
+                            next_starting = parse_time(next_task["start_time"]).utc_datetime()
+                            if next_starting-datetime.utcnow() <= timedelta(minutes=5):
+                                self.log.debug("Time until next task <= 5 minutes!")
+                                raise TimeoutError
+                    
+                    self.log.debug("Recalibrating...")
+                
             self.log.debug("Calibration completed successfully!")
         except:
             self.log.error("Calibration issue!")
         finally:
             self.log.debug("Enabling tracking...")
-            await RotatorInterface.set_tracking(True) #go back to tracking afterwards
+            #go back to tracking afterwards
+            await send_rpc_request("rotator", f"uhf.rpc.tracking", {
+                "mode": "automatic"
+            })
         pass
