@@ -5,8 +5,8 @@ class CalibratorInterface:
     Calibrator related commands
     """
 
-    def __init__(self, prefix):
-        self.prefix = prefix
+    def __init__(self):
+        pass
     
     async def set_enabled(
             self,
