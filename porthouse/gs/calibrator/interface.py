@@ -41,3 +41,12 @@ class CalibratorInterface:
         Manually run a calibration cycle
         """
         await send_rpc_request("calibrator", "rpc.calibrate")
+    
+    async def status(self,verbose=True):
+        """
+        Manually run a calibration cycle
+        """
+        status = await send_rpc_request("calibrator", "rpc.status")
+        if verbose:
+            print(status)
+        return status

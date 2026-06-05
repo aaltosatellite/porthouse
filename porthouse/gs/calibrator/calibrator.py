@@ -77,6 +77,10 @@ class Calibrator(BaseModule):
         elif request_name == "rpc.calibrate":
             self.log.info("Automatic calibration command issued, starting calibration")
             await self.calibrate()
+        elif request_name == "rpc.status":
+            return {
+                "enabled":self.calibration_enabled,
+                "max_calibration_cycles":self.max_calibration_cycles}
                 
 
 
@@ -112,7 +116,7 @@ class Calibrator(BaseModule):
         moving = True
         while moving: 
             asyncio.sleep(5)
-            status = await send_rpc_request("rotator", f"uhf.rpc.status")
+            status = await self.send_rpc_request("rotator", f"uhf.rpc.status")
             if (round(status["az"])) == az and (round(status["el"]) == el):
                 moving = False
             else:
@@ -133,7 +137,7 @@ class Calibrator(BaseModule):
         
         next_task = []
         data = {"process_name": None, "target": None, "rotators": ["uhf"], "status": None, "limit": None}
-        schedule = await send_rpc_request("scheduler", "rpc.get_schedule", data)
+        schedule = await self.send_rpc_request("scheduler", "rpc.get_schedule", data)
         
         
         #get first task that is with the status "SCHEDULED"
@@ -159,7 +163,7 @@ class Calibrator(BaseModule):
             cycle_count = 0
             while calibrating:
                 self.log.debug("Calibration: Pointing antenna to east...")
-                await send_rpc_request("rotator", f"uhf.rpc.rotate", {
+                await self.send_rpc_request("rotator", f"uhf.rpc.rotate", {
                     "az": 90, "el": 0, "shortest": False
                 })
                 await self.are_we_there_yet(90,0)
@@ -172,7 +176,7 @@ class Calibrator(BaseModule):
                 average_el = sum(self.el_window)/self.window_length #get average from the 10 second window
                 
                 self.log.debug("Calibration: calibrating elevation...")
-                await send_rpc_request("rotator", f"uhf.rpc.reset_position", {
+                await self.send_rpc_request("rotator", f"uhf.rpc.reset_position", {
                     "az": 90, "el": average_el
                 }, timeout=5)
                 
@@ -187,7 +191,7 @@ class Calibrator(BaseModule):
                 average_az = sum(self.az_window)/self.window_length
                 
                 self.log.debug("Calibration: calibrating azimuth...")
-                await send_rpc_request("rotator", f"uhf.rpc.reset_position", {
+                await self.send_rpc_request("rotator", f"uhf.rpc.reset_position", {
                     "az": average_az, "el": 0
                 }, timeout=5)
                 
@@ -214,7 +218,7 @@ class Calibrator(BaseModule):
 
                     #check that it's not already time for the next task:
                     data = {"process_name": None, "target": None, "rotators": ["uhf"], "status": None, "limit": None}
-                    schedule = await send_rpc_request("scheduler", "rpc.get_schedule", data)
+                    schedule = await self.send_rpc_request("scheduler", "rpc.get_schedule", data)
                     for task in schedule:
                         if task["status"] == "ONGOING": #ongoing task!!!!!!!
                             self.log.error("Next task already running!!!")
@@ -233,7 +237,7 @@ class Calibrator(BaseModule):
         finally:
             self.log.debug("Enabling tracking...")
             #go back to tracking afterwards
-            await send_rpc_request("rotator", f"uhf.rpc.tracking", {
+            await self.send_rpc_request("rotator", f"uhf.rpc.tracking", {
                 "mode": "automatic"
             })
         pass
