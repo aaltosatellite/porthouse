@@ -231,6 +231,7 @@ class Calibrator(BaseModule):
             self.log.debug("Calibration completed successfully!")
         except:
             self.log.error("Calibration issue!")
+            self.log.error(traceback.format_exc())
         finally:
             self.log.debug("Enabling tracking...")
             #go back to tracking afterwards
