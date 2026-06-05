@@ -100,8 +100,6 @@ class Calibrator(BaseModule):
                 self.el_window.append(parsed_data[app_el])
                 self.az_window.append(parsed_data[app_az])
                 
-                await asyncio.sleep(2)
-                
             except KeyboardInterrupt:
                 print("Keyboardinterrupt")
                 raise KeyboardInterrupt #Raising this so that the rest of the system can do what it wishes with it
@@ -116,9 +114,10 @@ class Calibrator(BaseModule):
         moving = True
         while moving: 
             asyncio.sleep(5)
-            status = await self.send_rpc_request("rotator", f"uhf.rpc.status")
+            status = await self.send_rpc_request("rotator", "uhf.rpc.status")
             if (round(status["az"])) == az and (round(status["el"]) == el):
                 moving = False
+                return
             else:
                 self.log.debug("Calibration: Movement not finished yet...")
 
