@@ -3,7 +3,7 @@ from porthouse.gs.tracking.utils import parse_time
 from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, queue, bind
 from porthouse.core.rpc_async import send_rpc_request
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import socket
 import json
@@ -91,6 +91,8 @@ class Calibrator(BaseModule):
     async def get_data(self):
         #gather 5 samples of data from the last 10 seconds
         start_time = datetime.utcnow()
+        self.el_window.clear()
+        self.az_window.clear()
         while len(self.el_window)<self.window_length:
             try:
                 #kill it if data acquisition takes too long
@@ -124,7 +126,7 @@ class Calibrator(BaseModule):
                 moving = False
                 return
             else:
-                self.log.debug("Calibration: Movement not finished yet...")
+                self.log.debug("Movement not finished yet...")
 
 
 
@@ -153,7 +155,7 @@ class Calibrator(BaseModule):
         #check if next task is more than 10 minutes away
         next_starting = parse_time(next_task["start_time"]).utc_datetime().replace(tzinfo=timezone.utc)
         if next_starting-datetime.utcnow() > timedelta(minutes=10):
-            self.log.info("Calibration: Open window detected, starting automatic antenna calibration")
+            self.log.info("Open window detected, starting automatic antenna calibration")
             await self.calibrate()
 
 
@@ -165,7 +167,7 @@ class Calibrator(BaseModule):
             calibrating = True
             cycle_count = 0
             while calibrating:
-                self.log.info("Calibration: Pointing antenna to east...")
+                self.log.info("Pointing antenna to east...")
                 await self.send_rpc_request("rotator", f"uhf.rpc.rotate", {
                     "az": 90, "el": 0, "shortest": False
                 })
@@ -173,12 +175,12 @@ class Calibrator(BaseModule):
                 
                 
                 #-------------Elevation------------------
-                self.log.info("Calibration: Gathering data...")
+                self.log.info("Gathering data...")
                 await self.get_data() #gather data from antenna sensors
                 
                 average_el = sum(self.el_window)/self.window_length #get average from the 10 second window
                 
-                self.log.info("Calibration: calibrating elevation...")
+                self.log.info("calibrating elevation...")
                 await self.send_rpc_request("rotator", f"uhf.rpc.reset_position", {
                     "az": 90, "el": average_el
                 }, timeout=5)
@@ -188,12 +190,12 @@ class Calibrator(BaseModule):
                 
                 
                 #-------------Azimuth-------------------
-                self.log.info("Calibration: Gathering data...")
+                self.log.info("Gathering data...")
                 await self.get_data()
                 
                 average_az = sum(self.az_window)/self.window_length
                 
-                self.log.info("Calibration: calibrating azimuth...")
+                self.log.info("calibrating azimuth...")
                 await self.send_rpc_request("rotator", f"uhf.rpc.reset_position", {
                     "az": average_az, "el": 0
                 }, timeout=5)
