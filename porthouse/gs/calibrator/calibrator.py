@@ -11,6 +11,7 @@ import struct
 import sys
 import traceback
 import asyncio
+import threading
 
 
 class Calibrator(BaseModule):
@@ -157,6 +158,10 @@ class Calibrator(BaseModule):
     @queue()
     #will automatically run this if there's a LOS event
     @bind(exchange="event", routing_key="los")
+    async def check_calibration(self):
+        thread = threading.Thread(target=check_schedule, daemon=True)
+        thread.start()
+    
     async def check_schedule(self):
         if not self.calibration_enabled():
             return
@@ -186,9 +191,11 @@ class Calibrator(BaseModule):
         #go to 90, 0 and calibrate that angle as 0
         self.log.info("Calibration starting")
         try:
-            calibrating = True
+            if self.calibrating:
+                return
+            self.calibrating = True
             cycle_count = 0
-            while calibrating:
+            while self.calibrating:
                 self.log.info("Pointing antenna to east...")
                 await self.send_rpc_request("rotator", f"uhf.rpc.rotate", {
                     "az": 90, "el": 0, "shortest": False
@@ -233,7 +240,7 @@ class Calibrator(BaseModule):
                 el_offset = abs( 0-sum(self.el_window)/self.window_length)
                 cycle_count+=1
                 if az_offset < 2 and el_offset < 1:
-                   calibrating=False
+                   self.calibrating=False
                 else:
                     self.log.info("Calibration results not satisfactory:")
                     self.log.info(f"Azimuth offset:   {az_offset}")
