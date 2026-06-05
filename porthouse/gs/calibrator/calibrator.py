@@ -90,7 +90,7 @@ class Calibrator(BaseModule):
 #-----------------------Helper funcs---------------------
     async def get_data(self):
         #gather 5 samples of data from the last 10 seconds
-        while len(self.el_window<self.window_length):
+        while len(self.el_window)<self.window_length:
             try:
                 data, addr = self.sock.recvfrom(65536)
                 
