@@ -209,7 +209,8 @@ class Calibrator(BaseModule):
                 
                 #-------------Verification--------------
                 await self.get_data()
-                
+                self.log.info(str(self.az_window))
+                self.log.info(str(self.el_window))
                 az_offset = abs(90-sum(self.az_window)/self.window_length)
                 el_offset = abs( 0-sum(self.el_window)/self.window_length)
                 cycle_count+=1
