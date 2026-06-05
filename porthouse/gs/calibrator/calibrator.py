@@ -90,16 +90,21 @@ class Calibrator(BaseModule):
 #-----------------------Helper funcs---------------------
     async def get_data(self):
         #gather 5 samples of data from the last 10 seconds
+        start_time = datetime.utcnow()
         while len(self.el_window)<self.window_length:
             try:
+                #kill it if data acquisition takes too long
+                if datetime.utcnow()-start_time > timedelta(seconds=60):
+                    return
                 data, addr = self.sock.recvfrom(65536)
                 
                 #load JSON
                 parsed_data = json.loads(data.decode())
                 
-                self.el_window.append(parsed_data[app_el])
-                self.az_window.append(parsed_data[app_az])
+                self.el_window.append(parsed_data["app_el"])
+                self.az_window.append(parsed_data["app_az"])
                 
+                await asyncio.sleep(2)
             except KeyboardInterrupt:
                 print("Keyboardinterrupt")
                 raise KeyboardInterrupt #Raising this so that the rest of the system can do what it wishes with it
