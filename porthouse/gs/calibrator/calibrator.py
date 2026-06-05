@@ -158,7 +158,7 @@ class Calibrator(BaseModule):
         
         #check if next task is more than 10 minutes away
         next_starting = parse_time(next_task["start_time"]).utc_datetime().replace(tzinfo=timezone.utc)
-        if next_starting-datetime.utcnow() > timedelta(minutes=10):
+        if next_starting-datetime.utcnow().replace(tzinfo=timezone.utc) > timedelta(minutes=10):
             self.log.info("Open window detected, starting automatic antenna calibration")
             await self.calibrate()
 
@@ -234,7 +234,7 @@ class Calibrator(BaseModule):
                             raise TimeoutError
                         if task["status"] == "SCHEDULED":
                             next_starting = parse_time(task["start_time"]).utc_datetime().replace(tzinfo=timezone.utc)
-                            if next_starting-datetime.utcnow() <= timedelta(minutes=5):
+                            if next_starting-datetime.utcnow().replace(tzinfo=timezone.utc) <= timedelta(minutes=5):
                                 self.log.info("Time until next task <= 5 minutes!")
                                 raise TimeoutError
                     
