@@ -22,12 +22,6 @@ class Calibrator(BaseModule):
         
         #setup of all basic module stuff
         super().__init__(**kwargs)
-    
-        #setup of multicast receiver socket for data
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        self.sock.bind(("",6969))
-        self.sock.settimeout(2.0)
-        self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, struct.pack("4sl", socket.inet_aton("224.0.0.1"), socket.INADDR_ANY))
         
         #sliding window for averaging last 5 measurements to counterract wind
         self.el_window = []
@@ -93,12 +87,22 @@ class Calibrator(BaseModule):
         start_time = datetime.utcnow()
         self.el_window.clear()
         self.az_window.clear()
+        
+        #setup of multicast receiver socket for data
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.bind(("",6969))
+        sock.settimeout(2.0)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, struct.pack("4sl", socket.inet_aton("224.0.0.1"), socket.INADDR_ANY))
+        
         while len(self.el_window)<self.window_length:
             try:
                 #kill it if data acquisition takes too long
                 if datetime.utcnow()-start_time > timedelta(seconds=60):
                     return
-                data, addr = self.sock.recvfrom(65536)
+                    
+                
+                
+                data, addr = sock.recvfrom(65536)
                 
                 #load JSON
                 parsed_data = json.loads(data.decode())
@@ -109,12 +113,13 @@ class Calibrator(BaseModule):
                 await asyncio.sleep(2)
             except KeyboardInterrupt:
                 print("Keyboardinterrupt")
+                sock.close()
                 raise KeyboardInterrupt #Raising this so that the rest of the system can do what it wishes with it
             except TimeoutError:
                 pass
             except:
                 print(traceback.format_exc())
-
+        sock.close()
 
 
     async def are_we_there_yet(self,az,el):
