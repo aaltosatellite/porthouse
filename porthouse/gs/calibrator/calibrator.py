@@ -92,7 +92,7 @@ class Calibrator(BaseModule):
         #setup of multicast receiver socket for data
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.bind(("",6969))
-        sock.settimeout(0.01)
+        sock.settimeout(0.5)
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, struct.pack("4sl", socket.inet_aton("224.0.0.1"), socket.INADDR_ANY))
         
         #flush the buffer as it seems ot get filled
