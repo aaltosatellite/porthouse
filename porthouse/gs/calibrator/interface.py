@@ -10,7 +10,7 @@ class CalibratorInterface:
     
     async def set_enabled(
             self,
-            enabled: bool=True1
+            enabled: bool=True
         ):
         """
         Enable/disable automatic calibration.
