@@ -199,7 +199,7 @@ class Calibrator:
                 az_offset = abs(90-sum(self.az_window)/self.window_length)
                 el_offset = abs( 0-sum(self.el_window)/self.window_length)
                 cycle_count+=1
-                if az_offset < 2 and el_offset < 1):
+                if az_offset < 2 and el_offset < 1:
                    calibrating=False
                 else:
                     self.log.debug("Calibration results not satisfactory:")
