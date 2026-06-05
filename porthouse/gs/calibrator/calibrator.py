@@ -129,8 +129,6 @@ class Calibrator(BaseModule):
     #will automatically run this if there's a LOS event
     @bind(exchange="event", routing_key="los")
     async def check_schedule(self):
-        await asyncio.sleep(5) #Wait for things to settle down
-        
         if not self.calibration_enabled():
             return
         

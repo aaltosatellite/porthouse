@@ -40,7 +40,7 @@ class CalibratorInterface:
         """
         Manually run a calibration cycle
         """
-        await send_rpc_request("calibrator", "rpc.calibrate")
+        await send_rpc_request("calibrator", "rpc.calibrate",timeout=1800)
     
     async def status(self):
         """
