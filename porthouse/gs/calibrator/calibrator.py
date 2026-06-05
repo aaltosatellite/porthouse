@@ -17,7 +17,8 @@ class Calibrator:
     """Antenna calibration"""
     def __init__(self, 
             calibration_enabled = False,
-            max_calibration_cycles = 15):
+            max_calibration_cycles = 15,
+            **kwargs):
         
         #setup of all basic module stuff
         BaseModule.__init__(self, **kwargs)
