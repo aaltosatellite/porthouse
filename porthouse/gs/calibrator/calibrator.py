@@ -21,7 +21,7 @@ class Calibrator:
             **kwargs):
         
         #setup of all basic module stuff
-        BaseModule.__init__(self, **kwargs)
+        super().__init__(**kwargs)
     
         #setup of multicast receiver socket for data
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
