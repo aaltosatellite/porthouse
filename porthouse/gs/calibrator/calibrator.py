@@ -122,7 +122,7 @@ class Calibrator(BaseModule):
         while moving: 
             await asyncio.sleep(5)
             status = await self.send_rpc_request("rotator", "uhf.rpc.status")
-            if (round(status["az"])) == az and (round(status["el"]) == el):
+            if ((abs(status["az"])-az) < 1) and ((abs(status["el"]-el)) < 1):
                 moving = False
                 return
             else:
