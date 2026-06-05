@@ -76,7 +76,7 @@ class Calibrator(BaseModule):
                 self.max_calibration_cycles = cycle_count
         elif request_name == "rpc.calibrate":
             self.log.info("Automatic calibration command issued, starting calibration")
-            await calibrate()
+            await self.calibrate()
                 
 
 
@@ -148,7 +148,7 @@ class Calibrator(BaseModule):
         next_starting = parse_time(next_task["start_time"]).utc_datetime()
         if next_starting-datetime.utcnow() > timedelta(minutes=10):
             self.log.debug("Calibration: Open window detected, starting automatic antenna calibration")
-            await calibrate()
+            await self.calibrate()
 
 
 
@@ -162,12 +162,12 @@ class Calibrator(BaseModule):
                 await send_rpc_request("rotator", f"uhf.rpc.rotate", {
                     "az": 90, "el": 0, "shortest": False
                 })
-                await are_we_there_yet(90,0)
+                await self.are_we_there_yet(90,0)
                 
                 
                 #-------------Elevation------------------
                 self.log.debug("Calibration: Gathering data...")
-                await get_data() #gather data from antenna sensors
+                await self.get_data() #gather data from antenna sensors
                 
                 average_el = sum(self.el_window)/self.window_length #get average from the 10 second window
                 
@@ -177,12 +177,12 @@ class Calibrator(BaseModule):
                 }, timeout=5)
                 
                 #wait to move back to 90,0 for azimuth calib
-                await are_we_there_yet(90,0)
+                await self.are_we_there_yet(90,0)
                 
                 
                 #-------------Azimuth-------------------
                 self.log.debug("Calibration: Gathering data...")
-                await get_data()
+                await self.get_data()
                 
                 average_az = sum(self.az_window)/self.window_length
                 
@@ -191,11 +191,11 @@ class Calibrator(BaseModule):
                     "az": average_az, "el": 0
                 }, timeout=5)
                 
-                await are_we_there_yet(90,0)
+                await self.are_we_there_yet(90,0)
                 
                 
                 #-------------Verification--------------
-                await get_data()
+                await self.get_data()
                 
                 az_offset = abs(90-sum(self.az_window)/self.window_length)
                 el_offset = abs( 0-sum(self.el_window)/self.window_length)
