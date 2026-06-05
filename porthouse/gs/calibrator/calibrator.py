@@ -127,6 +127,10 @@ class Calibrator(BaseModule):
                 return
             else:
                 self.log.debug("Movement not finished yet...")
+                # for some reason the rotation sometimes just stops for no reason
+                await self.send_rpc_request("rotator", f"uhf.rpc.rotate", {
+                    "az": az, "el": el, "shortest": False
+                })
 
 
 
