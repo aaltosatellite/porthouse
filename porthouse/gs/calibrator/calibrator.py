@@ -153,19 +153,19 @@ class Calibrator(BaseModule):
         #check if next task is more than 10 minutes away
         next_starting = parse_time(next_task["start_time"]).utc_datetime().replace(tzinfo=timezone.utc)
         if next_starting-datetime.utcnow() > timedelta(minutes=10):
-            self.log.debug("Calibration: Open window detected, starting automatic antenna calibration")
+            self.log.info("Calibration: Open window detected, starting automatic antenna calibration")
             await self.calibrate()
 
 
 
     async def calibrate(self):
         #go to 90, 0 and calibrate that angle as 0
-        self.log.debug("Calibration starting")
+        self.log.info("Calibration starting")
         try:
             calibrating = True
             cycle_count = 0
             while calibrating:
-                self.log.debug("Calibration: Pointing antenna to east...")
+                self.log.info("Calibration: Pointing antenna to east...")
                 await self.send_rpc_request("rotator", f"uhf.rpc.rotate", {
                     "az": 90, "el": 0, "shortest": False
                 })
@@ -173,12 +173,12 @@ class Calibrator(BaseModule):
                 
                 
                 #-------------Elevation------------------
-                self.log.debug("Calibration: Gathering data...")
+                self.log.info("Calibration: Gathering data...")
                 await self.get_data() #gather data from antenna sensors
                 
                 average_el = sum(self.el_window)/self.window_length #get average from the 10 second window
                 
-                self.log.debug("Calibration: calibrating elevation...")
+                self.log.info("Calibration: calibrating elevation...")
                 await self.send_rpc_request("rotator", f"uhf.rpc.reset_position", {
                     "az": 90, "el": average_el
                 }, timeout=5)
@@ -188,12 +188,12 @@ class Calibrator(BaseModule):
                 
                 
                 #-------------Azimuth-------------------
-                self.log.debug("Calibration: Gathering data...")
+                self.log.info("Calibration: Gathering data...")
                 await self.get_data()
                 
                 average_az = sum(self.az_window)/self.window_length
                 
-                self.log.debug("Calibration: calibrating azimuth...")
+                self.log.info("Calibration: calibrating azimuth...")
                 await self.send_rpc_request("rotator", f"uhf.rpc.reset_position", {
                     "az": average_az, "el": 0
                 }, timeout=5)
@@ -210,9 +210,9 @@ class Calibrator(BaseModule):
                 if az_offset < 2 and el_offset < 1:
                    calibrating=False
                 else:
-                    self.log.debug("Calibration results not satisfactory:")
-                    self.log.debug(f"Azimuth offset:   {az_offset}")
-                    self.log.debug(f"Elevation offset: {el_offset}")
+                    self.log.info("Calibration results not satisfactory:")
+                    self.log.info(f"Azimuth offset:   {az_offset}")
+                    self.log.info(f"Elevation offset: {el_offset}")
                     
                     #check how many cycles
                     if cycle_count>self.max_calibration_cycles:
@@ -229,17 +229,17 @@ class Calibrator(BaseModule):
                         if task["status"] == "SCHEDULED":
                             next_starting = parse_time(task["start_time"]).utc_datetime().replace(tzinfo=timezone.utc)
                             if next_starting-datetime.utcnow() <= timedelta(minutes=5):
-                                self.log.debug("Time until next task <= 5 minutes!")
+                                self.log.info("Time until next task <= 5 minutes!")
                                 raise TimeoutError
                     
-                    self.log.debug("Recalibrating...")
+                    self.log.info("Recalibrating...")
                 
-            self.log.debug("Calibration completed successfully!")
+            self.log.info("Calibration completed successfully!")
         except:
             self.log.error("Calibration issue!")
             self.log.error(traceback.format_exc())
         finally:
-            self.log.debug("Enabling tracking...")
+            self.log.info("Enabling tracking...")
             #go back to tracking afterwards
             await self.send_rpc_request("rotator", f"uhf.rpc.tracking", {
                 "mode": "automatic"
