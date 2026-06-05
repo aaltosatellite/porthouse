@@ -30,6 +30,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         Initialization
         """
+        super().__init__(**kwargs)
 
         self.main_processes_file = main_processes_file
         self.misc_processes_file = misc_processes_file
