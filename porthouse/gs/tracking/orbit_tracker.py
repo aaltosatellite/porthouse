@@ -29,6 +29,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         """
         Initialize module.
         """
+        print(kwargs)
         super().__init__(**kwargs)
 
         self.tracking_interval = tracking_interval

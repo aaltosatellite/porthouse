@@ -21,6 +21,7 @@ class Calibrator:
             **kwargs):
         
         #setup of all basic module stuff
+        print(kwargs)
         super().__init__(**kwargs)
     
         #setup of multicast receiver socket for data
