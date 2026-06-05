@@ -113,7 +113,7 @@ class Calibrator(BaseModule):
     async def are_we_there_yet(self,az,el):
         moving = True
         while moving: 
-            asyncio.sleep(5)
+            await asyncio.sleep(5)
             status = await self.send_rpc_request("rotator", "uhf.rpc.status")
             if (round(status["az"])) == az and (round(status["el"]) == el):
                 moving = False
@@ -129,7 +129,7 @@ class Calibrator(BaseModule):
     #will automatically run this if there's a LOS event
     @bind(exchange="event", routing_key="los")
     async def check_schedule(self):
-        asyncio.sleep(5) #Wait for things to settle down
+        await asyncio.sleep(5) #Wait for things to settle down
         
         if not self.calibration_enabled():
             return
