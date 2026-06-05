@@ -13,7 +13,7 @@ import traceback
 import asyncio
 
 
-class Calibrator:
+class Calibrator(BaseModule):
     """Antenna calibration"""
     def __init__(self, 
             calibration_enabled = False,
@@ -21,7 +21,7 @@ class Calibrator:
             **kwargs):
         
         #setup of all basic module stuff
-        print(kwargs)
+        super().__init__(**kwargs)
     
         #setup of multicast receiver socket for data
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
