@@ -63,7 +63,7 @@ class Calibrator(BaseModule):
                 raise RPCError("Invalid or missing mode parameter 'enabled'")
             
             self.calibration_enabled = enabled
-            self.log.info("Automatic calibration is now "+ "enabled" if enabled else "disabled")
+            self.log.info("Automatic calibration is now "+ ("enabled" if enabled else "disabled"))
         elif request_name == "rpc.cycle_count":
             try:
                 cycle_count = request_data["cycle_count"]
@@ -151,7 +151,7 @@ class Calibrator(BaseModule):
         
         
         #check if next task is more than 10 minutes away
-        next_starting = parse_time(next_task["start_time"]).utc_datetime()
+        next_starting = parse_time(next_task["start_time"]).utc_datetime().replace(tzinfo=timezone.utc)
         if next_starting-datetime.utcnow() > timedelta(minutes=10):
             self.log.debug("Calibration: Open window detected, starting automatic antenna calibration")
             await self.calibrate()
@@ -160,6 +160,7 @@ class Calibrator(BaseModule):
 
     async def calibrate(self):
         #go to 90, 0 and calibrate that angle as 0
+        self.log.debug("Calibration starting")
         try:
             calibrating = True
             cycle_count = 0
@@ -226,7 +227,7 @@ class Calibrator(BaseModule):
                             self.log.error("Next task already running!!!")
                             raise TimeoutError
                         if task["status"] == "SCHEDULED":
-                            next_starting = parse_time(task["start_time"]).utc_datetime()
+                            next_starting = parse_time(task["start_time"]).utc_datetime().replace(tzinfo=timezone.utc)
                             if next_starting-datetime.utcnow() <= timedelta(minutes=5):
                                 self.log.debug("Time until next task <= 5 minutes!")
                                 raise TimeoutError
