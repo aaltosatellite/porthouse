@@ -95,11 +95,14 @@ class Calibrator(BaseModule):
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, struct.pack("4sl", socket.inet_aton("224.0.0.1"), socket.INADDR_ANY))
         
         #flush the buffer as it seems ot get filled
-        while True:
-            try:
-                sock.recvfrom(65536)
-            except:
-                break
+        sock.setblocking(False)
+        try:
+            while True:
+                data, addr = sock.recvfrom(65536)
+        except BlockingIOError:
+            pass
+        finally:
+            sock.setblocking(True)
         
         sock.settimeout(2)
         while len(self.el_window)<self.window_length:
