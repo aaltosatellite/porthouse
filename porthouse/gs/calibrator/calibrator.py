@@ -226,7 +226,7 @@ class Calibrator(BaseModule):
                             self.log.error("Next task already running!!!")
                             raise TimeoutError
                         if task["status"] == "SCHEDULED":
-                            next_starting = parse_time(next_task["start_time"]).utc_datetime()
+                            next_starting = parse_time(task["start_time"]).utc_datetime()
                             if next_starting-datetime.utcnow() <= timedelta(minutes=5):
                                 self.log.debug("Time until next task <= 5 minutes!")
                                 raise TimeoutError
