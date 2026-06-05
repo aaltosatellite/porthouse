@@ -63,7 +63,7 @@ class Calibrator:
             
             self.calibration_enabled = enabled
             self.log.info("Automatic calibration is now "+ "enabled" if enabled else "disabled")
-        elif request_name = "rpc.cycle_count":
+        elif request_name == "rpc.cycle_count":
             try:
                 cycle_count = request_data["cycle_count"]
             except:
@@ -73,6 +73,9 @@ class Calibrator:
                 raise RPCError("Cycle count must be higher than 0")
             else:
                 self.max_calibration_cycles = cycle_count
+        elif request_name == "rpc.calibrate":
+            self.log.info("Automatic calibration command issued, starting calibration")
+            await calibrate()
                 
 
 

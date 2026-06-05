@@ -10,7 +10,7 @@ class CalibratorInterface:
     
     async def set_enabled(
             self,
-            enabled: bool=True
+            enabled: bool=True1
         ):
         """
         Enable/disable automatic calibration.
@@ -35,3 +35,9 @@ class CalibratorInterface:
         await send_rpc_request("calibrator", "rpc.cycle_count", {
             "cycle_count": cycle_count
         })
+    
+    async def calibrate(self):
+        """
+        Manually run a calibration cycle
+        """
+        await send_rpc_request("calibrator", "rpc.calibrate")
