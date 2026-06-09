@@ -95,8 +95,11 @@ class TLEServer(BaseModule):
             }
 
         self.external_tle_cache_url = None
-        if "external-tle-cache" in tle_cfg:
+        if "external_tle_cache_url" in tle_cfg:
             self.external_tle_cache_url = tle_cfg["external_tle_cache_url"]
+            self.log.info(f"Using external cache at: {self.external_tle_cache_url}")
+        else:
+            self.log.warning(f"No external cache found in config file {self.config_file}")
 
         # Create TLE updater task
         task = asyncio.get_event_loop().create_task(self.updater_task(), name="tle_server.updater_task")
@@ -258,18 +261,18 @@ class TLEServer(BaseModule):
             return None, auth_cookies
 
     async def query_external_tle_cache(self, norad_id):
-        query_external_tle_cache_url + str(norad_id)
+        query_url = self.external_tle_cache_url + str(norad_id)
         try:
             async with httpx.AsyncClient() as client:
-                r = await client.get(query_external_tle_cache_url, timeout=5)
+                r = await client.get(query_url, timeout=5)
         except (httpx.RequestError, httpx.ConnectTimeout) as e:
-            self.log.error(f"Failed to query TLE for NID={norad_id} using {query_external_tle_cache_url}: %r", e)
+            self.log.error(f"Failed to query TLE for NID={norad_id} using {query_url}: %r", e)
             return None
 
         if r.status_code == 200:
             tle = r.text.split("\n")
         else:
-            self.log.error(f"While querying TLE for NID={norad_id}, {query_external_tle_cache_url} responded with"
+            self.log.error(f"While querying TLE for NID={norad_id}, {query_url} responded with"
                            f" HTTP error %d: %r", r.status_code, r.text)
             return None
 
@@ -359,11 +362,18 @@ class TLEServer(BaseModule):
                         new_tle[satellite.get("name")] = entry
 
                 elif source == "space-track":
-                    #
-                    # Space-track
-                    #
-                    tle, auth_cookies = await self.query_spacetrack(norad_id=satellite["norad_id"],
-                                                                    auth_cookies=auth_cookies)
+                    tle, norad_id = None, satellite["norad_id"]
+                    if self.external_tle_cache_url is not None:
+                        tle = await self.query_external_tle_cache(norad_id=norad_id)
+                        self.log.info(f"Successfully fetched TLE for {norad_id} from external TLE cache"
+                                      if tle is not None else
+                                      f"Failed to fetch TLE for {norad_id} from external TLE cache, "
+                                      f"trying space-track.org next")
+                    
+                    if tle is None:
+                        # Space-track
+                        tle, auth_cookies = await self.query_spacetrack(norad_id=norad_id,
+                                                                        auth_cookies=auth_cookies)
                     if tle is None:
                         continue
 
