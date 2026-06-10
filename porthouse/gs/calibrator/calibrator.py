@@ -33,6 +33,8 @@ class Calibrator(BaseModule):
         self.max_calibration_cycles = max_calibration_cycles
         self.calibration_enabled = calibration_enabled
         
+        self.calibrating = False
+        
         #index of the last task after which the calibration was ran (not needed as we use LOS events now so if there's no LOS event then no calibration occurs)
         #self.last_ran_task = "" 
         
@@ -159,7 +161,7 @@ class Calibrator(BaseModule):
     #will automatically run this if there's a LOS event
     @bind(exchange="event", routing_key="los")
     async def check_calibration(self):
-        thread = threading.Thread(target=check_schedule, daemon=True)
+        thread = threading.Thread(target=self.check_schedule, daemon=True)
         thread.start()
     
     async def check_schedule(self):
