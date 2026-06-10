@@ -41,6 +41,12 @@ class CalibratorInterface:
         Manually run a calibration cycle
         """
         await send_rpc_request("calibrator", "rpc.calibrate",timeout=1800)
+        
+    async def reset_calibration_flag(self):
+        """
+        Manually reset the calibrating flag if that seems to be stuck and calibration isn't running
+        """
+        await send_rpc_request("calibrator", "rpc.reset_flag")
     
     async def status(self):
         """

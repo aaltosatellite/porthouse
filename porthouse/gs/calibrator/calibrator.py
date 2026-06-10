@@ -74,6 +74,9 @@ class Calibrator(BaseModule):
         elif request_name == "rpc.calibrate":
             self.log.info("Automatic calibration command issued, starting calibration")
             await self.calibrate()
+        elif request_name == "rpc.reset_flag":
+            self.calibrating = False
+            self.log.info("Calibration flag has now been reset!")
         elif request_name == "rpc.status":
             return {
                 "enabled":self.calibration_enabled,
@@ -161,8 +164,11 @@ class Calibrator(BaseModule):
     #will automatically run this if there's a LOS event
     @bind(exchange="event", routing_key="los")
     async def check_calibration(self):
+        self.log.info("Starting automatic calibration...")
         thread = threading.Thread(target=self.check_schedule, daemon=True)
         thread.start()
+        self.log.info("Thread started!")
+        return
     
     async def check_schedule(self):
         if not self.calibration_enabled():
@@ -194,6 +200,7 @@ class Calibrator(BaseModule):
         self.log.info("Calibration starting")
         try:
             if self.calibrating:
+                self.log.error("Calibration flag is set to True, is calibration already running?")
                 return
             self.calibrating = True
             cycle_count = 0
