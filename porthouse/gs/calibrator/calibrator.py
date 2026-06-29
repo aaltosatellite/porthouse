@@ -33,13 +33,15 @@ class Calibrator(BaseModule):
         self.max_calibration_cycles = max_calibration_cycles
         self.calibration_enabled = calibration_enabled
         
-        self.calibrating = False
+        
+        self.calibrating = False #So you don't run multiple calibrations at once
+        self.need_calibration = False #For the calibrator_task to poll to start calibration so we don't get a weird timeout on LOS events
         
         #index of the last task after which the calibration was ran (not needed as we use LOS events now so if there's no LOS event then no calibration occurs)
         #self.last_ran_task = "" 
         
-        #loop = asyncio.get_event_loop()
-        #task = loop.create_task(self.calibrator_task(), name="calibrator.calibrator_task")
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(self.calibrator_task(), name="calibrator.calibrator_task")
     
     
     
@@ -163,12 +165,17 @@ class Calibrator(BaseModule):
     @queue()
     #will automatically run this if there's a LOS event
     @bind(exchange="event", routing_key="los")
-    async def check_calibration(self):
-        self.log.info("Starting automatic calibration...")
-        thread = threading.Thread(target=self.check_schedule, daemon=True)
-        thread.start()
-        self.log.info("Thread started!")
+    async def start_calibration(self):
+        self.log.info("Enabling need_calibration flag!")
+        self.need_calibration = True
         return
+    
+    async def calibrator_task(self):
+        if need_calibration:
+            self.log.info("need_calibration flag detected, checking schedule...")
+            self.need_calibration = False
+            await self.check_schedule()
+        await asyncio.sleep(5)
     
     async def check_schedule(self):
         if not self.calibration_enabled():
@@ -243,8 +250,8 @@ class Calibrator(BaseModule):
                 
                 #-------------Verification--------------
                 await self.get_data()
-                self.log.info(str(self.az_window))
-                self.log.info(str(self.el_window))
+                self.log.debug(str(self.az_window))
+                self.log.debug(str(self.el_window))
                 az_offset = abs(90-sum(self.az_window)/self.window_length)
                 el_offset = abs( 0-sum(self.el_window)/self.window_length)
                 cycle_count+=1
