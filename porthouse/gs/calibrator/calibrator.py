@@ -171,7 +171,7 @@ class Calibrator(BaseModule):
         return
     
     async def calibrator_task(self):
-        if need_calibration && self.calibration_enabled:
+        if self.need_calibration && self.calibration_enabled:
             self.log.info("need_calibration flag detected, checking schedule...")
             self.need_calibration = False
             await self.check_schedule()
