@@ -168,14 +168,16 @@ class Calibrator(BaseModule):
     #will automatically run this if there's a LOS event
     @queue()
     @bind(exchange="event", routing_key="los") 
-    async def start_calibration(self): 
+    async def start_calibration(self, _): 
         self.log.info("Enabling need_calibration flag!")
         self.need_calibration = True
-        return
+    
+    
     
     async def calibrator_task(self):
         while True:
             try:
+                self.log.info("Im alive")
                 if self.need_calibration and self.calibration_enabled:
                     self.log.info("need_calibration flag detected, checking schedule...")
                     self.need_calibration = False
@@ -183,6 +185,8 @@ class Calibrator(BaseModule):
                 await asyncio.sleep(5)
             except:
                 print(traceback.format_exc())
+    
+    
     
     async def check_schedule(self):
         try:
