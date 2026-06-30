@@ -108,7 +108,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             await asyncio.sleep(0)
             return self._get_status_message()
         elif request_name == "rpc.loss":
-            await self.send_event("los", task_name=self.task_name, target=self.target, rotators=())
+            await self.publish(exchange="event", routing_key="los")
 
         elif request_name == "rpc.get_target_position":
             target_name = request_data.get("target", "")
