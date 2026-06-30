@@ -41,6 +41,12 @@ class CalibratorInterface:
         Manually run a calibration cycle
         """
         await send_rpc_request("calibrator", "rpc.calibrate",timeout=1800)
+    
+    async def calibrate_mindfully(self):
+        """
+        Manually runs the 'check_schedule' function before calibrating
+        """
+        await send_rpc_request("calibrator", "rpc.calibrate_sched",timeout=1800)
         
     async def reset_calibration_flag(self):
         """

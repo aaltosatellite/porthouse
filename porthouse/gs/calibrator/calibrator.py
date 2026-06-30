@@ -76,6 +76,9 @@ class Calibrator(BaseModule):
         elif request_name == "rpc.calibrate":
             self.log.info("Automatic calibration command issued, starting calibration")
             await self.calibrate()
+        elif request_name == "rpc.calibrate_sched":
+            self.log.info("Checking schedule before calibrating")
+            await self.check_schedule()
         elif request_name == "rpc.reset_flag":
             self.calibrating = False
             self.log.info("Calibration flag has now been reset!")
