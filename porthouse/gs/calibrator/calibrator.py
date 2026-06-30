@@ -174,35 +174,40 @@ class Calibrator(BaseModule):
         return
     
     async def calibrator_task(self):
-        if self.need_calibration and self.calibration_enabled:
-            self.log.info("need_calibration flag detected, checking schedule...")
-            self.need_calibration = False
-            await self.check_schedule()
-        await asyncio.sleep(5)
+        try:
+            if self.need_calibration and self.calibration_enabled:
+                self.log.info("need_calibration flag detected, checking schedule...")
+                self.need_calibration = False
+                await self.check_schedule()
+            await asyncio.sleep(5)
+        except:
+            print(traceback.format_exc())
     
     async def check_schedule(self):
-        if not self.calibration_enabled:
-            return
-        
-        next_task = []
-        data = {"process_name": None, "target": None, "rotators": ["uhf"], "status": None, "limit": None}
-        schedule = await self.send_rpc_request("scheduler", "rpc.get_schedule", data)
-        
-        
-        #get first task that is with the status "SCHEDULED"
-        for task in schedule:
-            if task["status"] == "ONGOING": #ongoing task, abort
+        try:
+            if not self.calibration_enabled:
                 return
-            if task["status"] == "SCHEDULED":
-                next_task = task
-        
-        
-        #check if next task is more than 10 minutes away
-        next_starting = parse_time(next_task["start_time"]).utc_datetime().replace(tzinfo=timezone.utc)
-        if next_starting-datetime.utcnow().replace(tzinfo=timezone.utc) > timedelta(minutes=10):
-            self.log.info("Open window detected, starting automatic antenna calibration")
-            await self.calibrate()
-
+            
+            next_task = []
+            data = {"process_name": None, "target": None, "rotators": ["uhf"], "status": None, "limit": None}
+            schedule = await self.send_rpc_request("scheduler", "rpc.get_schedule", data)
+            
+            
+            #get first task that is with the status "SCHEDULED"
+            for task in schedule:
+                if task["status"] == "ONGOING": #ongoing task, abort
+                    return
+                if task["status"] == "SCHEDULED":
+                    next_task = task
+            
+            
+            #check if next task is more than 10 minutes away
+            next_starting = parse_time(next_task["start_time"]).utc_datetime().replace(tzinfo=timezone.utc)
+            if next_starting-datetime.utcnow().replace(tzinfo=timezone.utc) > timedelta(minutes=10):
+                self.log.info("Open window detected, starting automatic antenna calibration")
+                await self.calibrate()
+        except:
+            print(traceback.format_exc())
 
 
     async def calibrate(self):
