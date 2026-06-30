@@ -165,23 +165,24 @@ class Calibrator(BaseModule):
 
 
 #-----------------------Rotator logic--------------------------------
-    @queue()
     #will automatically run this if there's a LOS event
-    @bind(exchange="event", routing_key="los")
-    async def start_calibration(self):
+    @queue()
+    @bind(exchange="event", routing_key="los") 
+    async def start_calibration(self): 
         self.log.info("Enabling need_calibration flag!")
         self.need_calibration = True
         return
     
     async def calibrator_task(self):
-        try:
-            if self.need_calibration and self.calibration_enabled:
-                self.log.info("need_calibration flag detected, checking schedule...")
-                self.need_calibration = False
-                await self.check_schedule()
-            await asyncio.sleep(5)
-        except:
-            print(traceback.format_exc())
+        while True:
+            try:
+                if self.need_calibration and self.calibration_enabled:
+                    self.log.info("need_calibration flag detected, checking schedule...")
+                    self.need_calibration = False
+                    await self.check_schedule()
+                await asyncio.sleep(5)
+            except:
+                print(traceback.format_exc())
     
     async def check_schedule(self):
         try:
