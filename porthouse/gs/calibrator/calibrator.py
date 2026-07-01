@@ -79,6 +79,9 @@ class Calibrator(BaseModule):
         elif request_name == "rpc.calibrate_sched":
             self.log.info("Checking schedule before calibrating")
             await self.check_schedule()
+        elif request_name == "rpc.stop_calibration":
+            self.calibrating = False
+            self.log.info("Calibration flag has now been cancelled!")
         elif request_name == "rpc.reset_flag":
             self.calibrating = False
             self.log.info("Calibration flag has now been reset!")
@@ -238,6 +241,10 @@ class Calibrator(BaseModule):
                 
                 average_el = sum(self.el_window)/self.window_length #get average from the 10 second window
                 
+                if not self.calibrating:
+                    self.log.info("self.calibrating == False => cancel command issued")
+                    raise TimeoutError
+                    
                 self.log.info("calibrating elevation...")
                 await self.send_rpc_request("rotator", f"uhf.rpc.reset_position", {
                     "az": 90, "el": average_el
@@ -253,13 +260,15 @@ class Calibrator(BaseModule):
                 
                 average_az = sum(self.az_window)/self.window_length
                 
+                if not self.calibrating:
+                    self.log.info("self.calibrating == False => cancel command issued")
+                    raise TimeoutError
                 self.log.info("calibrating azimuth...")
                 await self.send_rpc_request("rotator", f"uhf.rpc.reset_position", {
                     "az": average_az, "el": 0
                 }, timeout=5)
                 
                 await self.are_we_there_yet(90,0)
-                
                 
                 #-------------Verification--------------
                 await self.get_data()

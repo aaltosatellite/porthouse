@@ -47,7 +47,14 @@ class CalibratorInterface:
         Manually runs the 'check_schedule' function before calibrating
         """
         await send_rpc_request("calibrator", "rpc.calibrate_sched",timeout=1800)
-        
+    
+    async def stop_calibration(self):
+        """
+        Stops the calibration at the next possible opportunity
+        """
+        await send_rpc_request("calibrator", "rpc.stop_calibration")
+    
+    
     async def reset_calibration_flag(self):
         """
         Manually reset the calibrating flag if that seems to be stuck and calibration isn't running
