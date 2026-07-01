@@ -180,7 +180,7 @@ class Calibrator(BaseModule):
     async def calibrator_task(self):
         while True:
             try:
-                self.log.info("Im alive")
+                #self.log.info("Im alive")
                 if self.need_calibration and self.calibration_enabled:
                     self.log.info("need_calibration flag detected, checking schedule...")
                     self.need_calibration = False
