@@ -81,14 +81,13 @@ class Calibrator(BaseModule):
             await self.check_schedule()
         elif request_name == "rpc.stop_calibration":
             self.calibrating = False
-            self.log.info("Calibration flag has now been cancelled!")
-        elif request_name == "rpc.reset_flag":
-            self.calibrating = False
-            self.log.info("Calibration flag has now been reset!")
+            self.log.info("Calibration has now been cancelled!")
         elif request_name == "rpc.status":
             return {
                 "enabled":self.calibration_enabled,
-                "max_calibration_cycles":self.max_calibration_cycles}
+                "max_calibration_cycles":self.max_calibration_cycles,
+                "calibrating":self.calibrating,
+                "need_calibration":self.need_calibration}
                 
 
 

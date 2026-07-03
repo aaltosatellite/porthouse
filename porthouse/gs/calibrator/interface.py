@@ -54,16 +54,9 @@ class CalibratorInterface:
         """
         await send_rpc_request("calibrator", "rpc.stop_calibration")
     
-    
-    async def reset_calibration_flag(self):
-        """
-        Manually reset the calibrating flag if that seems to be stuck and calibration isn't running
-        """
-        await send_rpc_request("calibrator", "rpc.reset_flag")
-    
     async def status(self):
         """
-        Manually run a calibration cycle
+        Reports the current status of the calibrator and configuration
         """
         status = await send_rpc_request("calibrator", "rpc.status")
         return status
