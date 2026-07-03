@@ -48,7 +48,7 @@ class CalibratorInterface:
         """
         await send_rpc_request("calibrator", "rpc.calibrate_sched",timeout=1800)
     
-    async def stop_calibration(self):
+    async def stop(self):
         """
         Stops the calibration at the next possible opportunity
         """
