@@ -83,7 +83,7 @@ class Calibrator(BaseModule):
             self.calibrating = False
             self.log.info("Calibration has now been cancelled!")
             self.calibration_enabled = False
-            self.log.info("Automatic calibration is now "+ ("enabled" if enabled else "disabled"))
+            self.log.info("Automatic calibration is now "+ ("enabled" if self.calibration_enabled else "disabled"))
         elif request_name == "rpc.reset_flag":
             self.need_calibration = False
             self.log.info("need_calibration flag has now been reset!")
