@@ -128,16 +128,28 @@ class Calibrator(BaseModule):
                 #kill it if data acquisition takes too long
                 if datetime.utcnow()-start_time > timedelta(seconds=60):
                     return
-                    
-                
                 
                 data, addr = sock.recvfrom(65536)
                 
                 #load JSON
                 parsed_data = json.loads(data.decode())
                 
-                self.el_window.append(parsed_data["app_el"])
-                self.az_window.append(parsed_data["app_az"])
+                #mag is disconnected
+                if parsed_data["mag_x"] == -1000 and
+                   parsed_data["mag_y"] == -1000 and
+                   parsed_data["mag_z"] == -1000:
+                    #if something already in the window then use that data
+                    if len(el_window) > 1:
+                        self.el_window.append(el_window[0])
+                        self.az_window.append(az_window[0])
+                    else:
+                        #otherwise just dont move at all
+                        self.el_window.append(0)
+                        self.az_window.append(90)
+                else:
+                    self.el_window.append(parsed_data["app_el"])
+                    self.az_window.append(parsed_data["app_az"])
+                
                 
                 await asyncio.sleep(2)
             except KeyboardInterrupt:
