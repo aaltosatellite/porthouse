@@ -135,9 +135,9 @@ class Calibrator(BaseModule):
                 parsed_data = json.loads(data.decode())
                 
                 #mag is disconnected
-                if parsed_data["mag_x"] == -1000 and
+                if (parsed_data["mag_x"] == -1000 and
                    parsed_data["mag_y"] == -1000 and
-                   parsed_data["mag_z"] == -1000:
+                   parsed_data["mag_z"] == -1000):
                     #if something already in the window then use that data
                     if len(el_window) > 1:
                         self.el_window.append(el_window[0])
