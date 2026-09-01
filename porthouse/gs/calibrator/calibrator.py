@@ -139,7 +139,7 @@ class Calibrator(BaseModule):
                    parsed_data["mag_y"] == -1000 and
                    parsed_data["mag_z"] == -1000):
                     #if something already in the window then use that data
-                    if len(el_window) > 1:
+                    if len(self.el_window) > 1:
                         self.el_window.append(self.el_window[0])
                         self.az_window.append(self.az_window[0])
                     else:
