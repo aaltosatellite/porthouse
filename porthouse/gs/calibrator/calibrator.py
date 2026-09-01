@@ -139,17 +139,15 @@ class Calibrator(BaseModule):
                    parsed_data["mag_y"] == -1000 and
                    parsed_data["mag_z"] == -1000):
                     #if something already in the window then use that data
-                    if len(self.el_window) > 1:
-                        self.el_window.append(self.el_window[0])
+                    if len(self.az_window) > 1:
                         self.az_window.append(self.az_window[0])
                     else:
                         #otherwise just dont move at all
-                        self.el_window.append(0)
                         self.az_window.append(90)
                 else:
-                    self.el_window.append(parsed_data["app_el"])
                     self.az_window.append(parsed_data["app_az"])
-                
+                    
+                self.el_window.append(parsed_data["app_el"])
                 
                 await asyncio.sleep(2)
             except KeyboardInterrupt:
