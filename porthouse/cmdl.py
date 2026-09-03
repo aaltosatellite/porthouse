@@ -160,6 +160,10 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
             "class": "porthouse.gs.tracking.interface.OrbitTrackerInterface",
         },
         {
+            "name": "calibrator",
+            "class": "porthouse.gs.calibrator.interface.CalibratorInterface",
+        },
+        {
             "name": "scheduler",
             "class": "porthouse.gs.scheduler.interface.SchedulerInterface",
         },

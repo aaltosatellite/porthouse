@@ -17,7 +17,13 @@ class OrbitTrackerInterface:
             print(status)
         else:
             return status
-
+    
+    async def emit_loss(self, verbose=True):
+        """
+        Get satellite tracker status.
+        """
+        await send_rpc_request("tracking", "orbit.rpc.loss")
+    
     async def add_target(
             self,
             target: str,
