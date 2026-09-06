@@ -78,7 +78,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         if routing_key == "task.start":
             kwargs = {k: v for k, v in event_body.items() if k in ["start_time", "end_time", "min_elevation",
                                                                    "min_max_elevation", "sun_max_elevation",
-                                                                   "sunlit", "preaos_time"]}
+                                                                   "sunlit", "preaos_time", "nodes"]}
             await self.add_target(event_body["task_name"], event_body["target"], event_body["rotators"], **kwargs)
 
         elif routing_key == "task.end":
@@ -134,7 +134,8 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
                          sun_max_elevation: float = None,
                          sunlit: bool = None,
                          preaos_time: int = DEFAULT_PREAOS_TIME,
-                         high_accuracy: bool = None) -> NoReturn:
+                         high_accuracy: bool = None,
+                         nodes: Union[None, List] = None) -> NoReturn:
         """
         Set the tracking target for given rotators.
         """
@@ -166,7 +167,9 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
         # NOTE: Other params except target_name not strictly needed for get_satellite or get_celestial_object
         #       as current pass is only of interest and scheduler takes care of min elevation etc filtering.
         #       However, AOS and LOS times could be different without them.
-        if CelestialObject.is_class_of(target_name):
+        if nodes:
+            target = self.get_custom_track(target_name, start_time=start_time, end_time=end_time, nodes=nodes)
+        elif CelestialObject.is_class_of(target_name):
             target = await self.get_celestial_object(target_name, start_time=start_time, end_time=end_time,
                                                      min_elevation=min_elevation, min_max_elevation=min_max_elevation,
                                                      sun_max_elevation=sun_max_elevation, sunlit=sunlit,
@@ -222,8 +225,9 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
 
         self.target_trackers = [tt for i, tt in enumerate(self.target_trackers) if i not in remove_idxs]
 
-    async def broadcast_pointing(self, task_name: str, target: Union[Satellite, CelestialObject], rotators: List[str],
-                                 az: float, el: float, range: float, az_rate: float, el_rate: float, range_rate: float,
+    async def broadcast_pointing(self, task_name: str, target: Union[Satellite, CelestialObject, CustomTrack],
+                                 rotators: List[str], az: float, el: float, range: float,
+                                 az_rate: float, el_rate: float, range_rate: float,
                                  timestamp: float) -> None:
         """
         Broadcast pointing information
@@ -259,7 +263,7 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
             "timestamp": timestamp,
         }, exchange="tracking", routing_key="target.position")
 
-    async def send_event(self, event_name: str, task_name: str, target: Union[Satellite, CelestialObject],
+    async def send_event(self, event_name: str, task_name: str, target: Union[Satellite, CelestialObject, CustomTrack],
                          rotators: List[str], **params):
         """
         Send events (next_pass/preaos/aos/los), used e.g. by the rotator
@@ -284,7 +288,7 @@ class TrackerStatus(IntEnum):
 
 class TargetTracker:
 
-    def __init__(self, module: OrbitTracker, task_name: str, target: Union[Satellite, CelestialObject],
+    def __init__(self, module: OrbitTracker, task_name: str, target: Union[Satellite, CelestialObject, CustomTrack],
                  rotators: List[str], task_start_time: Union[None, str, datetime, skyfield.api.Time],
                  task_end_time: Union[None, str, datetime, skyfield.api.Time],
                  preaos_time: float, tracking_interval=2.0, tracking_delay=2.0,
@@ -396,22 +400,33 @@ class TargetTracker:
             # Calculate the position tracking_delay seconds in the future
             t = now + timedelta(seconds=self.tracking_delay)
             pos = self.target.pos_at(t, accurate=self.high_accuracy)
-            el, az, range, el_rate, az_rate, range_rate = pos.frame_latlon_and_rates(self.module.gs.pos)
-            if self.high_accuracy:
-                el, az, _ = pos.altaz('standard')  # include effect from atmospheric refraction
+
+            if isinstance(pos, (tuple, list)):
+                el, az, range, el_rate, az_rate, range_rate = pos
+                if el is None:
+                    self.module.log.warning(f"Custom track {self.target.target_name} is not valid at {t}")
+                    self.status = TrackerStatus.LOS
+                    return
+            else:
+                el, az, range, el_rate, az_rate, range_rate = pos.frame_latlon_and_rates(self.module.gs.pos)
+                if self.high_accuracy:
+                    el, az, _ = pos.altaz('standard')  # include effect from atmospheric refraction
+
+                az, el = az.degrees, el.degrees
+                az_rate, el_rate = az_rate.degrees.per_second, el_rate.degrees.per_second
+                range, range_rate = range.m, range_rate.m_per_s
 
             if self.module.debug:
                 m, s = divmod((self.los_at - now).total_seconds(), 60)
                 self.module.log.debug(f"LOS for {self.target.target_name} {self.rotators} in {m:.0f}min "
-                                      f"{s:.0f}s, az={az.degrees:.1f} el={el.degrees:.1f} r={range.km:.1f} "
-                                      f"azr={az_rate.degrees.per_second:.3f} elr={el_rate.degrees.per_second:.3f} "
-                                      f"rr={range_rate.m_per_s:.1f} acc={self.high_accuracy}")
+                                      f"{s:.0f}s, az={az:.1f} el={el:.1f} r={range/1000:.1f} "
+                                      f"azr={az_rate:.3f} elr={el_rate:.3f} "
+                                      f"rr={range_rate:.1f} acc={self.high_accuracy}")
 
             # Broadcast spacecraft position
             await self.module.broadcast_pointing(self.task_name, self.target, self.rotators,
-                                                 az=az.degrees, el=el.degrees,
-                                                 az_rate=az_rate.degrees.per_second, el_rate=el_rate.degrees.per_second,
-                                                 range=range.m, range_rate=range_rate.m_per_s,
+                                                 az=az, el=el, az_rate=az_rate, el_rate=el_rate,
+                                                 range=range, range_rate=range_rate,
                                                  timestamp=t.timestamp())
 
             # Did LOS happen?

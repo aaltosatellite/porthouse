@@ -477,6 +477,78 @@ class CelestialObject:
         return f"{self.name} ({type})" + ("" if self._initialized else " [non-initialized]")
 
 
+class CustomTrack:
+    def __init__(self, target, start_time, end_time, nodes):
+        def as_datetime(t: Union[str, datetime, skyfield.Time]):
+            return parse_time(t).utc_datetime()
+
+        self.target = target
+        self.start_time = as_datetime(start_time)
+        self.end_time = as_datetime(end_time)
+
+        assert isinstance(nodes, list) and len(nodes) > 0, "Nodes must be a non-empty list"
+        assert len(nodes[0]) in (3, 7), "Nodes must be a list of tuples with 3 or 7 elements " \
+                                        "(time, az, el [, range, az_rate, el_rate, range_rate])"
+        assert np.all(np.diff([len(node) for node in nodes]) == 0), "All nodes must have the same length"
+        self.times = np.array([as_datetime(t) for t, *_ in nodes], dtype="datetime64[s]").astype("float64")
+        self.data = np.array([row for _, *row in nodes])    # az, el [, range, az_rate, el_rate, range_rate]
+
+        # sort based on time to enforce correct order
+        idxs = np.argsort(self.times)
+        self.times = self.times[idxs]
+        self.data = self.data[idxs, :]
+
+    @property
+    def target_name(self):
+        return self.target
+
+    def get_next_pass(self):
+        """ Return next pass or None """
+        el_max_idx = np.argmax(self.data[:, 1])
+        node_max = self.data[el_max_idx, :]
+        return Pass(
+            name=self.target,
+            gs="oh2ags",
+            t_aos=self.start_time,
+            az_aos=float(self.data[0, 0]),
+            el_aos=float(self.data[0, 1]),
+            t_max=self.start_time + timedelta(seconds=self.times[el_max_idx].tolist() - self.times[0].tolist()),
+            az_max=float(node_max[0]),
+            el_max=float(node_max[1]),
+            t_los=self.end_time,
+            az_los=float(self.data[-1, 0]),
+            el_los=float(self.data[-1, 1]),
+        )
+
+    @property
+    def passes(self):
+        """ CustomTrack has only one pass, so this property returns a list with a single Pass object. """
+        return [self.get_next_pass()]
+
+    def calculate_passes(self, *args, **kwargs):
+        """ CustomTrack has only one pass, so this method does nothing. """
+        return []
+
+    def pos_at(self, t: datetime, accurate=None):
+        """ Returns the position of the custom track at a given time. """
+        t = parse_time(t).utc_datetime()
+        if t < self.start_time or t > self.end_time:
+            return [None] * 6  # Outside the track time range
+
+        # Interpolate between nodes to find the azimuth and elevation at time t
+        range, az_rate, el_rate, range_rate = [0] * 4
+        az = np.interp(t.timestamp(), self.times, self.data[:, 0])
+        el = np.interp(t.timestamp(), self.times, self.data[:, 1])
+
+        if self.data.shape[1] == 6:
+            range = np.interp(t.timestamp(), self.times, self.data[:, 2])
+            az_rate = np.interp(t.timestamp(), self.times, self.data[:, 3])
+            el_rate = np.interp(t.timestamp(), self.times, self.data[:, 4])
+            range_rate = np.interp(t.timestamp(), self.times, self.data[:, 5])
+
+        return az, el, range, az_rate, el_rate, range_rate
+
+
 class SkyfieldModuleMixin:
     """
     Provides a BaseModule derived module with
@@ -581,6 +653,13 @@ class SkyfieldModuleMixin:
             self.log.warning(f"No passes generated for \"{target}\"!")
 
         return obj
+
+    def get_custom_track(self, target: str,
+                            start_time: Union[None, str, datetime, skyfield.Time] = None,
+                            end_time: Union[None, str, datetime, skyfield.Time] = None,
+                            nodes: List[Tuple[Union[str, datetime, skyfield.Time], float, float]] = None,
+                        ) -> Optional[CustomTrack]:
+        return CustomTrack(target, start_time=start_time, end_time=end_time, nodes=nodes)
 
 
 def parse_time(t: Union[None, str, datetime, skyfield.Time]) -> skyfield.Time:

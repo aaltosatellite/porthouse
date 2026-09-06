@@ -31,6 +31,7 @@ class Task:
         self.auto_scheduled = True
         self.status = TaskStatus.SCHEDULED
         self.aos_sent = False  # set to True after AOS event is sent
+        self.nodes = None  # list of nodes that are part of the task, e.g. for a custom track
         self.process_name = None
 
         # if provided, overrides corresponding process fields when sent with the task.start event
@@ -49,6 +50,7 @@ class Task:
             "auto_scheduled": self.auto_scheduled,
             "status": self.status.name,
             "aos_sent": self.aos_sent,
+            "nodes": self.nodes,
             "process_name": self.process_name,
             "process_overrides": self.process_overrides,
         }
@@ -63,6 +65,7 @@ class Task:
         task.auto_scheduled = data.get("auto_scheduled", False)
         task.status = TaskStatus[data.get("status", "SCHEDULED")]
         task.aos_sent = data.get("aos_sent", False)
+        task.nodes = data.get("nodes", None) or None
         task.process_name = data.get("process_name", "unnamed process")
         task.process_overrides = data.get("process_overrides", {})
         task.storage = storage
@@ -141,6 +144,7 @@ class Task:
         task.auto_scheduled = self.auto_scheduled
         task.status = self.status
         task.aos_sent = self.aos_sent
+        task.nodes = self.nodes.copy() if self.nodes is not None else None
         task.process_name = self.process_name
         task.process_overrides = self.process_overrides.copy()
         task.storage = self.storage
@@ -150,6 +154,8 @@ class Task:
         """ Splits task into multiple tasks by holes. """
         if len(holes) == 0:
             return [self]
+        elif self.nodes:
+            return []   # FIXME: splitting custom track tasks is not supported, so just return empty list for now
 
         # merge overlapping holes so that following logic is simpler to understand
         holes = sorted(holes)       # sort first on start time, then end time
