@@ -1,7 +1,7 @@
 
 from enum import IntEnum
 from datetime import datetime, timedelta, timezone
-from typing import Union, Optional, Callable
+from typing import Union, Optional, Callable, List, Tuple
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import yaml
@@ -490,7 +490,8 @@ class CustomTrack:
         assert len(nodes[0]) in (3, 7), "Nodes must be a list of tuples with 3 or 7 elements " \
                                         "(time, az, el [, range, az_rate, el_rate, range_rate])"
         assert np.all(np.diff([len(node) for node in nodes]) == 0), "All nodes must have the same length"
-        self.times = np.array([as_datetime(t) for t, *_ in nodes], dtype="datetime64[s]").astype("float64")
+        self.times = np.array([as_datetime(t).replace(tzinfo=None) for t, *_ in nodes],
+                              dtype="datetime64[s]").astype("float64")
         self.data = np.array([row for _, *row in nodes])    # az, el [, range, az_rate, el_rate, range_rate]
 
         # sort based on time to enforce correct order
@@ -546,7 +547,7 @@ class CustomTrack:
             el_rate = np.interp(t.timestamp(), self.times, self.data[:, 4])
             range_rate = np.interp(t.timestamp(), self.times, self.data[:, 5])
 
-        return az, el, range, az_rate, el_rate, range_rate
+        return el, az, range, el_rate, az_rate, range_rate
 
 
 class SkyfieldModuleMixin:

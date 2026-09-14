@@ -14,7 +14,7 @@ import skyfield
 
 from porthouse.core.basemodule_async import BaseModule, RPCError, rpc, queue, bind
 
-from .utils import Satellite, CelestialObject, Pass, SkyfieldModuleMixin, parse_time
+from .utils import Satellite, CelestialObject, CustomTrack, Pass, SkyfieldModuleMixin, parse_time
 
 ts = skyfield.api.load.timescale()
 

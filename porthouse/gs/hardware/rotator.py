@@ -326,9 +326,9 @@ class Rotator(BaseModule):
         # set target to the closest valid position instead of given target position
         valid_position = self.rotator.closest_valid_position(*target)
 
-        self.log.debug(f"Currently at {[round(p, 2) for p in self.current_position]} - "
-                       f"Rotating to {[round(p, 2) for p in valid_position]} "
-                       f"(original {[round(p, 2) for p in target]})")
+        self.log.debug(f"Currently at {[round(float(p), 2) for p in self.current_position]} - "
+                       f"Rotating to {[round(float(p), 2) for p in valid_position]} "
+                       f"(original {[round(float(p), 2) for p in target]})")
 
         # rotator function should not be called in here
         # should be done via check_state()
