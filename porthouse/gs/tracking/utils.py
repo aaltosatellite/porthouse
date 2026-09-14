@@ -479,7 +479,7 @@ class CelestialObject:
 
 class CustomTrack:
     def __init__(self, target, start_time, end_time, nodes):
-        def as_datetime(t: Union[str, datetime, skyfield.Time]):
+        def as_datetime(t: Union[float, str, datetime, skyfield.Time]):
             return parse_time(t).utc_datetime()
 
         self.target = target
@@ -663,9 +663,11 @@ class SkyfieldModuleMixin:
         return CustomTrack(target, start_time=start_time, end_time=end_time, nodes=nodes)
 
 
-def parse_time(t: Union[None, str, datetime, skyfield.Time]) -> skyfield.Time:
+def parse_time(t: Union[None, float, str, datetime, skyfield.Time]) -> skyfield.Time:
     if t is None:
         dt = datetime.utcnow().replace(tzinfo=timezone.utc)
+    elif isinstance(t, float):
+        dt = datetime.fromtimestamp(t).replace(tzinfo=timezone.utc)
     elif isinstance(t, str):
         dt = datetime.fromisoformat(t.replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
     elif isinstance(t, datetime):
