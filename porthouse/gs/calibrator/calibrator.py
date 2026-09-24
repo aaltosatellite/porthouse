@@ -235,10 +235,10 @@ class Calibrator(BaseModule):
     async def calibrate(self):
         #go to 90, 0 and calibrate that angle as 0
         self.log.info("Calibration starting")
-        try:
-            if self.calibrating:
+        if self.calibrating:
                 self.log.error("Calibration flag is set to True, is calibration already running?")
                 return
+        try:
             self.calibrating = True
             cycle_count = 0
             while self.calibrating:
