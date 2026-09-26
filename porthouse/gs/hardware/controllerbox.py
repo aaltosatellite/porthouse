@@ -36,6 +36,7 @@ class ControllerBox(RotatorController):
                  min_sun_angle: Optional[float] = None,
                  control_sw_version=1,
                  parking_position: Optional[Tuple[float, float]] = None,
+                 tracking_delay_s: float = 0.5,
                  log=None,
                  debug: bool = False,
                  prefix="") -> None:
@@ -58,7 +59,7 @@ class ControllerBox(RotatorController):
         """
 
         super().__init__(address, az_min, az_max, el_min, el_max, rotator_model, horizon_map_file,
-                         min_sun_angle, control_sw_version, parking_position, debug, log)
+                         min_sun_angle, control_sw_version, parking_position, tracking_delay_s, debug, log)
 
         self.err_cnt = 0
         self.prefix = prefix
@@ -124,7 +125,7 @@ class ControllerBox(RotatorController):
         maz, mel = self.rotator_model.to_motor(az, el)
 
         if self.control_sw_version > 2:
-            adj = 1.25e9 if True else 0.0  # anticipate satellite movement by 1.25 s?
+            adj = self.tracking_delay_s * 1e9  # anticipate satellite movement by this much
             t0 = (time.time_ns() + adj - self.epoch) / 1e9
             resp = await self._rpc(f"ST {t0 + self.sync_offset:.6f}".encode("ascii"), True)
             t1 = (time.time_ns() + adj - self.epoch) / 1e9

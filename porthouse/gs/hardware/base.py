@@ -37,6 +37,7 @@ class RotatorController(abc.ABC):
     horizon_map: Optional[np.ndarray]
     min_sun_angle: Optional[float]
     enforce_limits: bool
+    tracking_delay_s: float
     debug: bool
 
     def __init__(self,
@@ -50,6 +51,7 @@ class RotatorController(abc.ABC):
                  min_sun_angle: Optional[float] = None,
                  control_sw_version = 1,
                  parking_position: Optional[Tuple[float, float]] = None,
+                 tracking_delay_s: float = 0.5,
                  debug: bool = False,
                  log=None,
                  prefix: str = ""):
@@ -75,6 +77,7 @@ class RotatorController(abc.ABC):
         self.az_max = az_max
         self.el_min = el_min
         self.el_max = el_max
+        self.tracking_delay_s = tracking_delay_s
         self.debug = debug
         self.enforce_limits = True
         self.current_motor_pos = (0.0, 0.0)
