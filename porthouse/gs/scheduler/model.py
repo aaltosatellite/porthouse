@@ -260,6 +260,7 @@ class Process:
 
         self.extra = {}    # stores extra data that is passed in the task.start event
         self.storage = Process.STORAGE_MAIN    # storage type
+        self.max_task_id = None
 
     def to_dict(self):
         return dict(process_name=self.process_name,
@@ -276,6 +277,7 @@ class Process:
                     duration=self.duration,
                     daily_windows=self.daily_windows,
                     date_ranges=self.date_ranges,
+                    max_task_id=self.max_task_id,
                     **self.extra)
 
     @staticmethod
@@ -295,6 +297,7 @@ class Process:
         process.duration = data.get("duration", None)
         process.daily_windows = data.get("daily_windows", None)
         process.date_ranges = data.get("date_ranges", None)
+        process.max_task_id = data.get("max_task_id", None)
         process.extra = {k: v for k, v in data.items() if k not in process.__dict__}
         process.storage = storage
         return process
@@ -312,7 +315,6 @@ class Schedule:
         self.start_times = SortedList(key=lambda t: t if isinstance(t, datetime) else t.start_time)
         self.end_times = SortedList(key=lambda t: t if isinstance(t, datetime) else t.end_time)
         self.tasks = {}  # task_name -> Task
-        self.max_task_no = {}  # process_name -> max_task_no
         self.deleted_tasks = SortedList(key=lambda t: t if isinstance(t, datetime) else t.start_time)
 
         if iterable is not None:
@@ -363,14 +365,19 @@ class Schedule:
         return True
 
     def new_task_name(self, process_name):
-        self.max_task_no[process_name] = self.max_task_no.get(process_name, 0) + 1
-        return f"{process_name} #{self.max_task_no[process_name]}"
+        process = self.scheduler.processes.get(process_name, None)
+        task_id = (process and process.max_task_id or 0) + 1
+        if process:
+            process.max_task_id = task_id
+        return f"{process_name} #{task_id}"
 
     def update_task_numbering(self, task_name):
         m = Schedule.TASK_NAME_REGEX.fullmatch(task_name)
         if m:
-            base, n, pf = m[1], m[3], m[4]
-            self.max_task_no[base] = max(self.max_task_no.get(base, 0), int(n) if n else 0)
+            process_name, n, pf = m[1], m[3], m[4]
+            process = self.scheduler.processes.get(process_name, None)
+            if process:
+                process.max_task_id = max(process.max_task_id or 0, int(n) if n else 0)
 
     def remove(self, task: Task):
         if task.task_name in self.tasks:

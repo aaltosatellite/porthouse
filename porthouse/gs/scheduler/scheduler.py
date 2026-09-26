@@ -216,6 +216,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         if not self.sync_schedule_files:
             return
 
+        self.update_max_task_ids()  # not certain if actually necessary
+
         for file, storage in ((self.main_processes_file, Process.STORAGE_MAIN),
                               (self.misc_processes_file, Process.STORAGE_MISC)):
             if skip_main and storage == Process.STORAGE_MAIN:
@@ -230,6 +232,17 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                     yaml.dump(processes, fp, indent=4, sort_keys=False)
             except Exception as e:
                 self.log.error(f"Failed to write schedule file {file}: {e}", exc_info=True)
+
+    def update_max_task_ids(self):
+        """
+        Update max task id for each process
+        """
+        max_task_ids = {proc.process_name: proc.max_task_id for proc in self.processes.values()}
+        for task in self.schedule.all():
+            max_task_ids[task.process_name] = max(max_task_ids[task.process_name], task.task_id)
+
+        for proc in self.processes.values():
+            proc.max_task_id = max_task_ids[proc.process_name]
 
     def add_process(self, process_dict, deny_main=True):
         """
@@ -510,6 +523,7 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                 self.log.debug(f"After fitting to schedule, added {c} tasks for process {proc.process_name}")
                 added_count += c
             self.write_schedule()
+            self.write_processes(skip_main=True)    # to save max task id
 
         self.log.info(f"Added {added_count} tasks to the schedule between "
                       f"{start_time.isoformat()} and {end_time.isoformat()}.")
