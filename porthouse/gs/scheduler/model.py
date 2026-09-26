@@ -135,6 +135,15 @@ class Task:
     def get_process_name(self):
         return self.process_overrides.get("process_name", self.process_name) or "unnamed"
 
+    @property
+    def task_id(self):
+        if self.task_name is not None:
+            m = Schedule.TASK_NAME_REGEX.fullmatch(self.task_name)
+            if m:
+                process_name, n, pf = m[1], m[3], m[4]
+                return int(n) if n else 1
+        return 1
+
     def copy(self):
         task = Task()
         task.task_name = self.task_name
