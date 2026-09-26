@@ -239,10 +239,15 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         """
         max_task_ids = {proc.process_name: proc.max_task_id for proc in self.processes.values()}
         for task in self.schedule.all():
-            max_task_ids[task.process_name] = max(max_task_ids[task.process_name], task.task_id)
+            prev_max = max_task_ids.get(task.process_name, None)
+            if prev_max is None:
+                max_task_ids[task.process_name] = task.task_id
+            elif task.task_id is not None:
+                max_task_ids[task.process_name] = max(prev_max, task.task_id)
 
         for proc in self.processes.values():
-            proc.max_task_id = max_task_ids[proc.process_name]
+            if proc.process_name in max_task_ids:
+                proc.max_task_id = max_task_ids[proc.process_name]
 
     def add_process(self, process_dict, deny_main=True):
         """

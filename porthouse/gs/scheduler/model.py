@@ -141,8 +141,8 @@ class Task:
             m = Schedule.TASK_NAME_REGEX.fullmatch(self.task_name)
             if m:
                 process_name, n, pf = m[1], m[3], m[4]
-                return int(n) if n else 1
-        return 1
+                return int(n) if n else None
+        return None
 
     def copy(self):
         task = Task()
