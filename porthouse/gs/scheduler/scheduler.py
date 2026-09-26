@@ -278,6 +278,12 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
                                  f"currently not allowed.")
 
         state_changed = self.processes[process.process_name].enabled != process.enabled
+
+        # keep the max task id
+        max_task_id = self.processes[process.process_name].max_task_id
+        if process.max_task_id is not None or max_task_id is not None:
+            process.max_task_id = max(max_task_id or 0, process.max_task_id or 0)
+        
         self.processes[process.process_name] = process
         self.write_processes(skip_main=deny_main)
 
