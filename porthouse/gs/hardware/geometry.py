@@ -42,7 +42,7 @@ def main():
     rotator0 = AzElRotator.load(args.init) if args.init else AzElRotator()
     param_dict0 = rotator0.to_dict()
     params0 = [param_dict0[key] for key in ('el_off', 'az_off', 'el_gain', 'az_gain',
-                                            'tilt_az', 'tilt_angle', 'lateral_tilt')]
+                                            'tilt_az', 'tilt_angle', 'lateral_tilt', 'el_deg2coef')]
 
     data = []
     ts = []
@@ -111,7 +111,7 @@ def main():
 
     def errorfn(params, dat) -> np.ndarray:
         rotator = AzElRotator.from_dict(dict(zip(('el_off', 'az_off', 'el_gain', 'az_gain',
-                                                  'tilt_az', 'tilt_angle', 'lateral_tilt'), params)))
+                                                  'tilt_az', 'tilt_angle', 'lateral_tilt', 'el_deg2coef'), params)))
         drift = get_drift(rotator, dat)
         err = dat[:, 2:] - np.array([rotator.to_real(az, el, wrap=True) for az, el in dat[:, :2] - drift])
         err[:, 0] = wrapdeg(err[:, 0])
@@ -139,13 +139,13 @@ def main():
                 from scipy.optimize import least_squares
                 res = least_squares(lambda x: lossfn(x, _data), params0)
                 param_dict = dict(zip(('el_off', 'az_off', 'el_gain', 'az_gain',
-                                       'tilt_az', 'tilt_angle', 'lateral_tilt'), res.x))
+                                       'tilt_az', 'tilt_angle', 'lateral_tilt', 'el_deg2coef'), res.x))
                 loss = np.mean(res.fun ** 2)
             else:
                 from scipy.optimize import minimize
                 res = minimize(lambda x: lossfn(x, _data), np.array(params0), method='BFGS' if args.method == 'bfgs' else 'Nelder-Mead')
                 param_dict = dict(zip(('el_off', 'az_off', 'el_gain', 'az_gain',
-                                       'tilt_az', 'tilt_angle', 'lateral_tilt'), res.x))
+                                       'tilt_az', 'tilt_angle', 'lateral_tilt', 'el_deg2coef'), res.x))
                 loss = res.fun
 
             err = errnorm(res.x, _data)
@@ -207,7 +207,7 @@ def main():
 
 
 class AzElRotator:
-    def __init__(self, el_off=0, az_off=0, el_gain=1, az_gain=1, tilt_az=0, tilt_angle=0, lateral_tilt=0):
+    def __init__(self, el_off=0, az_off=0, el_gain=1, az_gain=1, tilt_az=0, tilt_angle=0, lateral_tilt=0, el_deg2coef=0):
         self.el_off = el_off
         self.az_off = az_off
         self.el_gain = el_gain
@@ -215,6 +215,7 @@ class AzElRotator:
         self.tilt_az = tilt_az
         self.tilt_angle = tilt_angle
         self.lateral_tilt = lateral_tilt
+        self.el_deg2coef = el_deg2coef
 
     @staticmethod
     def from_dict(data):
@@ -222,7 +223,7 @@ class AzElRotator:
 
     def to_dict(self):
         return {key: float(getattr(self, key)) for key in ('el_off', 'az_off', 'el_gain', 'az_gain',
-                                                           'tilt_az', 'tilt_angle', 'lateral_tilt')}
+                                                           'tilt_az', 'tilt_angle', 'lateral_tilt', 'el_deg2coef')}
 
     @classmethod
     def load(cls, filename):
@@ -271,6 +272,8 @@ class AzElRotator:
         q_r = self.platform_q * q_m * self.payload_q
         az_r, el_r = to_azel(q_r)
 
+        el_r += self.el_deg2coef * el_r ** 2  # add the effect of elevation-dependent error
+
         if not wrap:
             az_r = (az_r + 360) if abs(az_r - az) > 180 else az_r
 
@@ -287,6 +290,8 @@ class AzElRotator:
         return az_r, el_r
 
     def to_motor(self, az, el, az_dot=None, el_dot=None, wrap=False):
+        el -= self.el_deg2coef * el ** 2  # remove the effect of elevation-dependent error
+
         # Assumes x-axis points to the north, y-axis to the east and z-axis down (az=0 is north, el=0 is horizon)
         q_r = eul_to_q((np.deg2rad(az), np.deg2rad(el)), 'zy')
 
@@ -318,7 +323,7 @@ class AzElRotator:
     def __str__(self):
         return f'AzElRotator(el_off={self.el_off:.3f}, az_off={self.az_off:.3f}, el_gain={self.el_gain:.4f}, ' \
                f'az_gain={self.az_gain:.4f}, tilt_az={self.tilt_az:.4f}, tilt_angle={self.tilt_angle:.4f}, ' \
-               f'lateral_tilt={self.lateral_tilt:.4f})'
+               f'lateral_tilt={self.lateral_tilt:.4f}, el_deg2coef={self.el_deg2coef:.6f})'
 
 
 def wrapdeg(angle):

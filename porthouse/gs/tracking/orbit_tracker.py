@@ -164,18 +164,22 @@ class OrbitTracker(SkyfieldModuleMixin, BaseModule):
 
         self.log.info(f"Starting to track target {target_name} with {rotators} related to task {task_name}")
 
+        aos_time = parse_time(start_time).utc_datetime()
+        if start_time is not None:
+            aos_time += timedelta(seconds=preaos_time)
+
         # NOTE: Other params except target_name not strictly needed for get_satellite or get_celestial_object
         #       as current pass is only of interest and scheduler takes care of min elevation etc filtering.
         #       However, AOS and LOS times could be different without them.
         if nodes:
-            target = self.get_custom_track(target_name, start_time=start_time, end_time=end_time, nodes=nodes)
+            target = self.get_custom_track(target_name, start_time=aos_time, end_time=end_time, nodes=nodes)
         elif CelestialObject.is_class_of(target_name):
-            target = await self.get_celestial_object(target_name, start_time=start_time, end_time=end_time,
+            target = await self.get_celestial_object(target_name, start_time=aos_time, end_time=end_time,
                                                      min_elevation=min_elevation, min_max_elevation=min_max_elevation,
                                                      sun_max_elevation=sun_max_elevation, sunlit=sunlit,
                                                      partial_last_pass=True)
         else:
-            target = await self.get_satellite(target_name, start_time=start_time, end_time=end_time,
+            target = await self.get_satellite(target_name, start_time=aos_time, end_time=end_time,
                                               min_elevation=min_elevation, min_max_elevation=min_max_elevation,
                                               sun_max_elevation=sun_max_elevation, sunlit=sunlit,
                                               extra_margin=True)
