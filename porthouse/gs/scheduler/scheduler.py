@@ -192,6 +192,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
         if not self.sync_schedule_files:
             return
 
+        # keep the max task id
+        max_task_ids = {proc.process_name: proc.max_task_id for proc in self.processes.values()}
         self.processes = OrderedDict()
 
         for file, storage in ((self.main_processes_file, Process.STORAGE_MAIN),
@@ -207,6 +209,8 @@ class Scheduler(SkyfieldModuleMixin, BaseModule):
             for proc in (processes or []):
                 proc = Process.from_dict(proc, storage=storage)
                 if storage == Process.STORAGE_MAIN or not proc.expired():
+                    if proc.process_name in max_task_ids:
+                        proc.max_task_id = max(max_task_ids[proc.process_name] or 0, proc.max_task_id or 0)
                     self.processes[proc.process_name] = proc
 
     def write_processes(self, skip_main=True):
