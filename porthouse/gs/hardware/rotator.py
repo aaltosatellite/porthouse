@@ -175,6 +175,7 @@ class Rotator(BaseModule):
 
         except RotatorError as e:
             self.log.error("Could not get rotator position: %s", e, exc_info=True)
+            self.target_valid = False
             self.moving_to_target = False
             try:
                 await self.rotator.stop()
@@ -275,12 +276,17 @@ class Rotator(BaseModule):
                         self.moving_to_target = True
 
                     except RotatorError as e:
+                        # if get e.g. "encoder cannot be sensed" error, do not try to move again automatically
+                        self.target_valid = False
+                        self.log.error("Failed to move rotator: %s", str(e), exc_info=True)
+                        try:
+                            await self.rotator.stop()
+                        except RotatorError as e:
+                            self.log.error("Failed to stop rotator: %s", str(e), exc_info=True)
                         try:
                             await self.rotator.get_position()
-                        except RotatorError:
-                            pass
-                        self.log.error("Rotator could not set position: %s",
-                                        str(e), exc_info=True)
+                        except RotatorError as e:
+                            self.log.error("Failed to get rotator pos: %s", str(e), exc_info=True)
 
             else:
                 # toggle off as we are at target

@@ -80,6 +80,7 @@ class RotatorController(abc.ABC):
         self.tracking_delay_s = tracking_delay_s
         self.debug = debug
         self.enforce_limits = True
+        self.is_healthy = True  # set to false if get encoder problems, if false, won't try to enforce limits
         self.current_motor_pos = (0.0, 0.0)
         self.current_position = (0.0, 0.0)
         self.current_pos_ts = 0.0
@@ -345,9 +346,9 @@ class RotatorController(abc.ABC):
         to move to the closest allowed position. Note that the original target position is lost and must be reset at
         a higher level.
         """
-        if self.enforce_limits and not self.position_valid(*self.current_position):
+        if self.enforce_limits and self.is_healthy and not self.position_valid(*self.current_position):
             valid_position = self.closest_valid_position(*self.current_position)
-            await self.set_position(*valid_position, shortest_path=True)
+            await self.set_position(*valid_position, shortest_path=self.shortest_path)
 
     def az_dependent_min_el(self, az: float) -> Optional[float]:
         if self.horizon_map is not None:

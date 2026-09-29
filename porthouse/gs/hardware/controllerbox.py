@@ -122,6 +122,7 @@ class ControllerBox(RotatorController):
         self.target_position = (az, el)
         self.target_velocity = vel or (0.0, 0.0)
         self.target_pos_ts = ts or time.time()
+        self.is_healthy = True  # give rotator a new chance if earlier was declared unhealthy due to encoder error
         maz, mel = self.rotator_model.to_motor(az, el)
 
         if self.control_sw_version > 2:
@@ -152,11 +153,13 @@ class ControllerBox(RotatorController):
         if get_vel and self.control_sw_version > 1:
             res = await self._rpc(b"MV -s", True)   # NOTE: not yet deployed for original UHF controller
             trg_motor_vel = self._parse_position_output(res)
-            self.target_position, self.target_velocity = self.rotator_model.to_real(*trg_motor_pos, *trg_motor_vel)
+            trg_pos, trg_vel = self.rotator_model.to_real(*trg_motor_pos, *trg_motor_vel)
+            # self.target_position, self.target_velocity = self.rotator_model.to_real(*trg_motor_pos, *trg_motor_vel)
+            return trg_pos, trg_vel
         else:
-            self.target_position = self.rotator_model.to_real(*trg_motor_pos)
-
-        return self.target_position if not get_vel else (self.target_position, self.target_velocity)
+            trg_pos = self.rotator_model.to_real(*trg_motor_pos)
+            # self.target_position = self.rotator_model.to_real(*trg_motor_pos)
+            return trg_pos
 
     async def get_position_range(self) -> Tuple[float, float, float, float]:
         """
@@ -378,9 +381,8 @@ class ControllerBox(RotatorController):
 
             # Raise error if the line starts with "Error"
             if rsp.startswith(b"Error: "):
-                if (b"position cannot be sensed" in rsp
-                    or b"position changed in wrong direction" in rsp):
-
+                if b"position cannot be sensed" in rsp or b"position changed in wrong direction" in rsp:
+                    self.is_healthy = False   # don't try to enforce limits at base->maybe_enforce_limits
                     if self.log is not None:
                         self.log.warning(rsp[7:].decode("ascii").strip())
                     continue
