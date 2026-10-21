@@ -175,10 +175,10 @@ class HamlibController(RotatorController):
         return await self.get_position_range()
 
     async def reset_position(self, az: float, el: float) -> Tuple[float, float]:
-        raise NotImplementedError("rotctld does not support reset_position")
+        pass  # raise NotImplementedError("rotctld does not support reset_position")
 
     async def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
-        raise NotImplementedError("rotctld does not support duty cycle control")
+        pass  # raise NotImplementedError("rotctld does not support duty cycle control")
 
     async def set_dutycycle_range(
         self,
@@ -187,20 +187,20 @@ class HamlibController(RotatorController):
         el_duty_min: Optional[float] = None,
         el_duty_max: Optional[float] = None,
     ) -> None:
-        raise NotImplementedError("rotctld does not support duty cycle control")
+        pass  # raise NotImplementedError("rotctld does not support duty cycle control")
 
     async def get_backlash(self) -> Tuple[float, float]:
-        raise NotImplementedError("rotctld does not support backlash control")
+        pass  # raise NotImplementedError("rotctld does not support backlash control")
 
     async def set_backlash(
         self,
         az_backlash: Optional[float] = None,
         el_backlash: Optional[float] = None,
     ) -> Tuple[float, float]:
-        raise NotImplementedError("rotctld does not support backlash control")
+        pass  # raise NotImplementedError("rotctld does not support backlash control")
 
     async def get_pid_coef(self, coef: str) -> Tuple[float, float]:
-        raise NotImplementedError("rotctld does not support PID control")
+        pass  # raise NotImplementedError("rotctld does not support PID control")
 
     async def set_pid_coef(
         self,
@@ -208,7 +208,7 @@ class HamlibController(RotatorController):
         az_coef: Optional[float] = None,
         el_coef: Optional[float] = None,
     ) -> Tuple[float, float]:
-        raise NotImplementedError("rotctld does not support PID control")
+        pass  # raise NotImplementedError("rotctld does not support PID control")
 
     async def preaos(self) -> None:
         pass
