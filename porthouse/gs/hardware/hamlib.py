@@ -1,27 +1,28 @@
 """
-    Python interface class to connect Hamlib daemon via TCP socket
+Python interface class to connect Hamlib daemon via TCP socket
 
-    $ sudo apt-get install -y hamlib-utils
+$ sudo apt-get install -y hamlib-utils
 """
 
-import socket
+import asyncio
+import logging
+import math
 import time
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
-from .base import RotatorError, RotatorController
+from .base import PositionType, RotatorController, RotatorError
 
 __all__ = [
     "HamlibError",
-    "HamlibRadioInterface",
+    # "HamlibRadioInterface",
     "HamlibController",
     "HamlibErrorString",
     "parse_address",
 ]
 
 
-# Look up to decode hamlib error codes to strings
 # https://github.com/Hamlib/Hamlib/blob/master/include/hamlib/rig.h#L119
-HamlibErrorString = {
+HamlibErrorString: Dict[int, str] = {
     0: "No error",
     -1: "Invalid parameter",
     -2: "Invalid Configuration (serial,...)",
@@ -39,96 +40,130 @@ HamlibErrorString = {
     -14: "Collision on the bus",
     -15: "NULL RIG handle or any invalid pointer parameter in get arg",
     -16: "Invalid VFO",
-    -17: "Argument out of domain of func"
+    -17: "Argument out of domain of func",
 }
 
 
 class HamlibError(RotatorError):
-    """
-    Exception class for errors returned by Hamlib
-    """
+    """Exception class for errors returned by Hamlib or caused by the connection to it"""
 
 
-def parse_address(address_str):
-    """
-    A util to parse address string to tuple.
-    """
-    addr, port = address_str.split(":")
+def parse_address(address_str: str) -> Tuple[str, int]:
+    """Convert the string "host:port" to the tuple (host, port)"""
+    addr, port = address_str.rsplit(":", 1)
     return addr, int(port)
 
 
 class HamlibController(RotatorController):
     """
-    Wrapper for Hamlib Rotator Interface
+    Controller class for a rotator behind a Hamlib daemon (rotctld)
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._connected = False
-        self._target = parse_address(self.address)
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-    def connect(self):
+    def __init__(
+        self,
+        address: str,
+        az_min: float = -180,
+        az_max: float = 450,
+        el_min: float = -5,
+        el_max: float = 95,
+        rotator_model: Optional[dict] = None,
+        horizon_map_file: Optional[str] = None,
+        min_sun_angle: Optional[float] = None,
+        control_sw_version: int = 1,
+        parking_position: Optional[Tuple[float, float]] = None,
+        tracking_delay_s: float = 0.5,
+        log: Optional[logging.Logger] = None,
+        debug: bool = False,
+        prefix: str = "",
+    ) -> None:
         """
-        Connect to hamlib daemon
+        Args:
+            address: Address of rotctld, in the format "host:port"
         """
-        try:
-            self._sock.connect(self._target)
-            self._connected = True
-        except ConnectionRefusedError:
-            raise
-        except socket.error:
-            raise
-        return True
+        super().__init__(
+            address,
+            az_min,
+            az_max,
+            el_min,
+            el_max,
+            rotator_model,
+            horizon_map_file,
+            min_sun_angle,
+            control_sw_version,
+            parking_position,
+            tracking_delay_s,
+            debug,
+            log,
+        )
 
-    def disconnect(self):
-        """
-            Disconnect from the hamlib daemon
-        """
-        self._sock.close()
-        self._connected = False
+        self.prefix = prefix
+        self._timeout = 1.0
+        self._target = parse_address(address)
+        self._reader: Optional[asyncio.StreamReader] = None
+        self._writer: Optional[asyncio.StreamWriter] = None
+        self._lock = asyncio.Lock()
 
-    def stop(self):
-        return self._execute(b"S\n")
+    async def setup(self) -> None:
+        async with self._lock:
+            await self._connect()
+        await self.get_position()
 
-    def set_position(self,
-                     az, el,
-                     ts=None,
-                     shortest_path=True):
+    async def close(self) -> None:
+        async with self._lock:
+            await self._disconnect()
 
+    async def stop(self) -> None:
+        await self._execute(b"S\n")
+
+    async def get_position(
+        self, with_timestamp: bool = False
+    ) -> Union[PositionType, Tuple[PositionType, float]]:
+        t0 = time.time()
+        res = await self._execute(b"p\n", data_lines=2)
+        self.current_pos_ts = (t0 + time.time()) / 2.0
+        self.current_position = HamlibController._parse_position_output(res)
+
+        await self.maybe_enforce_limits()
+        return (
+            self.current_position
+            if not with_timestamp
+            else (self.current_position, self.current_pos_ts)
+        )
+
+    async def set_position(
+        self,
+        az: float,
+        el: float,
+        vel: Optional[Tuple[float, float]] = None,
+        ts: Optional[float] = None,
+        shortest_path: bool = True,
+    ) -> None:
         self.position_valid(az, el, raise_error=True)
         self.target_position = (az, el)
+        self.target_velocity = vel or (0.0, 0.0)
         self.target_pos_ts = ts or time.time()
+        self.is_healthy = True
 
-        if shortest_path:
-            # TODO: Mimic sortest path
-            pass
+        command_az = self._shortest_azimuth(az) if shortest_path else az
+        await self._execute(f"P {command_az:.2f} {el:.2f}\n".encode("ascii"))
 
-        return self._execute(f"P {round(az, 2)} {round(el, 2)}\n")
-
-    def get_position(self, with_timestamp=False):
-        ret = self._execute(b"p\n")
-        self.current_pos_ts = time.time()
-        try:
-            az, el = tuple(map(float, ret.decode("ascii").split()))
-            self.current_position = az, el
-        except ValueError:
-            raise HamlibError("Failed to cast az/el information to floats")
-
-        self.maybe_enforce_limits()
-        return self.current_position if not with_timestamp else (self.current_position, self.current_pos_ts)
-
-    def get_position_target(self):
+    async def get_position_target(
+        self, get_vel: bool = False
+    ) -> Union[PositionType, Tuple[PositionType, PositionType]]:
+        if get_vel:
+            return self.target_position, self.target_velocity
         return self.target_position
 
-    def get_position_range(self) -> Tuple[float, float, float, float]:
+    async def get_position_range(self) -> Tuple[float, float, float, float]:
         return self.az_min, self.az_max, self.el_min, self.el_max
 
-    def set_position_range(self,
-                           az_min: Optional[float] = None,
-                           az_max: Optional[float] = None,
-                           el_min: Optional[float] = None,
-                           el_max: Optional[float] = None) -> Tuple[float, float, float, float]:
+    async def set_position_range(
+        self,
+        az_min: Optional[float] = None,
+        az_max: Optional[float] = None,
+        el_min: Optional[float] = None,
+        el_max: Optional[float] = None,
+    ) -> Tuple[float, float, float, float]:
         if az_min is not None:
             self.az_min = az_min
         if az_max is not None:
@@ -137,311 +172,158 @@ class HamlibController(RotatorController):
             self.el_min = el_min
         if el_max is not None:
             self.el_max = el_max
-        return self.get_position_range()
+        return await self.get_position_range()
 
-    def reset_position(self, az: float, el: float) -> None:
-        raise NotImplementedError("reset_position not implemented")
+    async def reset_position(self, az: float, el: float) -> Tuple[float, float]:
+        raise NotImplementedError("rotctld does not support reset_position")
 
-    def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
+    async def get_dutycycle_range(self) -> Tuple[float, float, float, float]:
+        raise NotImplementedError("rotctld does not support duty cycle control")
+
+    async def set_dutycycle_range(
+        self,
+        az_duty_min: Optional[float] = None,
+        az_duty_max: Optional[float] = None,
+        el_duty_min: Optional[float] = None,
+        el_duty_max: Optional[float] = None,
+    ) -> None:
+        raise NotImplementedError("rotctld does not support duty cycle control")
+
+    async def get_backlash(self) -> Tuple[float, float]:
+        raise NotImplementedError("rotctld does not support backlash control")
+
+    async def set_backlash(
+        self,
+        az_backlash: Optional[float] = None,
+        el_backlash: Optional[float] = None,
+    ) -> Tuple[float, float]:
+        raise NotImplementedError("rotctld does not support backlash control")
+
+    async def get_pid_coef(self, coef: str) -> Tuple[float, float]:
+        raise NotImplementedError("rotctld does not support PID control")
+
+    async def set_pid_coef(
+        self,
+        coef: str,
+        az_coef: Optional[float] = None,
+        el_coef: Optional[float] = None,
+    ) -> Tuple[float, float]:
+        raise NotImplementedError("rotctld does not support PID control")
+
+    async def preaos(self) -> None:
         pass
 
-    def set_dutycycle_range(self, az_duty_min: Optional[float] = None, az_duty_max: Optional[float] = None,
-                            el_duty_min: Optional[float] = None, el_duty_max: Optional[float] = None) -> None:
+    async def aos(self) -> None:
         pass
 
-    def pop_motion_log(self):
+    async def los(self) -> None:
+        if self.parking_position:
+            await self.set_position(*self.parking_position, shortest_path=False)
+
+    async def pop_motion_log(self) -> None:
         pass
 
-    def _execute(self, command):
+    def _shortest_azimuth(self, az: float) -> float:
         """
-        Execute command
+        Return the azimuth, equal to az modulo 360, that is inside the allowed range
+        and closest to the current azimuth.
         """
+        current = self.current_position
+        if current is None:
+            return az
+        k_min = math.ceil((self.az_min - az) / 360.0)
+        k_max = math.floor((self.az_max - az) / 360.0)
+        candidates = [az + 360.0 * k for k in range(k_min, k_max + 1)]
+        return min(candidates, key=lambda c: abs(c - current[0]), default=az)
 
-        if not self._connected:
-            self.connect()
-
-        if isinstance(command, str):
-            command = bytes(command, "ascii")
-
-        # TODO: Timeout/disconnect
+    async def _connect(self) -> None:
+        host, port = self._target
         try:
-            self._sock.send(command)
-            response = self._sock.recv(1024)
-        except socket.error as e:
-            raise HamlibError("Failed to send or recv") from e
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=self._timeout
+            )
+        except (OSError, asyncio.TimeoutError) as e:
+            raise HamlibError(
+                f"Cannot connect to rotctld at {host}:{port}"
+            ) from e
 
-        if self.debug:
-            print("[rotctld ret: %r]" % response)
-
-        if response.startswith(b"RPRT"):
+    async def _disconnect(self) -> None:
+        writer = self._writer
+        self._reader = None
+        self._writer = None
+        if writer is not None:
+            writer.close()
             try:
-                v = int(response[4:]) # Parse return code
-            except ValueError:
-                raise HamlibError("Failed to cast return code to int")
+                await writer.wait_closed()
+            except OSError:
+                pass
 
-            if v != 0:
-                raise HamlibError(HamlibErrorString.get(v, "Unknown error %d" % v))
-        else:
-            return response
+    async def _read_line(self, reader: asyncio.StreamReader) -> bytes:
+        line = await asyncio.wait_for(reader.readline(), timeout=self._timeout)
+        if not line:
+            raise ConnectionResetError("rotctld closed the connection")
+        return line
 
-
-class HamlibRadioInterface:
-    """
-    Wrapper for Hamlib Radio Interface
-    """
-
-    def __init__(self, addr, debug=False):
+    async def _execute(self, command: bytes, data_lines: int = 0) -> bytes:
         """
+        Send a command to rotctld and return the data lines of the response.
+
+        Args:
+            command: Command to send, with the final newline
+            data_lines: Number of data lines that rotctld sends if the command succeeds
+
+        Raises:
+            `HamlibError` - if the connection fails or if rotctld returns an error code.
         """
-        self.target = parse_address(addr)
-        self.connected = False
-        self.debug = debug
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        async with self._lock:
+            if self._reader is None or self._writer is None:
+                await self._connect()
+            reader, writer = self._reader, self._writer
+            if reader is None or writer is None:
+                raise HamlibError("Not connected to rotctld")
 
-
-    def connect(self):
-        """
-        Connect to hamlib daemon
-        """
-        try:
-            self._sock.connect(self.target)
-            self.connected = True
-        except socket.error:
-            raise
-        return True
-
-
-    def execute(self, command):
-        """
-        Send command to daemon and wait for response
-        """
-
-        if not self.connected:
-            print("HAMLIB not connected!")
-
-        if isinstance(command, str):
-            command = bytes(command, "ascii")
-
-        if self.debug:
-            print("[rotctld write: %r]" % command)
-
-        # TODO: Timeout/disconnect
-        try:
-            self._sock.send(command)
-            response = self._sock.recv(1024)
-        except Exception as e: # FIXME:
-            raise HamlibError("Socket error :(") from e
-
-        if self.debug:
-            print("[rotctld ret: %r]" % response)
-
-        if response[:4] == b"RPRT":
-            # Parse return code
+            lines: List[bytes] = []
             try:
-                v = int(response[4:])
-            except ValueError:
-                raise HamlibError("Failed to cast return code to int")
+                writer.write(command)
+                await asyncio.wait_for(writer.drain(), timeout=self._timeout)
+                lines.append(await self._read_line(reader))
+                if not lines[0].startswith(b"RPRT"):
+                    for _ in range(data_lines - 1):
+                        lines.append(await self._read_line(reader))
+            except (OSError, asyncio.TimeoutError) as e:
+                await self._disconnect()
+                raise HamlibError(
+                    "Failed to send to or receive from rotctld"
+                ) from e
 
-            if v != 0:
-                raise HamlibError(HamlibErrorString.get(v, "Unknown error %d" % v))
-        else:
-            return response
+        if self.debug and self.log is not None:
+            self.log.debug(f"rotctld write: {command!r}, read: {lines!r}")
 
+        if lines[0].startswith(b"RPRT"):
+            try:
+                code = int(lines[0][4:])
+            except ValueError as e:
+                raise HamlibError(
+                    f"Failed to cast return code to int: {lines[0]!r}"
+                ) from e
+            if code != 0:
+                raise HamlibError(
+                    HamlibErrorString.get(code, f"Unknown error {code}")
+                )
+            return b""
+        return b"".join(lines)
 
-    def disconnect(self):
+    @staticmethod
+    def _parse_position_output(output: bytes) -> PositionType:
         """
-            Disconnect from the hamlib daemon
-        """
-        self._sock.close()
-        self.connected = False
+        Parse the response of the rotctld command "p".
 
-
-    def set_vfo(self, vfo):
-        """
-        Set/select used VFO source
-        """
-        return self.execute(f"V {vfo}\n")
-
-
-    def set_frequency(self, freq):
-        """
-        Set VFO frequency
-        """
-        return self.execute(f"F {freq}\n")
-
-
-    def get_frequency(self):
-        """
-            Get current frequency
-        """
-        try:
-            return int(self.execute("f\n"))
-        except ValueError:
-            raise HamlibError("Failed to cast getFrequency output to int")
-
-
-    def set_mode(self, modulation, bandwidth):
-        """
-        Set mode
-        """
-        return self.execute(f"M {modulation} {bandwidth}\n")
-
-
-    def get_mode(self):
-        """
-        Get mode
+        Expected input format: "<az>\\n<el>\\n"
         """
         try:
-            mode, passband = self.execute("m\n").split()
-            return mode, int(passband)
-        except ValueError:
-            raise HamlibError("Failed to cast getMode output")
-
-
-    def set_level(self, level, value):
-        """
-        Set level
-        """
-        return self.execute(f"L {level} {value}\n")
-
-
-    def get_level(self, level):
-        """
-        Get a level reading from the radio
-        PREAMP, ATT, VOX, AF, RF, SQL, RAWSTR, AF
-        """
-        try:
-            return float(self.execute(f"l {level}\n"))
-        except ValueError:
-            raise HamlibError("Failed to cast getLevel() to int")
-
-
-    def set_split_vfo(self, split_mode, vfo):
-        """
-            Sets split mode ON and TX VFO
-            split_mode: 1 = ON, 0 = OFF
-        """
-        return self.execute(f"S {split_mode} {vfo}\n")
-
-
-    def get_split_vfo(self):
-        """
-            Get Split VFO
-        """
-        try:
-            split_mode, vfo = self.execute("s\n").split()
-            return int(split_mode), vfo
-        except ValueError:
-            raise HamlibError("Failed to cast getSplitVFO() output")
-
-
-    def set_split_frequency(self, freq):
-        """
-            Set Split Frequency for TX VFO
-        """
-        # doesn't work well with IC910H currently??
-        return self.execute("I %d\n" % freq)
-
-
-    def get_split_frequency(self):
-        """
-            Get split frequency
-        """
-        try:
-            return int(self.execute("i\n"))
-        except ValueError:
-            raise HamlibError("Failed to cast getSplitFrequency() to int")
-
-
-    def set_split_mode(self, modulation, bandwidth):
-        """
-            Set split mode
-            sets modulation and bandwidth of TX VFO. Use 0 for default bandwidth
-        """
-        return self.execute(f"X {modulation} {bandwidth} %d\n")
-
-
-    def get_split_mode(self):
-        """
-            Get split mode
-        """
-        try:
-            modulation, bandwidth = self.execute("x\n").split()
-            return modulation, int(bandwidth)
-        except ValueError:
-            raise HamlibError("Failed to cast getSplitMode() output")
-
-
-    def set_repeater_shift(self, sign):
-        """
-            Set repeater shift
-            sign can be "+", "-" or something else
-        """
-        return self.execute("R %s\n" % sign)
-
-
-    def get_repeater_shift(self):
-        """
-            Get Repeater Shift
-        """
-        try:
-            return int(self.execute("r\n"))
-        except ValueError:
-            raise HamlibError("Failed to cast getRepeaterShift() to int")
-
-
-    def set_repeater_ffset(self, offset):
-        """
-            Set repeater offset
-        """
-        return self.execute("O %d\n" % offset)
-
-
-    def get_repeater_offset(self):
-        """
-            Get repeater offset
-        """
-        try:
-            return int(self.execute("o\n"))
-        except ValueError:
-            raise HamlibError("Failed to cast getRepeaterOffset() to int")
-
-
-    def set_memory(self, number):
-        """
-        Set 'Memory#' channel number.
-        """
-        return self.execute("E %d\n" % number)
-
-
-    def get_memory(self):
-        """
-        Get current memory channel
-        """
-        try:
-            return int(self.execute("e\n"))
-        except ValueError:
-            raise HamlibError("Failed to cast getMemory() to int")
-
-
-    def run_vfo_op(self, vfo_op):
-        """
-        Perform 'Mem/VFO Op'.
-
-        Mem  VFO  operation is one of: CPY, XCHG, FROM_VFO, TO_VFO, MCL,
-        UP, DOWN, BAND_UP, BAND_DOWN, LEFT, RIGHT, TUNE, TOGGLE.
-        """
-        return self.execute("G %s\n" % vfo_op)
-
-
-    def memory_to_vfo(self):
-        """
-        Executes hamlib vfo_op command and transfers data from memory slot to active VFO
-        """
-        return self.run_vfo_op("TO_VFO")
-
-
-    def vfo_to_memory(self):
-        """
-        """
-        return self.run_vfo_op("FROM_VFO")
+            az, el = (float(value) for value in output.decode("ascii").split())
+        except ValueError as e:
+            raise HamlibError(
+                f"Failed to parse az/el information: {output!r}"
+            ) from e
+        return az, el
