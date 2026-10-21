@@ -143,6 +143,7 @@ class HamlibController(RotatorController):
         self.target_velocity = vel or (0.0, 0.0)
         self.target_pos_ts = ts or time.time()
         self.is_healthy = True
+        self.shortest_path = shortest_path
 
         command_az = self._shortest_azimuth(az) if shortest_path else az
         await self._execute(f"P {command_az:.2f} {el:.2f}\n".encode("ascii"))
