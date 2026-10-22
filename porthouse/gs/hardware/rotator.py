@@ -593,6 +593,13 @@ class Rotator(BaseModule):
                 else:
                     aos_az = (aos_az - 360 if aos_az > 270 else aos_az)
 
+            # The shift above assumes the range [-90, 450]. Move the azimuth back
+            # into the real range, otherwise it is clamped to a different direction.
+            if aos_az > self.rotator.az_max:
+                aos_az -= 360
+            elif aos_az < self.rotator.az_min:
+                aos_az += 360
+
             initial_target = (aos_az, aos_el)
 
             # Initial positioning of the rotator

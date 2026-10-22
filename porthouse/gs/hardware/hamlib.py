@@ -119,9 +119,9 @@ class HamlibController(RotatorController):
         self, with_timestamp: bool = False
     ) -> Union[PositionType, Tuple[PositionType, float]]:
         t0 = time.time()
-        res = await self._execute(b"p\n", data_lines=2)
+        position = await self._query_position()
         self.current_pos_ts = (t0 + time.time()) / 2.0
-        self.current_position = HamlibController._parse_position_output(res)
+        self.current_position = position
 
         await self.maybe_enforce_limits()
         return (
@@ -145,7 +145,13 @@ class HamlibController(RotatorController):
         self.is_healthy = True
         self.shortest_path = shortest_path
 
-        command_az = self._shortest_azimuth(az) if shortest_path else az
+        if shortest_path:
+            current_az, _ = await self._query_position()
+            command_az = HamlibController._shortest_azimuth(
+                az, current_az, self.az_min, self.az_max
+            )
+        else:
+            command_az = az
         await self._execute(f"P {command_az:.2f} {el:.2f}\n".encode("ascii"))
 
     async def get_position_target(
@@ -225,18 +231,23 @@ class HamlibController(RotatorController):
     async def pop_motion_log(self) -> None:
         pass
 
-    def _shortest_azimuth(self, az: float) -> float:
+    async def _query_position(self) -> PositionType:
+        """Read the position from rotctld. Does not change state or enforce limits."""
+        res = await self._execute(b"p\n", data_lines=2)
+        return HamlibController._parse_position_output(res)
+
+    @staticmethod
+    def _shortest_azimuth(
+        az: float, current_az: float, az_min: float, az_max: float
+    ) -> float:
         """
-        Return the azimuth, equal to az modulo 360, that is inside the allowed range
-        and closest to the current azimuth.
+        Return the azimuth, equal to az modulo 360, that is inside [az_min, az_max]
+        and closest to current_az.
         """
-        current = self.current_position
-        if current is None:
-            return az
-        k_min = math.ceil((self.az_min - az) / 360.0)
-        k_max = math.floor((self.az_max - az) / 360.0)
+        k_min = math.ceil((az_min - az) / 360.0)
+        k_max = math.floor((az_max - az) / 360.0)
         candidates = [az + 360.0 * k for k in range(k_min, k_max + 1)]
-        return min(candidates, key=lambda c: abs(c - current[0]), default=az)
+        return min(candidates, key=lambda c: abs(c - current_az), default=az)
 
     async def _connect(self) -> None:
         host, port = self._target
