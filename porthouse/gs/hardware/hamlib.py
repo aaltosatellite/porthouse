@@ -62,7 +62,7 @@ class HamlibController(RotatorController):
     def __init__(
         self,
         address: str,
-        az_min: float = 0,
+        az_min: float = -180,
         az_max: float = 360,
         el_min: float = -5,
         el_max: float = 95,
