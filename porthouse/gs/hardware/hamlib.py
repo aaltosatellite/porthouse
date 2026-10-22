@@ -212,7 +212,8 @@ class HamlibController(RotatorController):
         pass  # raise NotImplementedError("rotctld does not support PID control")
 
     async def preaos(self) -> None:
-        pass
+        if self.parking_position:
+            await self.set_position(*self.parking_position, shortest_path=False)
 
     async def aos(self) -> None:
         pass
