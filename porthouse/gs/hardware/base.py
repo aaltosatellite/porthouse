@@ -4,6 +4,7 @@
 
 import time
 import abc
+import math
 from typing import Tuple, Optional, List, Union
 
 import numpy as np
@@ -293,6 +294,26 @@ class RotatorController(abc.ABC):
     async def pop_motion_log(self):
         pass
 
+    def fold_motor_az(self, maz: float) -> Optional[float]:
+        """
+        Return the azimuth that is equal to maz modulo 360, is inside [az_min, az_max] and is closest to maz.
+        Return None if no such azimuth exists. If maz is already inside the limits, it is returned unchanged.
+        """
+        k_min = math.ceil((self.az_min - maz) / 360.0)
+        k_max = math.floor((self.az_max - maz) / 360.0)
+        if k_min > k_max:
+            return None
+        return maz + 360.0 * min(range(k_min, k_max + 1), key=abs)
+
+    def to_motor_in_range(self, az: float, el: float) -> Tuple[float, float]:
+        """
+        Convert a real position to motor angles. The motor azimuth is moved by a multiple of 360 degrees into
+        the allowed range if needed.
+        """
+        maz, mel = self.rotator_model.to_motor(az, el)
+        folded = self.fold_motor_az(maz)
+        return (maz if folded is None else folded), mel
+
     def position_valid(self, az: float, el: float, raise_error: bool = False) -> bool:
         """
         Check if the given position is valid, i.e. within allowed limits. If horizon_map or min_sun_angle is set,
@@ -314,7 +335,7 @@ class RotatorController(abc.ABC):
 
         maz, mel = self.rotator_model.to_motor(az, el)
 
-        if maz < self.az_min or maz > self.az_max:
+        if self.fold_motor_az(maz) is None:
             valid = False
             if raise_error:
                 raise RotatorError(f"Azimuth value {az} ({maz}) is outside allowed limits "

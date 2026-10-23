@@ -119,9 +119,10 @@ class HamlibController(RotatorController):
         self, with_timestamp: bool = False
     ) -> Union[PositionType, Tuple[PositionType, float]]:
         t0 = time.time()
-        position = await self._query_position()
+        self.current_motor_pos = await self._query_position()
         self.current_pos_ts = (t0 + time.time()) / 2.0
-        self.current_position = position
+        az, el = self.rotator_model.to_real(*self.current_motor_pos)
+        self.current_position = (float(az), float(el))
 
         await self.maybe_enforce_limits()
         return (
@@ -145,14 +146,14 @@ class HamlibController(RotatorController):
         self.is_healthy = True
         self.shortest_path = shortest_path
 
+        motor_az, motor_el = self.to_motor_in_range(az, el)
+        command_az, command_el = float(motor_az), float(motor_el)
         if shortest_path:
             current_az, _ = await self._query_position()
             command_az = HamlibController._shortest_azimuth(
-                az, current_az, self.az_min, self.az_max
+                command_az, current_az, self.az_min, self.az_max
             )
-        else:
-            command_az = az
-        await self._execute(f"P {command_az:.2f} {el:.2f}\n".encode("ascii"))
+        await self._execute(f"P {command_az:.2f} {command_el:.2f}\n".encode("ascii"))
 
     async def get_position_target(
         self, get_vel: bool = False
@@ -232,7 +233,7 @@ class HamlibController(RotatorController):
         pass
 
     async def _query_position(self) -> PositionType:
-        """Read the position from rotctld. Does not change state or enforce limits."""
+        """Read the motor position from rotctld. Does not change state or enforce limits."""
         res = await self._execute(b"p\n", data_lines=2)
         return HamlibController._parse_position_output(res)
 
